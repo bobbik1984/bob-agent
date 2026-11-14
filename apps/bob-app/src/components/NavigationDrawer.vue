@@ -1,7 +1,6 @@
 <script setup>
 import { computed, inject } from 'vue';
 import ConversationDirectory from './ConversationDirectory.vue';
-import SidebarCreateForm from './SidebarCreateForm.vue';
 
 const props = defineProps({
   docked: {
@@ -150,8 +149,6 @@ const effectiveSidebarMode = computed(() => {
       </button>
     </div>
 
-    <SidebarCreateForm />
-
     <ConversationDirectory :nodes="modelHub.state.remote_nodes || []" :catalog="catalog" :sync-revision="directorySyncRevision" :creation-revision="directoryCreationRevision" @create-in-project="startCreateConversation" :search="sidebarSearch" :mode="effectiveSidebarMode" @select-local="selectConversation" :delete-local="deleteLocalConversation" @select-remote="selectRemoteConversation" />
   </nav>
 
@@ -269,8 +266,6 @@ const effectiveSidebarMode = computed(() => {
         </svg>
       </button>
     </div>
-
-      <SidebarCreateForm />
 
       <ConversationDirectory :nodes="modelHub.state.remote_nodes || []" :catalog="catalog" :sync-revision="directorySyncRevision" :creation-revision="directoryCreationRevision" @create-in-project="startCreateConversation" :search="sidebarSearch" :mode="effectiveSidebarMode" @select-local="selectConversation" :delete-local="deleteLocalConversation" @select-remote="selectRemoteConversation" />
     </nav>

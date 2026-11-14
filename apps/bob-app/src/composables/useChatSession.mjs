@@ -89,14 +89,18 @@ const nativeSetupReply = ref('');
 const remoteHarnesses = {dsh:'DSH',claude:'Claude Code',codex:'Codex',agy:'AGY',pi:'Pi'};
 let nativeSetupTimer;
 const creationConnectionId = ref('');
+const creationDeviceId = ref('');
 const creationWorkspace = ref('');
 const creationWorkspaces = ref([]);
+const creationNodeSessionsCache = ref({});
 const creationLoading = ref(false);
+const creationNodeLoading = ref(false);
 const creationBusy = ref(false);
 const creationError = ref('');
 const remoteCreation = ref(null);
 const directoryCreationRevision = ref(0);
 const creationJournalKey = 'bob-dsh-create-v1';
+const creationToolOrder = ['dsh', 'claude', 'codex', 'agy', 'pi'];
 const creationNodes = computed(() => (ctx.modelHub.value?.state?.remote_nodes || []).filter(node => node.enabled !== false));
 const pairedCreationOwners = computed(() => browserClient ? [] : creationNodes.value.filter(node =>
   node.remark === 'web_host' || node.selectedProjectId === 'web_host'));
@@ -118,6 +122,40 @@ function dshSetupBridge(owner) {
 const creationNode = computed(() => creationNodes.value.find(node => node.id === creationConnectionId.value));
 let workspaceRead = 0;
 
+function workspacesForNodeTool(rows, tool) {
+  if (!Array.isArray(rows)) return [];
+  return [...new Set(rows
+    .filter(row => (tool === 'dsh' ? row.source_kind === 'dsh_native' : row.harness === tool)
+      && row.directoryStale !== true && typeof row.workspace === 'string' && row.workspace)
+    .map(row => row.workspace))].sort();
+}
+
+const creationAvailableTools = computed(() => {
+  const deviceId = creationDeviceId.value;
+  if (!deviceId) return [];
+  if (deviceId === 'none') {
+    return [{ id: 'none', labelKey: 'createProjectOnly', kind: 'projectOnly', workspaces: [], count: 0, available: true, loaded: true }];
+  }
+  if (deviceId === 'local') {
+    return [{ id: 'local', labelKey: 'createLocalAssistant', kind: 'local', workspaces: [], count: 0, available: true, loaded: true }];
+  }
+  if (!remoteCreationEnabled.value) return [];
+  const hasCache = Object.hasOwn(creationNodeSessionsCache.value, deviceId);
+  const rows = creationNodeSessionsCache.value[deviceId] || [];
+  return creationToolOrder.map((tool) => {
+    const workspaces = workspacesForNodeTool(rows, tool);
+    return {
+      id: tool,
+      label: remoteHarnesses[tool],
+      kind: 'remote',
+      workspaces,
+      count: workspaces.length,
+      available: hasCache ? workspaces.length > 0 : true,
+      loaded: hasCache,
+    };
+  });
+});
+
 async function loadCreationWorkspaces() {
   const read = ++workspaceRead;
   creationWorkspace.value = '';
@@ -125,15 +163,15 @@ async function loadCreationWorkspaces() {
   creationError.value = '';
   const node = creationNode.value;
   const tool = creationMode.value;
+  if (node?.id) creationDeviceId.value = node.id;
   creationLoading.value = Boolean(node && Object.hasOwn(remoteHarnesses,tool));
   if (!creationLoading.value) return;
   try {
     const rows = await dshSetupBridge(pairedCreationOwner.value).dshList(node.id);
     if (read !== workspaceRead) return;
-    creationWorkspaces.value = [...new Set(rows
-      .filter(row => (tool === 'dsh' ? row.source_kind === 'dsh_native' : row.harness === tool)
-        && row.directoryStale !== true && typeof row.workspace === 'string' && row.workspace)
-      .map(row => row.workspace))].sort();
+    const normalized = Array.isArray(rows) ? rows : [];
+    creationNodeSessionsCache.value = { ...creationNodeSessionsCache.value, [node.id]: normalized };
+    creationWorkspaces.value = workspacesForNodeTool(normalized, tool);
     if (!creationWorkspaces.value.length) creationError.value = 'createNoToolWorkspaces';
   } catch {
     if (read === workspaceRead) creationError.value = 'createNodeUnavailable';
@@ -916,12 +954,95 @@ function beginCreateItem(kind, projectId) {
   firstSessionMessage.value = saved?.text || '';
   nativeSetupReply.value = '';
   creationConnectionId.value = saved?.connectionId || '';
+  creationDeviceId.value = saved ? (saved.connectionId || 'local') : (kind === 'project' ? 'none' : 'local');
   creationWorkspace.value = saved?.workspace || '';
   creationWorkspaces.value = saved ? [saved.workspace] : [];
+  if (!saved) creationNodeSessionsCache.value = {};
+  creationNodeLoading.value = false;
   creationLoading.value = false;
   creationError.value = saved ? 'createRemoteRetry' : '';
   workspaceRead++;
-  navigationOpen.value = true;
+  navigationOpen.value = false;
+}
+
+function chooseBestWorkspaceForSelection(workspaces) {
+  if (!Array.isArray(workspaces) || !workspaces.length) return '';
+  if (typeof catalog !== 'undefined' && creatingForProjectId.value) {
+    const project = (catalog.value?.projects || []).find(item => item.id === creatingForProjectId.value);
+    const hint = project?.workspace || '';
+    if (hint && workspaces.includes(hint)) return hint;
+  }
+  return workspaces[0];
+}
+
+async function selectCreationDevice(deviceId) {
+  if (creationBusy.value || remoteCreation.value) return;
+  creationDeviceId.value = deviceId;
+  creationError.value = '';
+  creationWorkspace.value = '';
+  creationWorkspaces.value = [];
+  nativeSetupReply.value = '';
+  if (deviceId === 'none' || deviceId === 'local') {
+    creationMode.value = deviceId;
+    creationConnectionId.value = '';
+    creationNodeLoading.value = false;
+    creationLoading.value = false;
+    return;
+  }
+  creationConnectionId.value = deviceId;
+  creationLoading.value = false;
+  creationNodeLoading.value = true;
+  const read = ++workspaceRead;
+  try {
+    let rows = creationNodeSessionsCache.value[deviceId];
+    if (!rows) {
+      rows = await dshSetupBridge(pairedCreationOwner.value).dshList(deviceId);
+      if (read !== workspaceRead) return;
+      creationNodeSessionsCache.value = {
+        ...creationNodeSessionsCache.value,
+        [deviceId]: Array.isArray(rows) ? rows : [],
+      };
+    }
+    const cached = creationNodeSessionsCache.value[deviceId] || [];
+    const usableTools = creationToolOrder.filter(tool => workspacesForNodeTool(cached, tool).length > 0);
+    if (usableTools.includes(creationMode.value)) {
+      selectCreationTool(creationMode.value);
+    } else if (usableTools.length) {
+      selectCreationTool(usableTools[0]);
+    } else {
+      creationMode.value = '';
+      creationError.value = 'createNoToolsOnDevice';
+    }
+  } catch {
+    if (read === workspaceRead) {
+      creationMode.value = '';
+      creationError.value = 'createNodeUnavailable';
+    }
+  } finally {
+    if (read === workspaceRead) creationNodeLoading.value = false;
+  }
+}
+
+function selectCreationTool(toolId) {
+  if (creationBusy.value || remoteCreation.value) return;
+  creationError.value = '';
+  creationMode.value = toolId;
+  if (toolId === 'none' || toolId === 'local') {
+    creationDeviceId.value = toolId;
+    creationConnectionId.value = '';
+    creationWorkspaces.value = [];
+    creationWorkspace.value = '';
+    return;
+  }
+  const rows = creationNodeSessionsCache.value[creationConnectionId.value];
+  if (!rows) {
+    void loadCreationWorkspaces();
+    return;
+  }
+  const workspaces = workspacesForNodeTool(rows, toolId);
+  creationWorkspaces.value = workspaces;
+  creationWorkspace.value = chooseBestWorkspaceForSelection(workspaces);
+  if (!workspaces.length) creationError.value = 'createNoToolWorkspaces';
 }
 
 function startCreateProject() {
@@ -1069,6 +1190,10 @@ async function submitCreateItem(checking = false) {
   if (!available || !creatingKind.value || creationBusy.value) return;
   const title = newItemTitle.value.trim();
   if (creatingKind.value === 'project' && !title) return;
+  if (!['none', 'local'].includes(creationMode.value) && !Object.hasOwn(remoteHarnesses, creationMode.value)) {
+    creationError.value = 'createNoToolsOnDevice';
+    return;
+  }
   if (new TextEncoder().encode(title).length > 256) {
     creationError.value = 'createTitleTooLong';
     return;
@@ -1403,15 +1528,20 @@ const statusKeys = {
     remoteHarnesses,
     creationMode,
     creationConnectionId,
+    creationDeviceId,
     creationWorkspace,
     creationWorkspaces,
     creationLoading,
+    creationNodeLoading,
     creationBusy,
     creationError,
     remoteCreation,
     remoteCreationEnabled,
     creationNodes,
+    creationAvailableTools,
     loadCreationWorkspaces,
+    selectCreationDevice,
+    selectCreationTool,
     cancelCreateItem,
     directoryCreationRevision,
     layoutState,

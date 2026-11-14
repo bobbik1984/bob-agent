@@ -508,6 +508,7 @@ pub fn read_page(data: &Path, connection: &str, session_id: &str, after: Option<
         "messages": msgs,
         "request_results": req_results,
         "terminal_holder": terminal_holder,
+        "cli_interrupted": raw["cli_interrupted"].as_bool().unwrap_or(false),
     });
     let _=fs::write(&cache_path, serde_json::to_vec(&json!({"at":now,"page":page})).unwrap_or_default());
     Ok(page)
@@ -786,6 +787,30 @@ pub fn inspect_receipt(data: &Path, connection: &str, session_id: &str, text: &s
     Ok(res)
 }
 
+fn decode_file_uri(uri: &str) -> String {
+    let stripped = uri.strip_prefix("file://").unwrap_or(uri);
+    if !stripped.contains('%') {
+        return stripped.to_owned();
+    }
+    let bytes = stripped.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(hex) = std::str::from_utf8(&bytes[i + 1..i + 3]) {
+                if let Ok(val) = u8::from_str_radix(hex, 16) {
+                    out.push(val);
+                    i += 3;
+                    continue;
+                }
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| stripped.to_owned())
+}
+
 fn normalize(connection: &str, s: &Value)->Result<Value,&'static str>{
     if let Some(explicit_id)=s.get("id").and_then(Value::as_str) {
         if explicit_id.is_empty() || explicit_id.contains("..") { return Err("AGY_INDEX_INVALID") }
@@ -795,6 +820,8 @@ fn normalize(connection: &str, s: &Value)->Result<Value,&'static str>{
         let source_kind=s["sourceKind"].as_str().unwrap_or("remote_native");
         let uri=s["workspaceUris"].as_array().and_then(|x|x.first()).and_then(Value::as_str).unwrap_or("");
         let readable=s["historyReadable"].as_bool().unwrap_or(true);
+        let resumable=s["resumable"].as_bool().unwrap_or(readable);
+        let cli_interrupted=s["cliInterrupted"].as_bool().unwrap_or(false);
         return Ok(json!({
             "id":explicit_id,
             "nativeSessionId":native_id,
@@ -803,23 +830,29 @@ fn normalize(connection: &str, s: &Value)->Result<Value,&'static str>{
             "toolLabel":tool_label,
             "source_kind":source_kind,
             "title":s["title"].as_str().filter(|x|!x.is_empty()).unwrap_or(native_id),
-            "workspace":uri.strip_prefix("file://").unwrap_or(uri),
+            "workspace":decode_file_uri(uri),
             "updated_at":s["updatedAt"],
             "stepCount":s["stepCount"],
+            "nativeStatus":s["nativeStatus"],
             "firstPrompt":s["firstPrompt"],
             "lastSnippet":s["lastSnippet"],
             "historyReadable":readable,
             "historyReason":s["historyReason"],
+            "cliInterrupted":cli_interrupted,
+            "resumable":resumable,
             "readOnlyDirectory":!readable
         }));
     }
     let id=s["nativeSessionId"].as_str().ok_or("AGY_INDEX_INVALID")?;
     if id.len()!=36 || !id.bytes().all(|b|b.is_ascii_hexdigit()||b==b'-') { return Err("AGY_INDEX_INVALID") }
     let uri=s["workspaceUris"].as_array().and_then(|x|x.first()).and_then(Value::as_str).unwrap_or("");
+    let cli_interrupted=s["cliInterrupted"].as_bool().unwrap_or(false);
+    let resumable=s["resumable"].as_bool().unwrap_or(!uri.is_empty() || s["historyReason"].as_str()==Some("AGY_HISTORY_CODEC_UNSUPPORTED"));
     Ok(json!({"id":format!("agy:{id}"),"nativeSessionId":id,"connectionId":connection,
         "harness":"agy","toolLabel":"AGY","source_kind":"agy_native",
         "title":s["title"].as_str().filter(|x|!x.is_empty()).unwrap_or(id),
-        "workspace":uri.strip_prefix("file://").unwrap_or(uri),"updated_at":s["updatedAt"],
+        "workspace":decode_file_uri(uri),"updated_at":s["updatedAt"],
+        "nativeStatus":s["nativeStatus"],"cliInterrupted":cli_interrupted,"resumable":resumable,
         "historyReadable":false,"historyReason":s["historyReason"],"readOnlyDirectory":true}))
 }
 
@@ -853,6 +886,14 @@ fn normalize(connection: &str, s: &Value)->Result<Value,&'static str>{
   assert_eq!(render_document_bytes(b"malformed", "pdf").unwrap_err(),"DSH_DOCUMENT_RENDER_FAILED");
  }
  #[test] fn unconfigured_device_is_empty(){let d=tempfile::tempdir().unwrap();assert!(list(d.path(),"none").unwrap().is_empty())}
+ #[test] fn normalize_decodes_file_uri_and_forwards_interrupted_resume_flags() {
+  let s=json!({"id":"agy:00000000-0000-0000-0000-000000000002","nativeSessionId":"00000000-0000-0000-0000-000000000002","harness":"agy","toolLabel":"AGY","sourceKind":"agy_index","title":"Flight","workspaceUris":["file:///home/ubuntu/my%20proj"],"updatedAt":"2026-11-14","nativeStatus":"RUNNING","cliInterrupted":true,"resumable":true,"historyReadable":false,"historyReason":"AGY_HISTORY_CODEC_UNSUPPORTED"});
+  let v=normalize("vps2",&s).unwrap();
+  assert_eq!(v["workspace"],"/home/ubuntu/my proj");
+  assert_eq!(v["cliInterrupted"],true);
+  assert_eq!(v["resumable"],true);
+  assert_eq!(v["nativeStatus"],"RUNNING");
+ }
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@ import NavigationDrawer from './components/NavigationDrawer.vue';
 import PrimaryChatPane from './components/PrimaryChatPane.vue';
 import QuickNoteOverlay from './components/QuickNoteOverlay.vue';
 import OnboardingWizard from './components/OnboardingWizard.vue';
+import SidebarCreateForm from './components/SidebarCreateForm.vue';
 import { bindViewport } from './viewport.mjs';
 import { getProviderLogo } from './layout-mode.mjs';
 import { isBobNodeRuntime, fetchOnboardingStatus } from './http-bridge.mjs';
@@ -96,17 +97,8 @@ const {
 } = useOnlineWorkNode(shell);
 
 const {
-  modelHub,
-  activeMainRole,
-  quickSwitcherOpen,
-  quickSwitcherSearchQuery,
-  quickPopoverRef,
-  quickPillRef,
-  subscriptionQuotas,
-  loadModelHub,
-  prepaidUsageList,
-  showPrepaidCost,
-  togglePrepaidCost,
+  modelHub, activeMainRole, quickSwitcherOpen, quickSwitcherSearchQuery, quickPopoverRef, quickPillRef,
+  subscriptionQuotas, quotaCheckpoint, loadModelHub, prepaidUsageList, showPrepaidCost, togglePrepaidCost,
 } = useModelHub(shell);
 
 const {
@@ -333,6 +325,10 @@ onUnmounted(() => {
                 </div>
               </div>
             </div>
+            <div v-if="quotaCheckpoint?.configured" class="quota-checkpoint-status" role="status">
+              <span class="quota-checkpoint-dot" :class="{ synced: Boolean(quotaCheckpoint.lastSyncedAt && !quotaCheckpoint.lastError), error: Boolean(quotaCheckpoint.lastError) }" aria-hidden="true"></span>
+              <span>{{ t(quotaCheckpoint.lastSyncedAt && !quotaCheckpoint.lastError ? 'quotaAutoCheckpointSynced' : 'quotaAutoCheckpointPending') }}</span>
+            </div>
           </div>
 
         </div>
@@ -465,6 +461,7 @@ onUnmounted(() => {
     <NavigationDrawer v-if="layoutState.isCompact" :docked="false" />
 
     <QuickNoteOverlay />
+    <SidebarCreateForm />
 
     <!-- Mobile Bottom 5-Tab Navigation Bar: 对话 | 今天 | 收集箱 | 知识 | 设置 -->
     <nav class="bottom-nav" role="navigation">

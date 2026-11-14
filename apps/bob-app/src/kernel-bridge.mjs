@@ -150,6 +150,7 @@ export function createKernelBridge(invoke, isAvailable) {
     routeGet: sessionId => call('app_route_get', { sessionId }),
     routeSet: (sessionId, route) => call('app_route_set', { sessionId, route }),
     modelHubGet: () => call('app_model_hub_get'),
+    quotaCheckpointSync: () => call('app_quota_checkpoint_sync'),
     modelPresetsList: () => call('app_model_presets_list', {}),
     providerKeySet: (providerIdOrObj, apiKey, clearKey) => {
       if (typeof providerIdOrObj === 'object' && providerIdOrObj !== null) {

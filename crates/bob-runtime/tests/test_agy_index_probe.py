@@ -76,5 +76,30 @@ class IndexTests(unittest.TestCase):
             self.assertIn('```thinking', page['messages'][1]['text'])
             self.assertIn('tests/test_build_session.gd:49', page['messages'][1]['text'])
 
+    def test_disconnected_running_cli_session_flags_interrupted_and_resumable_and_decodes_uri(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sid = str(__import__('uuid').UUID(int=99))
+            convs = root / 'conversations'
+            convs.mkdir(parents=True)
+            (convs / f'{sid}.db').write_bytes(b'protobuf-placeholder')
+            with closing(sqlite3.connect(root / 'conversation_summaries.db')) as db:
+                db.execute('CREATE TABLE conversation_summaries(conversation_id,title,workspace_uris,last_modified_time,step_count,status,parent_conversation_id)')
+                db.execute(
+                    'INSERT INTO conversation_summaries VALUES(?,?,?,?,?,?,?)',
+                    (sid, 'PuTTY Flight Dev', '["file:///home/ubuntu/my%20app"]', '2026-11-14T08:00:00Z', 3, 'RUNNING', ''),
+                )
+                db.commit()
+            out = probe.discover(root, 10)
+            row = out['sessions'][0]
+            self.assertEqual(row['historyReason'], 'AGY_HISTORY_CODEC_UNSUPPORTED')
+            self.assertFalse(row['historyReadable'])
+            self.assertTrue(row['cliInterrupted'])
+            self.assertTrue(row['resumable'])
+            page = probe.read_session_page({'agyDataDir': str(root)}, f'agy:{sid}')
+            self.assertEqual(page['workspace'], '/home/ubuntu/my app')
+            self.assertTrue(page['cli_interrupted'])
+            self.assertGreaterEqual(len(page['messages']), 1)
+
 if __name__ == '__main__':
     unittest.main()

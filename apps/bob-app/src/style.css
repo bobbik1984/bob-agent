@@ -3691,6 +3691,10 @@ dialog::backdrop {
 .quota-time-fill { background:var(--quota-time); }
 .quota-bar-pct { width:6ch; white-space:nowrap; font-size:10px; font-weight:400; color:var(--text-primary); }
 .quota-time-text { color:var(--text-secondary); }
+.quota-checkpoint-status { display:flex; align-items:center; gap:6px; margin-top:6px; padding-top:6px; border-top:1px solid var(--line); font-size:11px; color:var(--text-tertiary); }
+.quota-checkpoint-dot { width:7px; height:7px; border-radius:999px; flex:0 0 auto; background:var(--text-tertiary); }
+.quota-checkpoint-dot.synced { background:var(--color-success); }
+.quota-checkpoint-dot.error { background:var(--color-error); }
 
 /* Stage 2.5: Foldable Agent Execution Timeline, Audit Checklist Box, and Session Logos */
 .thinking-process-box.execution-process-box {

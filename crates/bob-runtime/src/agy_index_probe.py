@@ -1,8 +1,53 @@
 from collections import deque
 from contextlib import closing
 from datetime import datetime
+from urllib.parse import unquote
 import json, os, re, shutil, sqlite3, subprocess, sys, time, uuid
 from pathlib import Path
+
+def _uri_to_path(uri):
+    if not isinstance(uri, str) or not uri:
+        return ''
+    p = unquote(uri.removeprefix('file://')) if uri.startswith('file://') else uri
+    if os.name == 'nt' and len(p) >= 3 and p[0] == '/' and p[2] == ':' and p[1].isalpha():
+        p = p[1:]
+    return p
+
+def _readonly_receipts_conn():
+    dbp = Path.home() / '.local/share/bob-native/receipts.sqlite'
+    if dbp.is_symlink() or not dbp.is_file():
+        return None
+    try:
+        return sqlite3.connect(dbp.as_uri() + '?mode=ro', uri=True, timeout=1)
+    except Exception:
+        return None
+
+def _active_agy_supervisors():
+    conn = _readonly_receipts_conn()
+    if conn is None:
+        return set()
+    try:
+        with closing(conn) as db:
+            tbls = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            if 'agy_supervisors' not in tbls:
+                return set()
+            rows = db.execute('SELECT session, token, pid FROM agy_supervisors').fetchall()
+            return {r[0] for r in rows if _agy_process_owned(r[2], r[1], r[0])}
+    except Exception:
+        return set()
+
+def _sessions_with_bob_streams():
+    conn = _readonly_receipts_conn()
+    if conn is None:
+        return set()
+    try:
+        with closing(conn) as db:
+            tbls = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            if 'requests' not in tbls:
+                return set()
+            return {r[0] for r in db.execute('SELECT DISTINCT session FROM requests').fetchall() if r and r[0]}
+    except Exception:
+        return set()
 
 MAX_ROWS = 200
 REQUIRED = {'conversation_id', 'title', 'workspace_uris', 'last_modified_time', 'step_count', 'status'}
@@ -50,6 +95,8 @@ def discover(data_dir, limit=100):
             'last_modified_time,step_count,status,' + prev_col + ' FROM conversation_summaries ' + pred +
             ' ORDER BY last_modified_time DESC,conversation_id LIMIT ?', (limit + 1,)
         ).fetchall()
+    active_sups = _active_agy_supervisors()
+    streamed_sids = _sessions_with_bob_streams()
     out = []
     for sid, title, enc, mod, cnt, st, prev in rows[:limit]:
         try:
@@ -65,6 +112,11 @@ def discover(data_dir, limit=100):
         tr_comp = root / 'brain' / sid / '.system_generated' / 'logs' / 'transcript.jsonl'
         has_tr = (tr_full.is_file() and not tr_full.is_symlink()) or (tr_comp.is_file() and not tr_comp.is_symlink())
         loc = has_tr or (h.is_file() and not h.is_symlink() and h.resolve().is_relative_to(root))
+        full_sid = f'agy:{sid}'
+        has_bob_stream = full_sid in streamed_sids
+        readable = bool(has_tr or has_bob_stream)
+        cli_interrupted = bool(str(st or '').upper() == 'RUNNING' and full_sid not in active_sups)
+        resumable = bool(has_tr or loc or uris or has_bob_stream)
         prev_clean = _clean(prev) if prev else ''
         eff_title = title if (title and str(title).strip()) else (prev_clean or title)
         fp, ls = prev_clean, ''
@@ -74,13 +126,14 @@ def discover(data_dir, limit=100):
             fp = fp_tr or fp
             ls = ls_tr or ls
         out.append({
-            'id': f'agy:{sid}', 'nativeSessionId': sid, 'harness': 'agy', 'toolLabel': 'AGY',
+            'id': full_sid, 'nativeSessionId': sid, 'harness': 'agy', 'toolLabel': 'AGY',
             'title': eff_title, 'workspaceUris': uris,
             'updatedAt': mod, 'stepCount': cnt, 'nativeStatus': st, 'sourceKind': 'agy_index',
             'firstPrompt': (fp or '')[:120], 'lastSnippet': (ls or '')[:120],
-            'localHistoryPresent': loc, 'historyReadable': has_tr,
-            'historyReason': None if has_tr else ('AGY_HISTORY_CODEC_UNSUPPORTED' if loc else 'AGY_HISTORY_NOT_LOCAL'),
-            'resumeVerified': has_tr,
+            'localHistoryPresent': loc, 'historyReadable': readable,
+            'historyReason': None if readable else ('AGY_HISTORY_CODEC_UNSUPPORTED' if loc else 'AGY_HISTORY_NOT_LOCAL'),
+            'cliInterrupted': cli_interrupted, 'resumable': resumable,
+            'resumeVerified': readable,
         })
     return {'schemaVersion': 1, 'sessions': out, 'hasMore': len(rows) > limit,
             'authentication': 'unverified', 'source': 'local_readonly_index'}
@@ -453,6 +506,8 @@ def read_session_page(cfg, sid):
     ev, ws, h = [], '', 'dsh'
     codex_turn_texts = {}
     native_user_ids = set()
+    agy_meta = {}
+    cli_interrupted = False
     push = lambda r, t, ts=0: ev.append((r, t.strip(), ts)) if (t or '').strip() else None
     if sid.startswith('agy:'):
         h, raw, adir = 'agy', sid.split(':', 1)[1], cfg.get('agyDataDir') or ''
@@ -462,11 +517,20 @@ def read_session_page(cfg, sid):
             if idx.is_file():
                 try:
                     with closing(sqlite3.connect(idx.as_uri() + '?mode=ro', uri=True, timeout=2)) as db:
-                        row = db.execute('SELECT workspace_uris FROM conversation_summaries WHERE conversation_id=?', (raw,)).fetchone()
-                        if row and row[0]:
-                            uris = _j(row[0])
+                        cols = {r[1] for r in db.execute('PRAGMA table_info(conversation_summaries)')}
+                        prev_col = ', preview' if 'preview' in cols else ''
+                        row = db.execute(f'SELECT workspace_uris, title, status{prev_col} FROM conversation_summaries WHERE conversation_id=?', (raw,)).fetchone()
+                        if row:
+                            uris = _j(row[0]) if row[0] else []
                             if isinstance(uris, list) and uris and isinstance(uris[0], str):
-                                ws = uris[0].removeprefix('file://')
+                                ws = _uri_to_path(uris[0])
+                            agy_meta = {
+                                'title': str(row[1] or '').strip(),
+                                'status': str(row[2] or '').strip(),
+                                'preview': _clean(row[3]) if len(row) > 3 and row[3] else '',
+                            }
+                            if str(agy_meta.get('status') or '').upper() == 'RUNNING' and sid not in _active_agy_supervisors():
+                                cli_interrupted = True
                 except Exception:
                     pass
             tf = root / 'brain' / raw / '.system_generated' / 'logs' / 'transcript_full.jsonl'
@@ -683,8 +747,20 @@ def read_session_page(cfg, sid):
             ra.add(at)
     msgs = _consolidate(ev, 60)
     if not msgs and cfg.get('mode') != 'setup':
-        msgs = [{'sequence': 1, 'role': 'assistant', 'text': f'Session `{sid}` loaded (`{ws or "default"}`).', 'timestamp': _now()}]
-    out = {'harness': h, 'workspace': ws, 'messages': msgs,
+        if sid.startswith('agy:') and agy_meta:
+            parts = [f"AGY session `{raw}` (`{ws or 'default'}`)"]
+            if agy_meta.get('title'):
+                parts.append(f"**{agy_meta['title']}**")
+            if agy_meta.get('status'):
+                parts.append(f"Status: `{agy_meta['status']}`" + (' (CLI detached/interrupted)' if cli_interrupted else ''))
+            if agy_meta.get('preview'):
+                parts.append(f"> {agy_meta['preview']}")
+            if cli_interrupted:
+                parts.append('Previous CLI session was interrupted (no live supervisor). Send a message below to resume in background via `agy acp`.')
+            msgs = [{'sequence': 1, 'role': 'assistant', 'text': '\n\n'.join(parts), 'timestamp': _now()}]
+        else:
+            msgs = [{'sequence': 1, 'role': 'assistant', 'text': f'Session `{sid}` loaded (`{ws or "default"}`).', 'timestamp': _now()}]
+    out = {'harness': h, 'workspace': ws, 'messages': msgs, 'cli_interrupted': cli_interrupted,
            'request_results': [{'request_id': r['request_id'], 'status': r.get('execution_status', 'completed')} for r in recs if r.get('request_id')]}
     if cfg.get('mode') == 'page' and sid.startswith('claude-jsonl:'):
         holder = _safe_claude_holder(sid)
@@ -2451,6 +2527,7 @@ def prompt_session(cfg):
     if sid.startswith('agy:'):
         raw, adir = sid.split(':', 1)[1], cfg.get('agyDataDir') or ''
         idx = (Path(adir) / 'conversation_summaries.db') if adir else None
+        found_uri = ''
         if idx and idx.is_file():
             try:
                 with closing(sqlite3.connect(idx.as_uri() + '?mode=ro', uri=True, timeout=2)) as db:
@@ -2458,9 +2535,13 @@ def prompt_session(cfg):
                     if row and row[0]:
                         uris = _j(row[0])
                         if isinstance(uris, list) and uris and isinstance(uris[0], str):
-                            wcwd = pcwd = uris[0].removeprefix('file://')
+                            found_uri = _uri_to_path(uris[0])
             except Exception:
                 pass
+        if found_uri:
+            wcwd = pcwd = found_uri
+        elif isinstance(cfg.get('workspace'), str) and cfg['workspace'].strip() and Path(cfg['workspace'].strip()).is_dir():
+            wcwd = pcwd = cfg['workspace'].strip()
     elif sid.startswith('claude-jsonl:'):
         raw, cdir = sid.split(':', 1)[1], cfg.get('claudeDataDir') or ''
         m = list((Path(cdir) / 'projects').glob(f'*/{raw}.jsonl')) if cdir else []

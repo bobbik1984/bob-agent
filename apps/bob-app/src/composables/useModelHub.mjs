@@ -29,6 +29,8 @@ function cloneDefaultRegistry() {
   }
 }
 
+const quotaCheckpoint = ref(null);
+
 const modelHub = ref({
   registry: cloneDefaultRegistry(),
   state: {
@@ -432,6 +434,9 @@ function applyModelHubSnapshot(snap) {
   if (snap.subscriptionQuotas || snap.subscription_quotas) {
     modelHub.value.state.subscription_quotas = snap.subscriptionQuotas || snap.subscription_quotas;
   }
+  if (snap.quotaCheckpoint || snap.quota_checkpoint) {
+    quotaCheckpoint.value = snap.quotaCheckpoint || snap.quota_checkpoint;
+  }
   if (snap.prepaidUsage || snap.prepaid_usage) {
     modelHub.value.state.prepaid_usage = snap.prepaidUsage || snap.prepaid_usage;
   }
@@ -765,6 +770,7 @@ const prepaidUsageList = computed(() => {
 
   return Object.assign(ctx, {
     subscriptionQuotas,
+    quotaCheckpoint,
     prepaidUsageList,
     showPrepaidCost,
     togglePrepaidCost,

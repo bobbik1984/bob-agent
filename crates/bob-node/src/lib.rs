@@ -21,6 +21,7 @@ pub mod onboarding;
 pub mod jarvis;
 pub mod push_channels;
 pub mod browser_ws;
+mod quota_sync;
 
 use bob_kernel::app::LocalApp;
 use bob_runtime::{now_millis, ModelHubRuntime, RuntimeCapabilityManifest};
@@ -1021,7 +1022,18 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 .map_err(|_| "DECISION_UPDATE_FAILED")?;
             serde_json::to_value(dec).map_err(|_| "DECISION_UPDATE_FAILED")
         }
-        "app_model_hub_get" => ctx.runtime.build_snapshot_and_sync(&mut ctx.app),
+        "app_model_hub_get" => {
+            let mut snap = ctx.runtime.build_snapshot_and_sync(&mut ctx.app)?;
+            if let Some(quotas) = snap.get("subscriptionQuotas") {
+                quota_sync::maybe_sync_in_background(quotas);
+            }
+            snap["quotaCheckpoint"] = quota_sync::status_snapshot();
+            Ok(snap)
+        }
+        "app_quota_checkpoint_sync" => {
+            let quotas = bob_runtime::subscription_quota::read(&ctx.runtime.data_dir);
+            Ok(quota_sync::sync_now(&quotas))
+        }
         "app_provider_key_set" => {
             let pid = args
                 .get("providerId")
@@ -2465,7 +2477,10 @@ pub fn handle_client_v1_http(
         ) {
             Ok(mut merged) => {
                 if parsed["includeSubscriptionQuotas"] == true {
-                    merged["subscriptionQuotas"] = bob_runtime::subscription_quota::read(&ctx.runtime.data_dir);
+                    let quotas = bob_runtime::subscription_quota::read(&ctx.runtime.data_dir);
+                    quota_sync::maybe_sync_in_background(&quotas);
+                    merged["subscriptionQuotas"] = quotas;
+                    merged["quotaCheckpoint"] = quota_sync::status_snapshot();
                 }
                 (200, merged)
             }

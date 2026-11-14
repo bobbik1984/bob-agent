@@ -1,6 +1,9 @@
 # Bob — Current Stage（1.0.1 施工与交接合同）
 
 > **最新交接入口（2026-11-14）**：`WP-J1`～`WP-J6` 核心底座与生产端升级已合入主干（当前代码基线 `6b93e62`）；后续任何 Agent 接手系统性进化任务，请直接跳转本文件末尾 **「5. 后 WP-J6 系统性进化施工合同（BOB-D-016：WP-E1 → WP-E4）」** 按序领取工作包。
+> - 新建项目/新对话毛玻璃居中弹窗（`<Teleport to="body">` + `backdrop-filter: blur(14px)`），级联顺序改为「① 关联项目与名称 → ② 选择运行设备 → ③ 选择该设备实际可用工具 → ④ 工作目录与首条指令」。
+> - 右上角额度追踪自动增量打点（`crates/bob-node/src/quota_sync.rs` 配合环境变量 `BOB_QUOTA_CHECKPOINT_URL` / `BOB_QUOTA_CHECKPOINT_TOKEN`，在 `app_model_hub_get` 与拓扑同步时自动去重推送周额度快照并支持周周期重置轮转）。
+> - 终端断线 `agy` 会话识别与一键后台接续（`agy_index_probe.py` 只读比对 `receipts.sqlite` `agy_supervisors` 识别 `cliInterrupted` / `resumable`，解除 `DshSessions.vue` 对 `historyReadable === false` 的打开与发送封锁，支持通过独立守护进程 `agy acp --stdio` `session/load` 无缝恢复）。
 
 > 当前外部Bot待办验收以本文件末尾“语义日期与原待办修改”及对应Evidence为准；早期阶段记录不是当前限制。
 
