@@ -1,6 +1,6 @@
 <script setup>
 import { computed, inject, nextTick, onUnmounted, ref, watch } from 'vue';
-import { nodeLabel } from '../conversation-directory.mjs';
+import { nodeCreationKey, nodeLabel } from '../conversation-directory.mjs';
 
 const {
   t,
@@ -34,6 +34,21 @@ const titleInputRef = ref(null);
 const projectSelectRef = ref(null);
 
 const isRemoteMode = computed(() => Boolean(remoteHarnesses[creationMode.value]));
+
+function formatNodeMeta(node) {
+  if (!node) return '';
+  const remark = String(node.remark || '').trim();
+  if (remark && remark !== 'web_host') return remark;
+  if (node.isLocal || node.id === 'local') return t('createHostNodeTag');
+  const rawUrl = String(node.baseUrl || node.url || '').trim();
+  if (rawUrl) {
+    try {
+      const host = new URL(rawUrl).host;
+      if (host && !host.startsWith('127.0.0.1') && !host.startsWith('localhost')) return host;
+    } catch {}
+  }
+  return t('createRemoteNodeTag');
+}
 
 const canSubmit = computed(() => {
   if (creationBusy.value || creationLoading.value || creationNodeLoading.value) return false;
@@ -172,6 +187,7 @@ function submitLabelKey() {
                   <span class="choice-title-row">
                     <span class="choice-dot muted" />
                     <span class="choice-name">{{ t('createProjectOnlyDevice') }}</span>
+                    <span class="choice-radio" aria-hidden="true" />
                   </span>
                   <span class="choice-meta">{{ t('createProjectOnlyTag') }}</span>
                 </button>
@@ -186,6 +202,7 @@ function submitLabelKey() {
                   <span class="choice-title-row">
                     <span class="choice-dot online" />
                     <span class="choice-name">{{ t('createLocalDeviceTitle') }}</span>
+                    <span class="choice-radio" aria-hidden="true" />
                   </span>
                   <span class="choice-meta">{{ t('createLocalDeviceTag') }}</span>
                 </button>
@@ -193,18 +210,19 @@ function submitLabelKey() {
                 <template v-if="remoteCreationEnabled">
                   <button
                     v-for="node in creationNodes"
-                    :key="node.id"
+                    :key="nodeCreationKey(node)"
                     type="button"
                     class="choice-card"
-                    :class="{ active: creationDeviceId === node.id }"
-                    :aria-pressed="creationDeviceId === node.id"
-                    @click="selectCreationDevice(node.id)"
+                    :class="{ active: creationDeviceId === nodeCreationKey(node) }"
+                    :aria-pressed="creationDeviceId === nodeCreationKey(node)"
+                    @click="selectCreationDevice(nodeCreationKey(node))"
                   >
                     <span class="choice-title-row">
                       <span class="choice-dot" :class="node.online === false ? 'offline' : 'online'" />
                       <span class="choice-name">{{ nodeLabel(node) }}</span>
+                      <span class="choice-radio" aria-hidden="true" />
                     </span>
-                    <span class="choice-meta">{{ node.remark || node.id }}</span>
+                    <span class="choice-meta">{{ formatNodeMeta(node) }}</span>
                   </button>
                 </template>
               </div>
@@ -489,21 +507,23 @@ function submitLabelKey() {
   gap: 0.2rem;
   padding: 0.55rem 0.7rem;
   border-radius: var(--radius-btn, 10px);
-  border: 1px solid var(--border-color);
-  background: var(--bg-primary);
+  border: 1px solid color-mix(in srgb, var(--text-primary) 24%, var(--bg-primary));
+  background: var(--bg-secondary);
   color: var(--text-primary);
   text-align: left;
   cursor: pointer;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .choice-card:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--text-primary) 38%, var(--bg-primary));
   background: var(--bg-tertiary);
 }
 
 .choice-card.active {
   border-color: var(--accent-primary);
   background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent-primary);
 }
 
 .choice-title-row {
@@ -535,11 +555,27 @@ function submitLabelKey() {
 }
 
 .choice-name {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: var(--text-sm, 0.86rem);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.choice-radio {
+  width: 0.78rem;
+  height: 0.78rem;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  border: 1.5px solid color-mix(in srgb, var(--text-primary) 34%, var(--bg-primary));
+  background: transparent;
+}
+
+.choice-card.active .choice-radio {
+  border-color: var(--accent-primary);
+  background: radial-gradient(circle, var(--accent-primary) 44%, transparent 48%);
 }
 
 .choice-meta {

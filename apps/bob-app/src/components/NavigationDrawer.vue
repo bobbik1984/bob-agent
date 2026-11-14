@@ -41,6 +41,13 @@ const effectiveSidebarMode = computed(() => {
   const current = sidebarGroupMode?.value ?? sidebarGroupMode ?? 'project';
   return !hasConnectedNodes.value && current === 'device' ? 'project' : current;
 });
+
+function handleSmartOrganize() {
+  if (!props.docked && navigationOpen) {
+    navigationOpen.value = false;
+  }
+  void organizeSessionsViaAgent?.();
+}
 </script>
 
 <template>
@@ -112,6 +119,19 @@ const effectiveSidebarMode = computed(() => {
         <span>{{ t('modeDeviceShort') }}</span>
       </button>
     </div>
+
+    <button
+      v-if="effectiveSidebarMode === 'smart'"
+      type="button"
+      class="sidebar-smart-organize-btn"
+      :title="t('smartGroupActionBtn')"
+      @click="handleSmartOrganize"
+    >
+      <svg class="inline-svg-xs" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 2l1.8 5.2L19 9l-5.2 1.8L12 16l-1.8-5.2L5 9l5.2-1.8L12 2z" />
+      </svg>
+      <span>{{ t('smartGroupActionBtn') }}</span>
+    </button>
 
     <div class="sidebar-search-row">
       <input
@@ -231,6 +251,19 @@ const effectiveSidebarMode = computed(() => {
       </button>
     </div>
 
+    <button
+      v-if="effectiveSidebarMode === 'smart'"
+      type="button"
+      class="sidebar-smart-organize-btn"
+      :title="t('smartGroupActionBtn')"
+      @click="handleSmartOrganize"
+    >
+      <svg class="inline-svg-xs" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 2l1.8 5.2L19 9l-5.2 1.8L12 16l-1.8-5.2L5 9l5.2-1.8L12 2z" />
+      </svg>
+      <span>{{ t('smartGroupActionBtn') }}</span>
+    </button>
+
     <div class="sidebar-search-row">
       <input
         v-model="sidebarSearch"
@@ -271,3 +304,28 @@ const effectiveSidebarMode = computed(() => {
     </nav>
   </div>
 </template>
+
+<style scoped>
+.sidebar-smart-organize-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  width: 100%;
+  margin: 0.35rem 0 0;
+  padding: 0.38rem 0.65rem;
+  border-radius: var(--radius-btn, 8px);
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 42%, var(--border-color));
+  background: var(--accent-soft);
+  color: var(--accent-primary);
+  font-size: var(--text-xs, 0.78rem);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.sidebar-smart-organize-btn:hover {
+  border-color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-soft) 75%, var(--accent-primary) 15%);
+}
+</style>

@@ -1,6 +1,9 @@
 # Bob — Current Stage（1.0.1 施工与交接合同）
 
 > **最新交接入口（2026-11-14）**：`WP-J1`～`WP-J6` 核心底座与生产端升级已合入主干（当前代码基线 `431b63d`）；后续任何 Agent 接手系统性进化任务，请直接跳转本文件末尾 **「5. 后 WP-J6 系统性进化施工合同（BOB-D-016：WP-E1 → WP-E4）」** 按序领取工作包。
+> - **侧栏项目智能归类合并与新建设备选择隔离（2026-11-14）**：
+>   - **侧栏项目/智能分组归并（`conversation-directory.mjs` / `ConversationDirectory.vue` / `NavigationDrawer.vue` / `useChatSession.mjs`）**：新增 `attachInferredProjects`，结合同工作区已关联会话、`CANONICAL_PROJECTS`（补充 `Bob-bot 助手` 与 `sketchup|model_builder|平面模型`）及 `catalog.projects` 规范标题自动将未关联会话归入既有项目组（避免 `X1T / bob-bot` 与 `Bob-bot 助手` 割裂），同时将 `/tmp/` 与 `Bob Connection Verification` 等临时验证会话隔离到「实验与临时测试」；在智能模式侧栏渲染一键整理按钮并修复网页端直接路由至 `kernelBridge.assistantExecute` 执行 `organize_projects` 与目录即时刷新。
+>   - **新建设备卡片 `node:local` 隔离与选中对比度强化（`SidebarCreateForm.vue` / `useChatSession.mjs`）**：通过 `nodeCreationKey` / `parseNodeConnectionId` 将内置对话（`local`）与本机托管节点（如 `VPS2` 对应的 `node:local`）彻底隔离，点击 `VPS2` 时正确保留节点连接并拉取 `dsh` / `claude` / `codex` / `agy` / `pi` 工具与工作区；为所有设备卡片补充高对比度边框、右侧单选指示点与清晰节点用途副标题。
 > - **统一跨端认证、手机端可选生物安全锁与纯终端紧凑二维码（2026-11-14）**：
 >   - **手机端首次安装可选系统安全锁（Android）**：新增 `DeviceVaultPlugin.kt`（`checkDeviceAuth` / `authenticateDeviceOwner` / `deviceCredentialResult`）、`stage-android-vault.py` 权限注入、`security_lock.rs`（`app_security_lock_status/set/unlock`，原子落盘 `security_lock.json`）、`useMobileSecurityLock.mjs` 与 `<MobileSecurityGate />`（含 `SettingsView.vue` 外观页开关）。首次打开确认是否启用系统面部/指纹/锁屏认证；跳过后直接进入；Web 端与 PC 桌面端永不拦截。
 >   - **纯命令行紧凑终端二维码与密码学随机强化（`bob-node`）**：新增 `bob-node pair` / `qr` / `--pair-qr` / `--pair-only` 单次 CLI 指令及服务启动紧凑二维码打印（`bob://pair?...` ≤ 85 字节，Version 4/5 终端半块字符宽 ≤ 45 列，80×24 终端不换行；兼容 `node_access.sqlite` 与普通在线节点，自动优先走本机运行中守护进程），全链路配对码与令牌切换至 `ring::rand::SystemRandom` CSPRNG，`/api/node/v1/invitations` 支持 `"compact": true`。

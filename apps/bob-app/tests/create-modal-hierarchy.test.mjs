@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { markRecentProject } from '../src/recent-projects.mjs';
+import { nodeCreationKey } from '../src/conversation-directory.mjs';
 
 const chatSessionSrc = readFileSync(new URL('../src/composables/useChatSession.mjs', import.meta.url), 'utf8');
 const modalSrc = readFileSync(new URL('../src/components/SidebarCreateForm.vue', import.meta.url), 'utf8');
@@ -12,7 +13,7 @@ const enJson = JSON.parse(readFileSync(new URL('../src/locales/en-US.json', impo
 
 const readSection = (src, from, through) => src.slice(src.indexOf(from), src.indexOf(through));
 
-function mountCreateModalState(bridge, projects = []) {
+function mountCreateModalState(bridge, projects = [], remoteNodes = null) {
   const storage = new Map();
   const navigationOpen = { value: true };
   const ctx = vm.createContext({
@@ -23,7 +24,7 @@ function mountCreateModalState(bridge, projects = []) {
       modelHub: {
         value: {
           state: {
-            remote_nodes: [
+            remote_nodes: remoteNodes || [
               { id: 'vps2', name: 'VPS2 Build Host', url: 'https://vps2.example.invalid/' },
               { id: 'empty-node', name: 'Empty Node', url: 'https://empty.example.invalid/' },
             ],
@@ -120,6 +121,49 @@ test('create modal cascades Project -> Device -> Available Tools on Device -> Be
   await actions.selectCreationDevice('empty-node');
   assert.equal(actions.creationMode.value, '');
   assert.equal(actions.creationError.value, 'createNoToolsOnDevice');
+});
+
+test('VPS2 host node (id="local") is isolated from built-in local chat via node:local key', async () => {
+  const actions = mountCreateModalState(
+    {
+      dshList: async (nodeId) => {
+        if (nodeId === 'local') {
+          return [
+            { harness: 'claude', workspace: '/opt/quant_lab' },
+            { source_kind: 'dsh_native', workspace: '/srv/dsh-host' },
+          ];
+        }
+        return [];
+      },
+    },
+    [{ id: 'proj-quant', title: 'Quant Lab', workspace: '/opt/quant_lab' }],
+    [
+      { id: 'local', isLocal: true, label: 'VPS2', baseUrl: 'http://127.0.0.1:53020', remark: 'web_host' },
+      { id: '5dc9cf0011223344', label: 'X1T', baseUrl: 'https://x1-tablet.bobbik.org' },
+    ],
+  );
+
+  actions.startCreateConversation('proj-quant');
+  assert.equal(actions.creationDeviceId.value, 'local');
+  assert.equal(actions.creationMode.value, 'local');
+  assert.equal(nodeCreationKey({ id: 'local' }), 'node:local');
+  assert.notEqual(nodeCreationKey({ id: 'local' }), 'local');
+
+  await actions.selectCreationDevice(nodeCreationKey({ id: 'local' }));
+  assert.equal(actions.creationDeviceId.value, 'node:local');
+  assert.equal(actions.creationConnectionId.value, 'local');
+  assert.equal(actions.creationMode.value, 'dsh');
+  const toolMap = Object.fromEntries(actions.creationAvailableTools.value.map(item => [item.id, item]));
+  assert.equal(toolMap.dsh.available, true);
+  assert.equal(toolMap.claude.available, true);
+
+  actions.selectCreationTool('claude');
+  assert.equal(actions.creationWorkspace.value, '/opt/quant_lab');
+
+  await actions.selectCreationDevice('local');
+  assert.equal(actions.creationDeviceId.value, 'local');
+  assert.equal(actions.creationConnectionId.value, '');
+  assert.equal(actions.creationMode.value, 'local');
 });
 
 test('SidebarCreateForm uses Teleport frosted modal without hardcoded colors or emojis', () => {

@@ -126,3 +126,82 @@ test('groupIconKind selects project, archive, computer, phone, and cloud icons b
   assert.equal(groupIconKind({ name: 'VPS2', items: [{ node: { label: 'VPS2', remark: 'Hostinger VPS2' } }] }, 'device'), 'cloud');
   assert.equal(groupIconKind({ name: 'VPS3', items: [{ node: { label: 'VPS3', baseUrl: 'https://vps3.bobbik.org' } }] }, 'device'), 'cloud');
 });
+
+test('inferred project clustering merges unlinked workspace/canonical siblings into existing projects and isolates /tmp verification runs', () => {
+  const catalogProjects = [
+    { id: 'proj-92d40dc5', title: 'Bob-bot 助手' },
+    { id: 'proj-9099969361', title: 'Quant Lab 量化交易' },
+  ];
+  const rows = [
+    {
+      uid: 'x1t:explicit-1',
+      remote: true,
+      node: { id: '5dc9cf0011223344', label: 'X1T' },
+      workspace: '/home/bobbik/dsh_projects/bob-bot',
+      title: 'BobBot 原型排查',
+      project_id: 'proj-92d40dc5',
+      project: 'Bob-bot 助手',
+      project_owner: 'hostinger',
+      updated_at: '2026-11-14T10:00:00Z',
+    },
+    {
+      uid: 'x1t:explicit-2',
+      remote: true,
+      node: { id: '5dc9cf0011223344', label: 'X1T' },
+      workspace: '/home/bobbik/dsh_projects/bob-bot',
+      title: 'BobBot 架构梳理',
+      project_id: 'proj-92d40dc5',
+      project: 'Bob-bot 助手',
+      project_owner: 'hostinger',
+      updated_at: '2026-11-14T09:00:00Z',
+    },
+    {
+      uid: 'x1t:unlinked-sibling',
+      remote: true,
+      node: { id: '5dc9cf0011223344', label: 'X1T' },
+      workspace: '/home/bobbik/dsh_projects/bob-bot',
+      title: '理解项目作为开发基础',
+      updated_at: '2026-11-14T11:00:00Z',
+    },
+    {
+      uid: 'x1t:unlinked-wp',
+      remote: true,
+      node: { id: '5dc9cf0011223344', label: 'X1T' },
+      workspace: '/home/bobbik/dsh_projects',
+      title: 'Bob Agent WP-E1 System Evolution',
+      updated_at: '2026-11-14T08:00:00Z',
+    },
+    {
+      uid: 'vps2:quant-1',
+      remote: true,
+      node: { id: 'local', label: 'VPS2' },
+      workspace: '/opt/quant_lab',
+      title: 'Strategy Backtest Refresh',
+      updated_at: '2026-11-14T07:00:00Z',
+    },
+    {
+      uid: 'x1t:verify',
+      remote: true,
+      node: { id: '5dc9cf0011223344', label: 'X1T' },
+      workspace: '/tmp/bob-native-setup-x3yey2wd',
+      title: 'Bob Connection Verification',
+      updated_at: '2026-11-14T12:00:00Z',
+    },
+  ];
+
+  for (const mode of ['project', 'smart']) {
+    const groups = directoryGroups(rows, mode, null, { projects: catalogProjects, ownerInstance: 'hostinger' });
+    const bobGroup = groups.find(g => g.name === 'Bob-bot 助手');
+    assert.ok(bobGroup, `expected Bob-bot 助手 group in ${mode} mode`);
+    assert.equal(bobGroup.items.length, 4);
+    assert.equal(groups.some(g => g.name.includes('X1T / bob-bot')), false);
+
+    const quantGroup = groups.find(g => g.name === 'Quant Lab 量化交易');
+    assert.ok(quantGroup, `expected Quant Lab 量化交易 group in ${mode} mode`);
+    assert.equal(quantGroup.items.length, 1);
+
+    const testGroup = groups.find(g => g.isTestGroup);
+    assert.ok(testGroup, `expected test group in ${mode} mode`);
+    assert.deepEqual(testGroup.items.map(i => i.uid), ['x1t:verify']);
+  }
+});

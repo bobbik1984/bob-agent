@@ -5,6 +5,23 @@ export function workspaceName(path) {
   return parts.at(-1) || path;
 }
 
+export const REMOTE_NODE_PREFIX = 'node:';
+
+/** Build a distinct UI selection key for remote/paired nodes so id="local" never collides with built-in local chat. */
+export function nodeCreationKey(node) {
+  const id = typeof node === 'string' ? node : node?.id;
+  if (!id) return '';
+  const text = String(id);
+  return text.startsWith(REMOTE_NODE_PREFIX) ? text : `${REMOTE_NODE_PREFIX}${text}`;
+}
+
+/** Extract the underlying node connection ID from a creation device selection key. */
+export function parseNodeConnectionId(deviceId) {
+  const text = String(deviceId || '');
+  if (!text || text === 'none' || text === 'local') return '';
+  return text.startsWith(REMOTE_NODE_PREFIX) ? text.slice(REMOTE_NODE_PREFIX.length) : text;
+}
+
 const GENERIC_WORKSPACES = new Set([
   'dsh_projects',
   'bob-projects',
@@ -20,6 +37,12 @@ const GENERIC_WORKSPACES = new Set([
   'ubuntu',
   'root',
   'tmp',
+  'opt',
+  'srv',
+  'var',
+  'src',
+  'app',
+  'apps',
 ]);
 
 const STOP_TOKENS = new Set([
@@ -50,8 +73,16 @@ export function inferSmartTopic(row) {
   const title = String(row.title || '').trim();
   const ws = workspaceName(row.workspace || '');
   const wsLower = String(ws || '').toLocaleLowerCase();
+  const normWs = String(row.workspace || '').replace(/\\/g, '/').toLocaleLowerCase();
   if (/^session-[0-9a-f-]{8,}/i.test(title)) {
     return { key: 'smart:unnamed-uuid', name: '未命名节点会话 (UUID)' };
+  }
+  if (
+    /(bob[\s_-]*bot|bobbot|bob[\s_-]*agent)/i.test(title) ||
+    /(bob[\s_-]*bot|bobbot|bob[\s_-]*agent)/i.test(wsLower) ||
+    /(^|\/)(bob[\s_-]*bot|bobbot|bob[\s_-]*agent)(\/|$)/i.test(normWs)
+  ) {
+    return { key: 'smart:topic:bob-bot', name: 'Bob-bot 助手' };
   }
   if (/(sea2|海路纪元|地球渲染|海洋|航海)/i.test(title)) {
     return { key: 'smart:topic:sea2-hailu', name: '海路纪元 · Sea2 地球渲染' };
@@ -62,7 +93,10 @@ export function inferSmartTopic(row) {
   if (/(庭院|花园守线|garden)/i.test(title) || /(garden)/i.test(wsLower)) {
     return { key: 'smart:topic:courtyard-garden', name: '庭院布局与塔防网页' };
   }
-  if (/(空间站|月表|molence|gpcr|blender|render|渲染|建模|3d)/i.test(title)) {
+  if (
+    /(空间站|月表|molence|gpcr|blender|render|渲染|建模|3d|sketchup|model[\s_-]*builder|平面模型)/i.test(title) ||
+    /(sketchup|model[\s_-]*builder|blender|3d)/i.test(wsLower)
+  ) {
     return { key: 'smart:topic:3d-render', name: '3D 渲染与美术管线' };
   }
   if (/(dos|exe|逆向|还原源代码|反编译)/i.test(title)) {
@@ -127,8 +161,12 @@ export function rowTopicInfo(row) {
   };
 }
 
-export function extractFilterOptions(rows) {
-  const nonLegacy = (rows || []).filter(r => !r.legacy);
+export function extractFilterOptions(rows, options = null) {
+  const nonLegacy = attachInferredProjects(
+    (rows || []).filter(r => !r.legacy),
+    options?.projects,
+    options?.ownerInstance
+  );
   const nodeMap = new Map();
   const harnessMap = new Map();
   const topicMap = new Map();
@@ -201,8 +239,9 @@ export function filterAndSortRows(rows, pinnedSet = null, options = null) {
         : null;
   const topicFilter = String(opts.selectedTopic || 'all');
   const sortBy = String(opts.sortBy || 'time_desc');
+  const enriched = attachInferredProjects(rows, opts.projects, opts.ownerInstance);
 
-  const filtered = (rows || []).filter(row => {
+  const filtered = (enriched || []).filter(row => {
     if (row.legacy) return false;
     if (nodeSet && !nodeSet.has(rowNodeKey(row)) && !nodeSet.has(rowNodeLabel(row))) {
       return false;
@@ -255,6 +294,7 @@ export function filterAndSortRows(rows, pinnedSet = null, options = null) {
 
 
 export const CANONICAL_PROJECTS = [
+  { id: 'bob-bot', name: 'Bob-bot 助手', pattern: /(bob[\s_-]*bot|bobbot|bob[\s_-]*agent)/i },
   { id: 'sea2', name: '海路纪元 · Sea2', pattern: /(sea2|海路纪元|海路|地球渲染|航海)/i },
   { id: 'quant_lab', name: 'Quant Lab 量化实验室', pattern: /(quant_lab|quant|量化)/i },
   { id: 'winter-shelter', name: 'Winter Shelter 避难所', pattern: /(winter[\s_-]*shelter|winter|雪洞)/i },
@@ -264,10 +304,36 @@ export const CANONICAL_PROJECTS = [
   { id: 'bedtime_story', name: 'AI 睡前故事', pattern: /(bedtime_story|睡前故事|绘本)/i },
   { id: 'code_runner', name: 'CodeRunner 并发引擎', pattern: /(code_runner|coderunner)/i },
   { id: 'iknow', name: 'iKnow 知识图谱', pattern: /(iknow|生态图谱|知识图谱)/i },
-  { id: '3d-render', name: '3D 渲染与美术管线', pattern: /(空间站|月表|molence|gpcr|blender|render|渲染|建模|3d)/i },
+  { id: '3d-render', name: '3D 渲染与美术管线', pattern: /(空间站|月表|molence|gpcr|blender|render|渲染|建模|3d|sketchup|model[\s_-]*builder|平面模型)/i },
   { id: 'reverse-eng', name: '逆向工程与源码还原', pattern: /(dos|exe|逆向|还原源代码|反编译)/i },
   { id: 'four-harness', name: '多工具联合验收', pattern: /(four[\s_-]*harness)/i },
 ];
+
+function normWorkspacePath(path) {
+  return String(path || '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '')
+    .toLocaleLowerCase();
+}
+
+function slugifyMatchText(text) {
+  return String(text || '')
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '');
+}
+
+function isMeaningfulWorkspace(path) {
+  const norm = normWorkspacePath(path);
+  if (!norm || norm === '/' || /^[a-z]:$/.test(norm)) return false;
+  const leaf = workspaceName(norm).toLocaleLowerCase();
+  if (!leaf || leaf.startsWith('.') || GENERIC_WORKSPACES.has(leaf)) return false;
+  if (/^proj_[0-9a-f]{12,}$/i.test(leaf) || /^exec_[a-z0-9_]+$/i.test(leaf)) return false;
+  if (/(^|\/)(tmp|temp|verification-workspaces|bob-agy-candidates|bob-native-setup)(\/|$)/i.test(norm)) {
+    return false;
+  }
+  return true;
+}
 
 export function resolveCanonicalProject(row) {
   if (!row) return null;
@@ -275,15 +341,16 @@ export function resolveCanonicalProject(row) {
     return {
       id: row.project_id,
       name: row.project || row.project_id,
-      isExplicit: true,
+      isExplicit: !row.project_inferred,
     };
   }
   const title = String(row.title || '').trim();
   const ws = workspaceName(row.workspace || '');
   const wsLower = String(ws || '').toLocaleLowerCase();
+  const normWs = normWorkspacePath(row.workspace || '');
 
   for (const def of CANONICAL_PROJECTS) {
-    if (def.pattern.test(title) || def.pattern.test(wsLower)) {
+    if (def.pattern.test(title) || def.pattern.test(wsLower) || (normWs && def.pattern.test(normWs))) {
       return { id: def.id, name: def.name, isCanonical: true };
     }
   }
@@ -293,14 +360,15 @@ export function resolveCanonicalProject(row) {
 export function isTestOrScratchSession(row) {
   if (!row) return false;
   if (row.pinned) return false;
-  if (row.project_owner && row.project_id) {
+  if (row.project_owner && row.project_id && !row.project_inferred) {
     const pName = String(row.project || row.project_id || '');
     return /(test|tmp|scratch|probe|测试|探针|临时|实验|冒烟)/i.test(pName);
   }
   const title = String(row.title || '').trim().toLocaleLowerCase();
   const ws = workspaceName(row.workspace || '').toLocaleLowerCase();
+  const normWs = normWorkspacePath(row.workspace || '');
 
-  if (/(^|[\s_/-])(test|eval|probe|tmp|temp|scratch|benchmark|fixture|mock|smoke|check)([\s_/-]|$)/i.test(title)) {
+  if (/(^|[\s_/-])(test|eval|probe|tmp|temp|scratch|benchmark|fixture|mock|smoke|check|verification|verify)([\s_/-]|$)/i.test(title)) {
     return true;
   }
   if (/^(are you online\??|r u online\??|hello\??|hi\??|ping\??|blank message|synced conversation)$/i.test(title)) {
@@ -313,7 +381,122 @@ export function isTestOrScratchSession(row) {
   if (/(^|[\s_/-])(test|tmp|temp|scratch)([\s_/-]|$)/i.test(ws)) {
     return true;
   }
+  if (/(^|\/)(tmp|temp|verification-workspaces|bob-agy-candidates|bob-native-setup)(\/|$)/i.test(normWs)) {
+    return true;
+  }
   return false;
+}
+
+/** Infer catalog project associations for unlinked rows using sibling workspace affinity, canonical patterns, and project titles. */
+export function attachInferredProjects(rows, catalogProjects = [], defaultOwner = 'local') {
+  const input = Array.isArray(rows) ? rows : [];
+  if (input.length === 0) return input;
+
+  const projectOwnerById = new Map();
+  for (const row of input) {
+    if (row?.project_owner && row?.project_id && !row.project_inferred) {
+      if (!projectOwnerById.has(row.project_id)) {
+        projectOwnerById.set(row.project_id, row.project_owner);
+      }
+    }
+  }
+
+  const validProjects = [];
+  for (const p of Array.isArray(catalogProjects) ? catalogProjects : []) {
+    if (!p?.id) continue;
+    const title = String(p.title || p.name || p.id).trim();
+    const owner = projectOwnerById.get(p.id) || p.owner_instance || p.owner || defaultOwner || 'local';
+    validProjects.push({
+      id: String(p.id),
+      title,
+      owner: String(owner),
+      slug: slugifyMatchText(title),
+    });
+  }
+
+  const exactWsMap = new Map();
+  const slugWsMap = new Map();
+  for (const row of input) {
+    if (!row?.project_owner || !row?.project_id || row.project_inferred) continue;
+    if (!isMeaningfulWorkspace(row.workspace)) continue;
+    const meta = {
+      id: row.project_id,
+      title: row.project || row.project_id,
+      owner: row.project_owner,
+    };
+    const nKey = rowNodeKey(row);
+    const normWs = normWorkspacePath(row.workspace);
+    const exactKey = `${nKey}::${normWs}`;
+    if (!exactWsMap.has(exactKey)) exactWsMap.set(exactKey, meta);
+    const leafSlug = slugifyMatchText(workspaceName(normWs));
+    if (leafSlug && leafSlug.length >= 4 && !slugWsMap.has(leafSlug)) {
+      slugWsMap.set(leafSlug, meta);
+    }
+  }
+
+  if (validProjects.length === 0 && exactWsMap.size === 0 && slugWsMap.size === 0) {
+    return input;
+  }
+
+  const canonicalToProject = new Map();
+  for (const def of CANONICAL_PROJECTS) {
+    const matched = validProjects.find(p => def.pattern.test(p.title) || def.pattern.test(p.id));
+    if (matched) {
+      canonicalToProject.set(def.id, matched);
+    }
+  }
+
+  return input.map(row => {
+    if (!row || (row.project_owner && row.project_id)) return row;
+    if (row.legacy || isTestOrScratchSession(row)) return row;
+
+    let match = null;
+    if (isMeaningfulWorkspace(row.workspace)) {
+      const nKey = rowNodeKey(row);
+      const normWs = normWorkspacePath(row.workspace);
+      match = exactWsMap.get(`${nKey}::${normWs}`) || null;
+      if (!match) {
+        const leafSlug = slugifyMatchText(workspaceName(normWs));
+        if (leafSlug && leafSlug.length >= 4) {
+          match = slugWsMap.get(leafSlug) || null;
+        }
+      }
+    }
+
+    if (!match && canonicalToProject.size > 0) {
+      const canonical = resolveCanonicalProject(row);
+      if (canonical?.id && canonicalToProject.has(canonical.id)) {
+        match = canonicalToProject.get(canonical.id);
+      }
+    }
+
+    if (!match && validProjects.length > 0) {
+      const leafSlug = isMeaningfulWorkspace(row.workspace)
+        ? slugifyMatchText(workspaceName(row.workspace))
+        : '';
+      const titleSlug = slugifyMatchText(row.title);
+      match =
+        validProjects.find(p => {
+          if (!p.slug || p.slug.length < 4) return false;
+          if (leafSlug && (leafSlug === p.slug || leafSlug.includes(p.slug) || p.slug.includes(leafSlug))) {
+            return true;
+          }
+          if (titleSlug && p.slug.length >= 5 && titleSlug.includes(p.slug)) {
+            return true;
+          }
+          return false;
+        }) || null;
+    }
+
+    if (!match) return row;
+    return {
+      ...row,
+      project_id: match.id,
+      project: match.title,
+      project_owner: match.owner,
+      project_inferred: true,
+    };
+  });
 }
 
 // Display names never become identity keys: equal basenames can belong to different nodes/paths.

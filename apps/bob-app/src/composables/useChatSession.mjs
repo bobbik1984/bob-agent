@@ -81,6 +81,18 @@ function toggleProject(id) { expandedProjects.value[id] = !projectExpanded(id); 
 function activityText(item) { return Number(item.updated_at) > 0 ? new Date(Number(item.updated_at) * (Number(item.updated_at) < 1e12 ? 1000 : 1)).toLocaleDateString() : t('sidebarTimeUnknown'); }
 const theme = ref('system');
 const creatingKind = ref(null); // 'project' | 'conversation' | null
+const REMOTE_NODE_PREFIX = 'node:';
+function nodeCreationKey(node) {
+  const id = typeof node === 'string' ? node : node?.id;
+  if (!id) return '';
+  const text = String(id);
+  return text.startsWith(REMOTE_NODE_PREFIX) ? text : `${REMOTE_NODE_PREFIX}${text}`;
+}
+function parseNodeConnectionId(deviceId) {
+  const text = String(deviceId || '');
+  if (!text || text === 'none' || text === 'local') return '';
+  return text.startsWith(REMOTE_NODE_PREFIX) ? text.slice(REMOTE_NODE_PREFIX.length) : text;
+}
 const creatingForProjectId = ref(null);
 const newItemTitle = ref('');
 const creationMode = ref('local');
@@ -140,8 +152,10 @@ const creationAvailableTools = computed(() => {
     return [{ id: 'local', labelKey: 'createLocalAssistant', kind: 'local', workspaces: [], count: 0, available: true, loaded: true }];
   }
   if (!remoteCreationEnabled.value) return [];
-  const hasCache = Object.hasOwn(creationNodeSessionsCache.value, deviceId);
-  const rows = creationNodeSessionsCache.value[deviceId] || [];
+  const connectionId = parseNodeConnectionId(deviceId);
+  if (!connectionId) return [];
+  const hasCache = Object.hasOwn(creationNodeSessionsCache.value, connectionId);
+  const rows = creationNodeSessionsCache.value[connectionId] || [];
   return creationToolOrder.map((tool) => {
     const workspaces = workspacesForNodeTool(rows, tool);
     return {
@@ -163,7 +177,9 @@ async function loadCreationWorkspaces() {
   creationError.value = '';
   const node = creationNode.value;
   const tool = creationMode.value;
-  if (node?.id) creationDeviceId.value = node.id;
+  if (node?.id && !parseNodeConnectionId(creationDeviceId.value)) {
+    creationDeviceId.value = nodeCreationKey(node);
+  }
   creationLoading.value = Boolean(node && Object.hasOwn(remoteHarnesses,tool));
   if (!creationLoading.value) return;
   try {
@@ -678,12 +694,19 @@ async function switchSidebarMode(mode) {
   }
 }
 
+let pendingOrganizeRequest = false;
+
 async function organizeSessionsViaAgent() {
   await openAssistant();
   const promptText = t('smartGroupAgentPrompt');
   draft.value = promptText;
   controller.setDraft(promptText);
-  await send();
+  pendingOrganizeRequest = true;
+  try {
+    await send();
+  } finally {
+    pendingOrganizeRequest = false;
+  }
 }
 
 const controller = createSendController({
@@ -954,7 +977,7 @@ function beginCreateItem(kind, projectId) {
   firstSessionMessage.value = saved?.text || '';
   nativeSetupReply.value = '';
   creationConnectionId.value = saved?.connectionId || '';
-  creationDeviceId.value = saved ? (saved.connectionId || 'local') : (kind === 'project' ? 'none' : 'local');
+  creationDeviceId.value = saved ? (saved.connectionId ? nodeCreationKey(saved.connectionId) : 'local') : (kind === 'project' ? 'none' : 'local');
   creationWorkspace.value = saved?.workspace || '';
   creationWorkspaces.value = saved ? [saved.workspace] : [];
   if (!saved) creationNodeSessionsCache.value = {};
@@ -989,21 +1012,29 @@ async function selectCreationDevice(deviceId) {
     creationLoading.value = false;
     return;
   }
-  creationConnectionId.value = deviceId;
+  const connectionId = parseNodeConnectionId(deviceId);
+  if (!connectionId) {
+    creationMode.value = '';
+    creationConnectionId.value = '';
+    creationNodeLoading.value = false;
+    creationLoading.value = false;
+    return;
+  }
+  creationConnectionId.value = connectionId;
   creationLoading.value = false;
   creationNodeLoading.value = true;
   const read = ++workspaceRead;
   try {
-    let rows = creationNodeSessionsCache.value[deviceId];
+    let rows = creationNodeSessionsCache.value[connectionId];
     if (!rows) {
-      rows = await dshSetupBridge(pairedCreationOwner.value).dshList(deviceId);
+      rows = await dshSetupBridge(pairedCreationOwner.value).dshList(connectionId);
       if (read !== workspaceRead) return;
       creationNodeSessionsCache.value = {
         ...creationNodeSessionsCache.value,
-        [deviceId]: Array.isArray(rows) ? rows : [],
+        [connectionId]: Array.isArray(rows) ? rows : [],
       };
     }
-    const cached = creationNodeSessionsCache.value[deviceId] || [];
+    const cached = creationNodeSessionsCache.value[connectionId] || [];
     const usableTools = creationToolOrder.filter(tool => workspacesForNodeTool(cached, tool).length > 0);
     if (usableTools.includes(creationMode.value)) {
       selectCreationTool(creationMode.value);
@@ -1352,19 +1383,24 @@ async function send() {
       && /^(?:\/new-(?:dsh|claude|codex|agy|pi)|新建\s*(?:DSH|Claude(?: Code)?|Codex|AGY|Pi)\s*(?:会话|对话))(?:\s*\||$)/i.test(draft.value.trim())
       && await openAssistantSessionDraft(draft.value.trim())) return;
   if (!canSend.value) return;
-  if (!executionEnabled.value && !homeConfigured.value) {
+  const attBlock = formatComposerAttachments(composerAttachments.value);
+  const sentText = [draft.value.trim(), attBlock].filter(Boolean).join('\n\n') || draft.value;
+  const organizePrompt = typeof t === 'function' ? t('smartGroupAgentPrompt') : '';
+  const isOrganizeTurn = Boolean(
+    pendingOrganizeRequest || (organizePrompt && sentText.trim() === organizePrompt.trim()),
+  );
+  pendingOrganizeRequest = false;
+  if (!executionEnabled.value && !homeConfigured.value && !isOrganizeTurn) {
     fault.value = 'sendNotConfigured';
     input.value?.focus();
     return;
   }
   saving.value = true;
   fault.value = null;
-  const attBlock = formatComposerAttachments(composerAttachments.value);
-  const sentText = [draft.value.trim(), attBlock].filter(Boolean).join('\n\n') || draft.value;
   if (attBlock) {
     controller.setDraft(sentText);
   }
-  const shouldExecute = executionEnabled.value;
+  const shouldExecute = executionEnabled.value || isOrganizeTurn;
   try {
     if (newConversationPending.value) {
       await kernelBridge.createConversation(sessionId.value, null, sentText.trim().slice(0, 60));
@@ -1397,17 +1433,24 @@ async function send() {
       dispatchPending.value = true;
       executionFault.value = null;
       try {
-        const execution = browserClient && sessionId.value === assistantConversationId.value && directProviderEnabled.value
-          ? (typeof ctx.jarvisHome?.runJarvisTurn === 'function'
-              ? await ctx.jarvisHome.runJarvisTurn({ sessionId: sessionId.value, requestId: receipt.request_id, messageId: receipt.message_id, content: sentText })
-              : await kernelBridge.assistantExecute(receipt.request_id))
-          : await executionController.dispatch(receipt);
+        const execution = isOrganizeTurn && typeof kernelBridge.assistantExecute === 'function'
+          ? await kernelBridge.assistantExecute(receipt.request_id)
+          : (browserClient && sessionId.value === assistantConversationId.value && directProviderEnabled.value
+              ? (typeof ctx.jarvisHome?.runJarvisTurn === 'function'
+                  ? await ctx.jarvisHome.runJarvisTurn({ sessionId: sessionId.value, requestId: receipt.request_id, messageId: receipt.message_id, content: sentText })
+                  : await kernelBridge.assistantExecute(receipt.request_id))
+              : await executionController.dispatch(receipt));
         assistantNextPoll = 0;
         void refreshAssistantResults();
         executions.value = [
           ...executions.value.filter(run => run && (!execution || run.id !== execution.id)),
           ...(execution ? [execution] : []),
         ];
+        if (isOrganizeTurn) {
+          directorySyncRevision.value += 1;
+          const refreshedCatalog = await kernelBridge.catalog?.().catch(() => null);
+          if (refreshedCatalog) applyCatalogPreferences(refreshedCatalog);
+        }
       } catch {
         unconfirmedRequest = receipt.request_id;
         executionFault.value = 'executionStartUnconfirmed';
