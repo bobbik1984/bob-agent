@@ -1,17 +1,26 @@
 package org.bobagent.vault
 
 import android.app.Activity
+import android.app.KeyguardManager
+import android.content.Context
+import android.content.Intent
+import android.hardware.biometrics.BiometricManager
+import android.hardware.biometrics.BiometricPrompt
 import android.os.Build
+import android.os.CancellationSignal
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.system.Os
 import android.system.OsConstants
+import androidx.activity.result.ActivityResult
+import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.Plugin
+import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -46,6 +55,12 @@ class HttpsRequestArgs {
     var headers: Array<Array<String>> = emptyArray()
     var body: String? = null
     var timeout_ms: Int = 45000
+}
+
+@InvokeArg
+class DeviceAuthArgs {
+    var title: String = "Bob"
+    var subtitle: String = ""
 }
 
 /** Rust-only native bridge; its Rust invoke handler rejects all WebView calls.
@@ -264,5 +279,147 @@ class DeviceVaultPlugin(private val host: Activity) : Plugin(host) {
                 invoke.reject("PROVIDER_HTTP_FAILED")
             }
         }.start()
+    }
+
+    private fun isDeviceSecureAndEnrolled(): Boolean {
+        val km = host.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+        val deviceSecure = km?.isDeviceSecure == true
+        val bioOk = if (Build.VERSION.SDK_INT >= 30) {
+            val bm = host.getSystemService(BiometricManager::class.java)
+            bm?.canAuthenticate(
+                BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                    BiometricManager.Authenticators.BIOMETRIC_WEAK or
+                    BiometricManager.Authenticators.DEVICE_CREDENTIAL
+            ) == BiometricManager.BIOMETRIC_SUCCESS
+        } else {
+            false
+        }
+        return deviceSecure || bioOk
+    }
+
+    @Command
+    fun checkDeviceAuth(invoke: Invoke) {
+        try {
+            val enrolled = isDeviceSecureAndEnrolled()
+            invoke.resolve(JSObject().apply {
+                put("supported", true)
+                put("enrolled", enrolled)
+            })
+        } catch (_: Exception) {
+            invoke.resolve(JSObject().apply {
+                put("supported", true)
+                put("enrolled", false)
+            })
+        }
+    }
+
+    @Command
+    fun authenticateDeviceOwner(invoke: Invoke) {
+        val args = try {
+            invoke.parseArgs(DeviceAuthArgs::class.java)
+        } catch (_: Exception) {
+            DeviceAuthArgs()
+        }
+        val cleanTitle = args.title.ifBlank { "Bob" }
+        val cleanSubtitle = args.subtitle.trim()
+
+        if (!isDeviceSecureAndEnrolled()) {
+            invoke.resolve(JSObject().apply {
+                put("authenticated", false)
+                put("status", "not_enrolled")
+            })
+            return
+        }
+
+        if (Build.VERSION.SDK_INT >= 29) {
+            host.runOnUiThread {
+                val settled = AtomicBoolean(false)
+                try {
+                    val builder = BiometricPrompt.Builder(host)
+                        .setTitle(cleanTitle)
+                    if (cleanSubtitle.isNotEmpty()) {
+                        builder.setSubtitle(cleanSubtitle)
+                    }
+                    if (Build.VERSION.SDK_INT >= 30) {
+                        builder.setAllowedAuthenticators(
+                            BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                                BiometricManager.Authenticators.BIOMETRIC_WEAK or
+                                BiometricManager.Authenticators.DEVICE_CREDENTIAL
+                        )
+                    } else {
+                        @Suppress("DEPRECATION")
+                        builder.setDeviceCredentialAllowed(true)
+                    }
+                    val callback = object : BiometricPrompt.AuthenticationCallback() {
+                        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                            if (settled.compareAndSet(false, true)) {
+                                invoke.resolve(JSObject().apply {
+                                    put("authenticated", true)
+                                    put("status", "ok")
+                                })
+                            }
+                        }
+
+                        override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                            if (settled.compareAndSet(false, true)) {
+                                val mapped = when (errorCode) {
+                                    BiometricPrompt.BIOMETRIC_ERROR_CANCELED,
+                                    BiometricPrompt.BIOMETRIC_ERROR_USER_CANCELED -> "cancelled"
+                                    BiometricPrompt.BIOMETRIC_ERROR_NO_BIOMETRICS,
+                                    14 -> "not_enrolled"
+                                    else -> "failed"
+                                }
+                                invoke.resolve(JSObject().apply {
+                                    put("authenticated", false)
+                                    put("status", mapped)
+                                })
+                            }
+                        }
+                    }
+                    builder.build().authenticate(
+                        CancellationSignal(),
+                        host.mainExecutor,
+                        callback
+                    )
+                } catch (_: Exception) {
+                    if (settled.compareAndSet(false, true)) {
+                        launchConfirmCredentialIntent(invoke, cleanTitle, cleanSubtitle)
+                    }
+                }
+            }
+            return
+        }
+
+        launchConfirmCredentialIntent(invoke, cleanTitle, cleanSubtitle)
+    }
+
+    private fun launchConfirmCredentialIntent(invoke: Invoke, title: String, subtitle: String) {
+        try {
+            val km = host.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+            @Suppress("DEPRECATION")
+            val intent: Intent? = km?.createConfirmDeviceCredentialIntent(title, subtitle.ifEmpty { null })
+            if (intent == null) {
+                invoke.resolve(JSObject().apply {
+                    put("authenticated", false)
+                    put("status", "not_enrolled")
+                })
+                return
+            }
+            startActivityForResult(invoke, intent, "deviceCredentialResult")
+        } catch (_: Exception) {
+            invoke.resolve(JSObject().apply {
+                put("authenticated", false)
+                put("status", "failed")
+            })
+        }
+    }
+
+    @ActivityCallback
+    fun deviceCredentialResult(invoke: Invoke, result: ActivityResult) {
+        val ok = result.resultCode == Activity.RESULT_OK
+        invoke.resolve(JSObject().apply {
+            put("authenticated", ok)
+            put("status", if (ok) "ok" else "cancelled")
+        })
     }
 }

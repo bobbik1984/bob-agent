@@ -39,6 +39,21 @@ pub(crate) struct AndroidHttpResponse {
     pub status: u16,
     pub body: String,
 }
+#[derive(Deserialize)]
+pub(crate) struct DeviceAuthCapability {
+    pub supported: bool,
+    pub enrolled: bool,
+}
+#[derive(Serialize)]
+struct DeviceAuthRequest {
+    title: String,
+    subtitle: String,
+}
+#[derive(Deserialize)]
+pub(crate) struct DeviceAuthOutcome {
+    pub authenticated: bool,
+    pub status: String,
+}
 
 pub(crate) fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("bob-device-vault")
@@ -164,4 +179,29 @@ pub(crate) async fn https_request<R: Runtime>(
         .run_mobile_plugin_async("httpsRequest", req)
         .await
         .map_err(|_| "PROVIDER_HTTP_FAILED")
+}
+
+pub(crate) async fn check_device_auth<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<DeviceAuthCapability, &'static str> {
+    let handle = app.state::<AndroidVault<R>>().0.clone();
+    handle
+        .run_mobile_plugin_async("checkDeviceAuth", serde_json::json!({}))
+        .await
+        .map_err(|_| "SECURITY_LOCK_UNAVAILABLE")
+}
+
+pub(crate) async fn authenticate_device_owner<R: Runtime>(
+    app: &AppHandle<R>,
+    title: String,
+    subtitle: String,
+) -> Result<DeviceAuthOutcome, &'static str> {
+    let handle = app.state::<AndroidVault<R>>().0.clone();
+    handle
+        .run_mobile_plugin_async(
+            "authenticateDeviceOwner",
+            DeviceAuthRequest { title, subtitle },
+        )
+        .await
+        .map_err(|_| "SECURITY_LOCK_AUTH_FAILED")
 }

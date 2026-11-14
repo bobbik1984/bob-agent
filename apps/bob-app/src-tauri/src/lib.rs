@@ -14,6 +14,7 @@ use home_link::{app_home_sync, HomeLinkState};
 #[cfg(target_os = "android")]
 mod android_vault;
 mod device_vault;
+mod security_lock;
 mod runner;
 mod runtime_commands;
 use bob_kernel::app::{AppMessage, AppReadiness, LocalApp};
@@ -1079,6 +1080,7 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
         .manage(RunnerState::default())
         .manage(HomeLinkState::default())
         .manage(pairing_commands::PairingState::default())
+        .manage(security_lock::SecurityLockState::default())
         .invoke_handler(tauri::generate_handler![
             pairing_commands::app_pairing_device_code,
             pairing_commands::app_pairing_home_invite,
@@ -1096,6 +1098,9 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             pairing_commands::app_pairing_capabilities,
             pairing_commands::app_pairing_qr_create,
             pairing_commands::app_pairing_qr_propose,
+            security_lock::app_security_lock_status,
+            security_lock::app_security_lock_set,
+            security_lock::app_security_lock_unlock,
             app_home_sync,
             app_bootstrap,
             app_accept,
@@ -1157,6 +1162,8 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             direct_llm::app_dsh_prompt,
             direct_llm::app_remote_node_save,
             direct_llm::app_remote_node_delete,
+            direct_llm::app_node_discover,
+            direct_llm::app_node_connect,
             direct_llm::app_registry_save,
             direct_llm::app_model_visibility_set,
             direct_llm::app_models_discover,

@@ -4588,3 +4588,90 @@ pub(crate) async fn app_native_permission<R: Runtime>(host: AppHandle<R>, connec
  if (!session_id.starts_with("agy:") && !session_id.starts_with("claude-jsonl:") && !session_id.starts_with("codex:")) || request_id.is_empty() || request_id.len()>200 || permission_id.is_empty() || permission_id.len()>128 || option_id.as_ref().is_some_and(|x|x.len()>128) {return Err("HARNESS_APPROVAL_INVALID")}
  native_dsh(host,connection_id,"permission",session_id,json!({"permissionId":permission_id,"optionId":option_id}).to_string(),request_id,None).await
 }
+
+#[tauri::command]
+pub(crate) async fn app_node_discover(address: String) -> Result<Value, &'static str> {
+ tauri::async_runtime::spawn_blocking(move || bob_runtime::node_pairing::discover_remote_node(&address))
+  .await
+  .map_err(|_| "PAIRING_REQUEST_FAILED")?
+}
+
+#[tauri::command]
+pub(crate) async fn app_node_connect<R: Runtime>(
+ host: AppHandle<R>,
+ state: State<'_, AppState>,
+ address: Option<String>,
+ base_url: Option<String>,
+ label: Option<String>,
+ password: Option<String>,
+ pairing_code: Option<String>,
+ token: Option<String>,
+ qr_code: Option<String>,
+) -> Result<Value, &'static str> {
+ let at_ms = now()?;
+ let local_topo = build_local_topology_payload(&host, &state).await?;
+ let args = json!({
+  "address": address,
+  "baseUrl": base_url,
+  "label": label,
+  "password": password,
+  "pairingCode": pairing_code,
+  "token": token,
+  "qrCode": qr_code,
+ });
+ let device_name = if cfg!(target_os = "android") {
+  "Bob Mobile"
+ } else {
+  "Bob Desktop"
+ };
+ let connected = tauri::async_runtime::spawn_blocking(move || {
+  bob_runtime::node_pairing::connect_remote_node(&args, device_name, &local_topo, at_ms)
+ })
+ .await
+ .map_err(|_| "PAIRING_REQUEST_FAILED")??;
+
+ let node_id = connected["nodeId"]
+  .as_str()
+  .ok_or("NODE_CONNECT_FAILED")?
+  .to_owned();
+ let node_label = connected["label"].as_str().unwrap_or(&node_id).to_owned();
+ let node_base_url = connected["baseUrl"]
+  .as_str()
+  .ok_or("NODE_CONNECT_FAILED")?
+  .to_owned();
+ let role = connected["role"].as_str().unwrap_or("node").to_owned();
+ let access_token = connected["accessToken"]
+  .as_str()
+  .ok_or("NODE_CONNECT_FAILED")?
+  .to_owned();
+
+ app_remote_node_save(
+  host.clone(),
+  state.clone(),
+  Some(node_id.clone()),
+  Some(node_label.clone()),
+  node_base_url.clone(),
+  Some(access_token),
+  Some(false),
+  Some(role.clone()),
+  Some(true),
+  None,
+ )
+ .await?;
+
+ if let Some(synced) = connected
+  .get("syncedTopology")
+  .filter(|v| v.as_object().is_some_and(|m| !m.is_empty()))
+ {
+  let _ = apply_synced_topology_payload(&host, &state, synced, Some(&node_id)).await;
+ }
+
+ Ok(json!({
+  "connected": true,
+  "nodeId": node_id,
+  "label": node_label,
+  "baseUrl": node_base_url,
+  "role": role,
+  "mobileQr": connected.get("mobileQr").cloned().unwrap_or(Value::Null),
+ }))
+}

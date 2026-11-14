@@ -16,6 +16,40 @@ fn random() -> Result<String> {
         .map_err(|_| "NODE_RANDOM_FAILED")?;
     Ok(b.iter().map(|x| format!("{x:02x}")).collect())
 }
+const BASE62: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+pub fn random_base62(len: usize) -> Result<String> {
+    let rng = SystemRandom::new();
+    let mut out = String::with_capacity(len);
+    let mut buf = [0u8; 64];
+    while out.len() < len {
+        rng.fill(&mut buf).map_err(|_| "NODE_RANDOM_FAILED")?;
+        for &byte in &buf {
+            if byte < 248 {
+                out.push(BASE62[(byte % 62) as usize] as char);
+                if out.len() == len {
+                    break;
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+pub fn create_compact_invitation(dir: &Path, now: i64) -> Result<Value> {
+    let c = open(dir)?;
+    let id = random_base62(10)?;
+    let secret = random_base62(22)?;
+    let expires = now + 600_000;
+    c.execute("DELETE FROM invitations WHERE expires<=?1 OR used=1", [now])
+        .map_err(|_| "NODE_ACCESS_STORE")?;
+    c.execute(
+        "INSERT INTO invitations VALUES(?1,?2,?3,0)",
+        params![id, digest(&secret), expires],
+    )
+    .map_err(|_| "NODE_ACCESS_STORE")?;
+    Ok(
+        json!({"pairing_id":id,"user_code":secret,"expires_at":expires,"node_id":identity(dir)?}),
+    )
+}
 fn digest(s: &str) -> String {
     format!("{:x}", Sha256::digest(s.as_bytes()))
 }
@@ -168,7 +202,7 @@ pub fn route(
             .ok_or("NODE_INVITATION_INVALID")?;
         let code = body["code"]
             .as_str()
-            .filter(|s| s.len() == 64)
+            .filter(|s| (20..=128).contains(&s.len()))
             .ok_or("NODE_INVITATION_INVALID")?;
         let tx = c
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -225,6 +259,9 @@ pub fn route(
         return Ok(json!({"credentials":items}));
     }
     if path == "invitations" {
+        if body.get("compact").and_then(Value::as_bool) == Some(true) {
+            return create_compact_invitation(dir, now);
+        }
         let c = open(dir)?;
         let id = random()?;
         let secret = random()?;
@@ -301,5 +338,20 @@ mod tests {
             route(d.path(), "POST", "exchange", None, &body, 10).unwrap_err(),
             "NODE_RATE_LIMITED"
         );
+    }
+
+    #[test]
+    fn compact_invitation_uses_high_entropy_short_code_and_exchanges_once() {
+        let d = tempfile::tempdir().unwrap();
+        initialize(d.path(), "test-password-long").unwrap();
+        let inv = create_compact_invitation(d.path(), 1000).unwrap();
+        let pid = inv["pairing_id"].as_str().unwrap();
+        let code = inv["user_code"].as_str().unwrap();
+        assert_eq!(pid.len(), 10);
+        assert_eq!(code.len(), 22);
+        let body = json!({"pairing_id": pid, "code": code, "device_name": "Phone"});
+        let tok = route(d.path(), "POST", "exchange", None, &body, 2000).unwrap();
+        assert!(!tok["access_token"].as_str().unwrap().is_empty());
+        assert!(route(d.path(), "POST", "exchange", None, &body, 2001).is_err());
     }
 }

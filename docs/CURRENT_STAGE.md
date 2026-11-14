@@ -1,6 +1,10 @@
 # Bob — Current Stage（1.0.1 施工与交接合同）
 
 > **最新交接入口（2026-11-14）**：`WP-J1`～`WP-J6` 核心底座与生产端升级已合入主干（当前代码基线 `431b63d`）；后续任何 Agent 接手系统性进化任务，请直接跳转本文件末尾 **「5. 后 WP-J6 系统性进化施工合同（BOB-D-016：WP-E1 → WP-E4）」** 按序领取工作包。
+> - **统一跨端认证、手机端可选生物安全锁与纯终端紧凑二维码（2026-11-14）**：
+>   - **手机端首次安装可选系统安全锁（Android）**：新增 `DeviceVaultPlugin.kt`（`checkDeviceAuth` / `authenticateDeviceOwner` / `deviceCredentialResult`）、`stage-android-vault.py` 权限注入、`security_lock.rs`（`app_security_lock_status/set/unlock`，原子落盘 `security_lock.json`）、`useMobileSecurityLock.mjs` 与 `<MobileSecurityGate />`（含 `SettingsView.vue` 外观页开关）。首次打开确认是否启用系统面部/指纹/锁屏认证；跳过后直接进入；Web 端与 PC 桌面端永不拦截。
+>   - **纯命令行紧凑终端二维码与密码学随机强化（`bob-node`）**：新增 `bob-node pair` / `qr` / `--pair-qr` / `--pair-only` 单次 CLI 指令及服务启动紧凑二维码打印（`bob://pair?...` ≤ 85 字节，Version 4/5 终端半块字符宽 ≤ 45 列，80×24 终端不换行；兼容 `node_access.sqlite` 与普通在线节点，自动优先走本机运行中守护进程），全链路配对码与令牌切换至 `ring::rand::SystemRandom` CSPRNG，`/api/node/v1/invitations` 支持 `"compact": true`。
+>   - **统一 Web/PC/手机设备添加（IP/域名 + 扫码）与双向拓扑同步**：后端新增 `app_node_discover` 与 `app_node_connect`（`bob-runtime::node_pairing` + `bob-node` + `src-tauri`），穿透公网 HTTPS、Tailscale (`100.64.0.0/10`) 与局域网 HTTP 避免浏览器 Mixed-Content / CORS 限制；`node-connection.mjs`、`QrScanModal.vue`、`qr-image-decoder.mjs`（支持 `BarcodeDetector` 与纯 JS 正常/深色终端反相截图解码）、`NodeConnect.vue` 与 `HomeConnection.vue` 同时提供“展示二维码”与“扫码/输地址连接”；Web 端继续完整保留 Caddy `common_auth` 原密码直登。
 > - 恢复原密码直登体验并解除 `6` 位配对码开箱劫持（`431b63d`）：移除 `App.vue` 启动期对 `<OnboardingWizard>` / `fetchOnboardingStatus` 的挂载拦截（保持网关原生账号密码认证直入工作台）；`crates/bob-node/src/onboarding.rs` 增加 `BOB_DISABLE_ONBOARDING` 与 `is_established_external_auth_node` 保护并拒绝在已启用外部网关认证的节点调用 `/api/node/v1/onboarding/claim` 写入 `node_access.sqlite`；修复 `ModelHubRuntime::has_any_provider_key`（`crates/bob-runtime/src/lib.rs`）只读不落盘副作用。
 > - 新建项目/新对话毛玻璃居中弹窗（`<Teleport to="body">` + `backdrop-filter: blur(14px)`），级联顺序改为「① 关联项目与名称 → ② 选择运行设备 → ③ 选择该设备实际可用工具 → ④ 工作目录与首条指令」。
 > - 右上角额度追踪自动增量打点（`crates/bob-node/src/quota_sync.rs` 配合环境变量 `BOB_QUOTA_CHECKPOINT_URL` / `BOB_QUOTA_CHECKPOINT_TOKEN`，在 `app_model_hub_get` 与拓扑同步时自动去重推送周额度快照并支持周周期重置轮转）。

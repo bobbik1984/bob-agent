@@ -6,10 +6,13 @@ import { kernelBridge } from './native-bridge.mjs';
 import { isBobNodeRuntime } from './http-bridge.mjs';
 import PairingQr from './PairingQr.vue';
 import ManualPairing from './ManualPairing.vue';
+import QrScanModal from './components/QrScanModal.vue';
+import { extractPairingCode } from './qr-image-decoder.mjs';
 import {deviceGroups} from './device-paths.mjs';
 import {checkPath,pathState,pathHealth} from './path-health.mjs';
 import NodeConnect from './NodeConnect.vue';
 const addNode = ref(false);
+const webScannerOpen = ref(false);
 import { createPairingScanController } from './pairing-scan-controller.mjs';
 
 const { t } = useI18n();
@@ -112,7 +115,6 @@ const keys = {
 };
 
 async function completePairing() {
-  if (!capabilities.value?.can_scan) return;
   if (poll) clearInterval(poll);
   poll = null;
   await loadConnections();
@@ -134,7 +136,7 @@ async function refresh() {
     if (error.value === lastStatusError) error.value = '';
     lastStatusError = '';
     if (
-      capabilities.value?.can_scan &&
+      (capabilities.value?.can_scan || status.value?.role === 'replica') &&
       ['pending', 'unknown'].includes(status.value?.state)
     ) {
       try {
@@ -226,6 +228,31 @@ async function createQr() {
 
 async function scan() {
   await act(() => scanner.scan());
+}
+
+async function handleQrDetected(rawCode) {
+  const uri = extractPairingCode(rawCode) || String(rawCode || '').trim();
+  if (!uri) {
+    error.value = 'PAIRING_CODE_INVALID';
+    return;
+  }
+  webScannerOpen.value = false;
+  await act(async () => {
+    if (uri.startsWith('bob://pair?')) {
+      await kernelBridge.nodeConnect({ qrCode: uri });
+      await loadConnections();
+      emit('connected');
+      return { ...(status.value || {}), state: 'connected' };
+    }
+    const proposed = await kernelBridge.pairingQrPropose(uri);
+    status.value = proposed;
+    const finished = await kernelBridge.pairingFinish();
+    if (finished?.state === 'connected') {
+      scanPhase.value = 'connected';
+      await completePairing();
+    }
+    return finished;
+  });
 }
 
 async function reset() {
@@ -343,6 +370,15 @@ onUnmounted(() => {
           >
             {{ t('qrShow') }}
           </button>
+          <button
+            v-if="!invitation"
+            type="button"
+            class="secondary-action-btn"
+            :disabled="busy"
+            @click="capabilities?.can_scan ? scan() : (webScannerOpen = !webScannerOpen)"
+          >
+            {{ t('qrScanOtherDevice') }}
+          </button>
         </div>
         <PairingQr
           v-if="invitation"
@@ -350,6 +386,11 @@ onUnmounted(() => {
           :expires-at="invitation.expires_at"
           @expired="invitation = null"
           @error="error = 'PAIRING_QR_RENDER_FAILED'"
+        />
+        <QrScanModal
+          v-if="webScannerOpen"
+          @close="webScannerOpen = false"
+          @detected="handleQrDetected"
         />
         <p
           v-if="['confirmed', 'consumed', 'connected', 'enabled'].includes(status?.state)"

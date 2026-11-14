@@ -28,6 +28,7 @@ const {
   switchSettingsTab,
   devicePanel,
   deviceCapabilities,
+  securityLock,
   onlineState,
   handleOnlineUpdateOrigin,
   handleOnlineSaveNode,
@@ -1021,6 +1022,30 @@ async function saveMonthlySpendCap(val) {
                 </div>
               </div>
             </div>
+
+            <div v-if="securityLock?.state?.value?.supported" class="settings-card security-lock-setting-card">
+              <div class="settings-card-info">
+                <span class="settings-card-title">{{ t('securityLockSettingsTitle') }}</span>
+                <p class="view-card-desc">{{ t('securityLockSettingsDesc') }}</p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                class="security-lock-switch"
+                :class="{ on: securityLock.state.value.enabled }"
+                :aria-checked="securityLock.state.value.enabled"
+                :aria-label="t('securityLockSettingsTitle')"
+                :disabled="securityLock.busy.value"
+                @click="
+                  securityLock.toggleInSettings(!securityLock.state.value.enabled, {
+                    title: t('securityLockPromptTitle'),
+                    subtitle: t('securityLockPromptSubtitle'),
+                  })
+                "
+              >
+                <span class="security-lock-switch-thumb" aria-hidden="true"></span>
+              </button>
+            </div>
           </section>
         </div>
 
@@ -1366,5 +1391,43 @@ async function saveMonthlySpendCap(val) {
 .current-spend-bar {
   font-size: var(--text-xs);
   color: var(--text-secondary);
+}
+
+.security-lock-setting-card {
+  margin-top: var(--gap-sm);
+}
+
+.security-lock-switch {
+  position: relative;
+  width: 2.75rem;
+  height: 1.55rem;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: var(--bg-secondary);
+  padding: 0;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.security-lock-switch.on {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.security-lock-switch-thumb {
+  position: absolute;
+  top: 0.18rem;
+  left: 0.18rem;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 9999px;
+  background: var(--text-primary);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.security-lock-switch.on .security-lock-switch-thumb {
+  transform: translateX(1.18rem);
+  background: var(--text-on-accent);
 }
 </style>

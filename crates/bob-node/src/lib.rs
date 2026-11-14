@@ -235,6 +235,183 @@ impl NodeContext {
     }
 }
 
+fn csprng_digits_6() -> String {
+    use ring::rand::{SecureRandom, SystemRandom};
+    let rng = SystemRandom::new();
+    let mut buf = [0u8; 4];
+    loop {
+        if rng.fill(&mut buf).is_err() {
+            return format!("{}", (now_millis() as u64 % 900_000) + 100_000);
+        }
+        let val = u32::from_le_bytes(buf);
+        if val < (u32::MAX / 900_000) * 900_000 {
+            return format!("{}", (val % 900_000) + 100_000);
+        }
+    }
+}
+
+pub fn resolve_public_url(public_url: Option<&str>, bound_addr: Option<SocketAddr>) -> String {
+    if let Some(explicit) = public_url
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.trim_end_matches('/').to_owned())
+    {
+        return explicit;
+    }
+    if let Ok(env_url) = std::env::var("BOB_NODE_PUBLIC_URL") {
+        let trimmed = env_url.trim().trim_end_matches('/');
+        if !trimmed.is_empty() {
+            return trimmed.to_owned();
+        }
+    }
+    if let Ok(env_url) = std::env::var("BOB_PUBLIC_URL") {
+        let trimmed = env_url.trim().trim_end_matches('/');
+        if !trimmed.is_empty() {
+            return trimmed.to_owned();
+        }
+    }
+    if let Ok(domain) = std::env::var("BOB_PUBLIC_DOMAIN") {
+        let trimmed = domain.trim().trim_end_matches('/');
+        if !trimmed.is_empty() {
+            return if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+                trimmed.to_owned()
+            } else {
+                format!("https://{trimmed}")
+            };
+        }
+    }
+    let port = bound_addr
+        .map(|a| a.port())
+        .or_else(|| {
+            std::env::var("BOB_NODE_BIND")
+                .ok()
+                .and_then(|b| b.rsplit_once(':').and_then(|(_, p)| p.parse::<u16>().ok()))
+        })
+        .unwrap_or(53020);
+    let ip = match bound_addr {
+        Some(addr) if !addr.ip().is_loopback() && !addr.ip().is_unspecified() => {
+            addr.ip().to_string()
+        }
+        _ => bob_runtime::node_pairing::detect_lan_or_tailscale_ip(),
+    };
+    format!("http://{ip}:{port}")
+}
+
+pub fn resolve_node_label(label: Option<&str>, clean_url: &str) -> String {
+    if let Some(explicit) = label.map(str::trim).filter(|s| !s.is_empty()) {
+        return explicit.to_owned();
+    }
+    if let Ok(env_label) = std::env::var("BOB_NODE_LABEL") {
+        let trimmed = env_label.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_owned();
+        }
+    }
+    let from_url = bob_runtime::node_pairing::default_label_for_url(clean_url);
+    if !from_url.is_empty()
+        && !from_url.starts_with("127.")
+        && !from_url.starts_with("localhost")
+        && !from_url.starts_with("0.0.0.0")
+    {
+        return from_url;
+    }
+    std::env::var("HOSTNAME")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| std::env::var("COMPUTERNAME").ok().filter(|s| !s.trim().is_empty()))
+        .unwrap_or_else(|| "Bob Node".to_owned())
+}
+
+pub fn issue_node_access_cli_pairing(
+    data_dir: &std::path::Path,
+    clean_url: &str,
+    label: Option<&str>,
+) -> Result<bob_runtime::node_pairing::NodePairingInvitation, &'static str> {
+    let clean_url = clean_url.trim().trim_end_matches('/').to_owned();
+    let inv = node_access::create_compact_invitation(data_dir, now_millis())?;
+    let pairing_id = inv["pairing_id"]
+        .as_str()
+        .ok_or("NODE_ACCESS_STORE")?
+        .to_owned();
+    let user_code = inv["user_code"]
+        .as_str()
+        .ok_or("NODE_ACCESS_STORE")?
+        .to_owned();
+    let expires_at = inv["expires_at"].as_i64().unwrap_or(now_millis() + 600_000);
+    let node_id = inv["node_id"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| bob_runtime::node_pairing::compute_node_id(&clean_url));
+    let resolved_label = resolve_node_label(label, &clean_url);
+    let harnesses = discover_local_cli_harnesses(data_dir);
+    Ok(bob_runtime::node_pairing::NodePairingInvitation {
+        v: 1,
+        role: "node".to_owned(),
+        node_id,
+        label: resolved_label,
+        base_url: clean_url,
+        pairing_id,
+        user_code,
+        expires_at,
+        harnesses,
+    })
+}
+
+pub fn issue_offline_online_pairing(
+    data_dir: &std::path::Path,
+    clean_url: &str,
+    label: Option<&str>,
+) -> Result<bob_runtime::node_pairing::NodePairingInvitation, &'static str> {
+    let clean_url = clean_url.trim().trim_end_matches('/').to_owned();
+    let at = now_millis();
+    let pairing_id = format!(
+        "qr_{}",
+        node_access::random_base62(8).unwrap_or_else(|_| format!("{at}"))
+    );
+    let user_code = node_access::random_base62(16).unwrap_or_else(|_| csprng_digits_6());
+    let expires_at = at + 600_000;
+    let resolved_label = resolve_node_label(label, &clean_url);
+    let _ = std::fs::create_dir_all(data_dir);
+    let online_store_path = data_dir.join("online_work_store.json");
+    let mut online = load_online_state(&online_store_path);
+    online.pairings.insert(
+        pairing_id.clone(),
+        OnlinePairingSession {
+            pairing_id: pairing_id.clone(),
+            user_code: user_code.clone(),
+            device_name: resolved_label.clone(),
+            created_at: at,
+            expires_at,
+            exchanged_token: None,
+        },
+    );
+    save_online_state(&online_store_path, &online);
+    Ok(bob_runtime::node_pairing::NodePairingInvitation {
+        v: 1,
+        role: "node".to_owned(),
+        node_id: bob_runtime::node_pairing::compute_node_id(&clean_url),
+        label: resolved_label,
+        base_url: clean_url,
+        pairing_id,
+        user_code,
+        expires_at,
+        harnesses: discover_local_cli_harnesses(data_dir),
+    })
+}
+
+fn discover_local_cli_harnesses(data_dir: &std::path::Path) -> Vec<String> {
+    bob_runtime::agy_directory::ensure_local_grant_registered(data_dir, "local")
+        .and_then(|g| g.get("harnesses").cloned())
+        .and_then(|h| h.as_array().cloned())
+        .map(|arr| {
+            arr.into_iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) -> Result<Value, &'static str> {
     let at = now_millis();
     let data_dir = &ctx.runtime.data_dir;
@@ -1320,9 +1497,11 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                     "node"
                 })
                 .to_owned();
-            let pairing_id = format!("qr_{at}_{}", ctx.online.pairings.len() + 1);
-            let code_num = ((at as u64) % 900_000) + 100_000;
-            let user_code = format!("{code_num}");
+            let pairing_id = format!(
+                "qr_{}",
+                node_access::random_base62(8).unwrap_or_else(|_| format!("{at}_{}", ctx.online.pairings.len() + 1))
+            );
+            let user_code = node_access::random_base62(16).unwrap_or_else(|_| csprng_digits_6());
             let expires_at = at + 600_000;
             ctx.online.pairings.insert(
                 pairing_id.clone(),
@@ -1348,7 +1527,7 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 expires_at,
                 harnesses: Vec::new(),
             };
-            let qr_code = inv.encode_qr_code();
+            let qr_code = inv.encode_compact_qr_code();
             Ok(json!({
                 "code": qr_code,
                 "expires_at": expires_at,
@@ -1360,6 +1539,81 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 "pairing_id": pairing_id,
                 "user_code": user_code,
                 "addresses": [clean_url],
+            }))
+        }
+        "app_security_lock_status" | "app_security_lock_set" | "app_security_lock_unlock" => {
+            Ok(json!({
+                "supported": false,
+                "enrolled": false,
+                "decided": true,
+                "enabled": false,
+                "unlocked": true,
+            }))
+        }
+        "app_node_discover" => {
+            let address = args
+                .get("address")
+                .or_else(|| args.get("baseUrl"))
+                .and_then(Value::as_str)
+                .ok_or("NODE_ADDRESS_INVALID")?;
+            bob_runtime::node_pairing::discover_remote_node(address)
+        }
+        "app_node_connect" => {
+            let local_topo = bob_runtime::node_pairing::export_local_topology_with_app(
+                &ctx.runtime.data_dir,
+                Some(&ctx.app),
+                &ctx.runtime,
+                true,
+            );
+            let device_name = std::env::var("BOB_NODE_LABEL")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "Bob Operator".to_owned());
+            let connected = bob_runtime::node_pairing::connect_remote_node(
+                args,
+                &device_name,
+                &local_topo,
+                at,
+            )?;
+            let node_id = connected["nodeId"]
+                .as_str()
+                .ok_or("NODE_CONNECT_FAILED")?
+                .to_owned();
+            let label = connected["label"].as_str().unwrap_or(&node_id).to_owned();
+            let base_url = connected["baseUrl"]
+                .as_str()
+                .ok_or("NODE_CONNECT_FAILED")?
+                .to_owned();
+            let role = connected["role"].as_str().unwrap_or("node").to_owned();
+            let token = connected["accessToken"]
+                .as_str()
+                .ok_or("NODE_CONNECT_FAILED")?
+                .to_owned();
+            let _ = ctx.runtime.save_remote_node(
+                &mut ctx.app,
+                Some(node_id.clone()),
+                &label,
+                &base_url,
+                Some(&token),
+                false,
+                Some(&role),
+                true,
+            )?;
+            if let Some(synced) = connected.get("syncedTopology").filter(|v| v.is_object() && !v.as_object().unwrap().is_empty()) {
+                let _ = bob_runtime::node_pairing::merge_topology(
+                    &ctx.runtime.data_dir,
+                    &mut ctx.app,
+                    &ctx.runtime,
+                    synced,
+                );
+            }
+            Ok(json!({
+                "connected": true,
+                "nodeId": node_id,
+                "label": label,
+                "baseUrl": base_url,
+                "role": role,
+                "mobileQr": connected.get("mobileQr").cloned().unwrap_or(Value::Null),
             }))
         }
         "app_pairing_qr_propose" => {
@@ -2200,9 +2454,11 @@ pub fn handle_client_v1_http(
             .and_then(Value::as_str)
             .unwrap_or("Bob Client")
             .to_owned();
-        let pairing_id = format!("pair_{stamp}_{}", ctx.online.pairings.len() + 1);
-        let code_num = ((stamp as u64) % 900_000) + 100_000;
-        let user_code = format!("{code_num}");
+        let pairing_id = format!(
+            "pair_{}",
+            node_access::random_base62(10).unwrap_or_else(|_| format!("{stamp}_{}", ctx.online.pairings.len() + 1))
+        );
+        let user_code = csprng_digits_6();
         let session = OnlinePairingSession {
             pairing_id: pairing_id.clone(),
             user_code: user_code.clone(),
@@ -2234,11 +2490,22 @@ pub fn handle_client_v1_http(
             .and_then(Value::as_str)
             .unwrap_or("")
             .trim();
-        let found = ctx
-            .online
-            .pairings
-            .values_mut()
-            .find(|p| p.user_code == code || path.contains(&p.pairing_id));
+        let target_pid = path
+            .strip_prefix("/api/client/v1/pairings/")
+            .and_then(|s| s.strip_suffix("/exchange"));
+        let has_verifier = parsed
+            .get("verifier")
+            .and_then(Value::as_str)
+            .is_some_and(|s| !s.trim().is_empty());
+        let found = ctx.online.pairings.values_mut().find(|p| {
+            if let Some(pid) = target_pid {
+                p.pairing_id == pid
+                    && ((!code.is_empty() && p.user_code == code)
+                        || (code.is_empty() && has_verifier))
+            } else {
+                !code.is_empty() && p.user_code == code
+            }
+        });
         let Some(session) = found else {
             return (
                 404,
@@ -2251,7 +2518,10 @@ pub fn handle_client_v1_http(
                 json!({ "code": "PAIRING_EXPIRED", "message": "Pairing code expired" }),
             );
         }
-        let raw_token = format!("bob_online_tok_{}_{}", session.pairing_id, stamp);
+        let raw_token = format!(
+            "bob_online_tok_{}",
+            node_access::random_base62(32).unwrap_or_else(|_| format!("{}_{}", session.pairing_id, stamp))
+        );
         let cred_id = format!("cred_{stamp}");
         session.exchanged_token = Some(cred_id.clone());
         let dev_name = session.device_name.clone();
@@ -3638,6 +3908,95 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
             write_json_response(&mut stream, status, &value.to_string());
             return;
         }
+        if command.trim() == "app_node_discover" {
+            drop(guard);
+            let address = args
+                .get("address")
+                .or_else(|| args.get("baseUrl"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let result = bob_runtime::node_pairing::discover_remote_node(address);
+            let (status, value) = match result {
+                Ok(result) => (200, json!({ "ok": true, "result": result })),
+                Err(e) => (400, json!({ "ok": false, "error": e })),
+            };
+            write_json_response(&mut stream, status, &value.to_string());
+            return;
+        }
+        if command.trim() == "app_node_connect" {
+            let at = now_millis();
+            let local_topo = bob_runtime::node_pairing::export_local_topology_with_app(
+                &guard.runtime.data_dir,
+                Some(&guard.app),
+                &guard.runtime,
+                true,
+            );
+            drop(guard);
+            let device_name = std::env::var("BOB_NODE_LABEL")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "Bob Operator".to_owned());
+            let result: Result<Value, &'static str> = (|| {
+                let connected = bob_runtime::node_pairing::connect_remote_node(
+                    &args,
+                    &device_name,
+                    &local_topo,
+                    at,
+                )?;
+                let node_id = connected["nodeId"]
+                    .as_str()
+                    .ok_or("NODE_CONNECT_FAILED")?
+                    .to_owned();
+                let label = connected["label"].as_str().unwrap_or(&node_id).to_owned();
+                let base_url = connected["baseUrl"]
+                    .as_str()
+                    .ok_or("NODE_CONNECT_FAILED")?
+                    .to_owned();
+                let role = connected["role"].as_str().unwrap_or("node").to_owned();
+                let token = connected["accessToken"]
+                    .as_str()
+                    .ok_or("NODE_CONNECT_FAILED")?
+                    .to_owned();
+                let mut guard = state.lock().map_err(|_| "NODE_LOCK_POISONED")?;
+                let ctx: &mut NodeContext = &mut *guard;
+                let data_dir = ctx.runtime.data_dir.clone();
+                let _ = ctx.runtime.save_remote_node(
+                    &mut ctx.app,
+                    Some(node_id.clone()),
+                    &label,
+                    &base_url,
+                    Some(&token),
+                    false,
+                    Some(&role),
+                    true,
+                )?;
+                if let Some(synced) = connected
+                    .get("syncedTopology")
+                    .filter(|v| v.as_object().is_some_and(|m| !m.is_empty()))
+                {
+                    let _ = bob_runtime::node_pairing::merge_topology(
+                        &data_dir,
+                        &mut ctx.app,
+                        &ctx.runtime,
+                        synced,
+                    );
+                }
+                Ok(json!({
+                    "connected": true,
+                    "nodeId": node_id,
+                    "label": label,
+                    "baseUrl": base_url,
+                    "role": role,
+                    "mobileQr": connected.get("mobileQr").cloned().unwrap_or(Value::Null),
+                }))
+            })();
+            let (status, value) = match result {
+                Ok(result) => (200, json!({ "ok": true, "result": result })),
+                Err(e) => (400, json!({ "ok": false, "error": e })),
+            };
+            write_json_response(&mut stream, status, &value.to_string());
+            return;
+        }
         if command.trim() == "app_pairing_qr_propose" {
             let at = now_millis();
             let raw_code = args
@@ -3832,6 +4191,19 @@ impl RunningNodeServer {
         onboarding::peek_bootstrap_code(&guard.runtime.data_dir, now_millis())
     }
 
+    pub fn issue_node_access_startup_pairing(
+        &self,
+        public_url: Option<&str>,
+        label: Option<&str>,
+    ) -> Result<bob_runtime::node_pairing::NodePairingInvitation, &'static str> {
+        let data_dir = {
+            let guard = self.state.lock().map_err(|_| "NODE_LOCK_POISONED")?;
+            guard.runtime.data_dir.clone()
+        };
+        let clean_url = resolve_public_url(public_url, Some(self.local_addr));
+        issue_node_access_cli_pairing(&data_dir, &clean_url, label)
+    }
+
     pub fn issue_startup_pairing(
         &self,
         public_url: Option<&str>,
@@ -3853,40 +4225,19 @@ impl RunningNodeServer {
                     .collect()
             })
             .unwrap_or_default();
-        let resolved_url = public_url
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_owned)
-            .or_else(|| std::env::var("BOB_NODE_PUBLIC_URL").ok().filter(|s| !s.trim().is_empty()))
-            .unwrap_or_else(|| {
-                let ip = if self.local_addr.ip().is_loopback()
-                    || self.local_addr.ip().is_unspecified()
-                {
-                    bob_runtime::node_pairing::detect_lan_or_tailscale_ip()
-                } else {
-                    self.local_addr.ip().to_string()
-                };
-                format!("http://{ip}:{}", self.local_addr.port())
-            });
-        let clean_url = resolved_url.trim_end_matches('/').to_owned();
-        let default_host = std::env::var("BOB_NODE_LABEL")
-            .or_else(|_| std::env::var("HOSTNAME"))
-            .or_else(|_| std::env::var("COMPUTERNAME"))
-            .unwrap_or_else(|_| "Bob Node".to_owned());
-        let resolved_label = label
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .unwrap_or(&default_host)
-            .to_owned();
+        let clean_url = resolve_public_url(public_url, Some(self.local_addr));
+        let resolved_label = resolve_node_label(label, &clean_url);
         let role = if ctx.static_dir.is_some() {
             "web_host"
         } else {
             "node"
         };
         let at = now_millis();
-        let pairing_id = format!("qr_boot_{at}");
-        let code_num = ((at as u64) % 900_000) + 100_000;
-        let user_code = format!("{code_num}");
+        let pairing_id = format!(
+            "qr_boot_{}",
+            node_access::random_base62(8).unwrap_or_else(|_| format!("{at}"))
+        );
+        let user_code = node_access::random_base62(16).unwrap_or_else(|_| csprng_digits_6());
         let expires_at = at + 86_400_000; // 24h startup invitation window
         ctx.online.pairings.insert(
             pairing_id.clone(),
@@ -4908,6 +5259,79 @@ mod tests {
         assert!(conv_create["conversation_id"].is_string());
 
         server.shutdown();
+    }
+
+    #[test]
+    fn rpc_node_discover_and_connect_supports_tailscale_http_node_access_and_security_lock_status() {
+        let target_dir = tempfile::tempdir().unwrap();
+        let caller_dir = tempfile::tempdir().unwrap();
+        crate::node_access::initialize(target_dir.path(), "owner-secret-password-123").unwrap();
+        let target_srv = spawn_node_server(BobNodeConfig {
+            bind_addr: "127.0.0.1:0".to_owned(),
+            data_dir: target_dir.path().to_path_buf(),
+            static_dir: None,
+            legacy_db_path: None,
+        })
+        .unwrap();
+        let caller_srv = spawn_node_server(BobNodeConfig {
+            bind_addr: "127.0.0.1:0".to_owned(),
+            data_dir: caller_dir.path().to_path_buf(),
+            static_dir: None,
+            legacy_db_path: None,
+        })
+        .unwrap();
+
+        let (st, lock_res) = http_request(
+            caller_srv.local_addr,
+            "POST",
+            "/api/rpc/app_security_lock_status",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(lock_res["result"]["supported"], json!(false));
+        assert_eq!(lock_res["result"]["unlocked"], json!(true));
+
+        let target_url = format!("http://{}", target_srv.local_addr);
+        let (st, disc_res) = http_request(
+            caller_srv.local_addr,
+            "POST",
+            "/api/rpc/app_node_discover",
+            None,
+            Some(&json!({ "address": target_url }).to_string()),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(disc_res["result"]["authMode"], json!("owner_password"));
+
+        let (st, conn_res) = http_request(
+            caller_srv.local_addr,
+            "POST",
+            "/api/rpc/app_node_connect",
+            None,
+            Some(&json!({
+                "address": target_url,
+                "label": "Remote VPS",
+                "password": "owner-secret-password-123"
+            }).to_string()),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(conn_res["result"]["connected"], json!(true));
+        assert!(conn_res["result"].get("accessToken").is_none());
+        let mobile_qr = conn_res["result"]["mobileQr"]["code"].as_str().unwrap();
+        assert!(mobile_qr.starts_with("bob://pair?"));
+        assert!(mobile_qr.len() <= 90);
+
+        let (_, qr_res) = http_request(
+            caller_srv.local_addr,
+            "POST",
+            "/api/rpc/app_pairing_qr_create",
+            None,
+            Some(&json!({ "origin": "https://bob-online.bobbik.org" }).to_string()),
+        );
+        assert!(qr_res["result"]["code"].as_str().unwrap().len() <= 85);
+
+        caller_srv.shutdown();
+        target_srv.shutdown();
     }
 }
 

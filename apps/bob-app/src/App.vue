@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, provide } from 'vue';
+import { onMounted, onUnmounted, provide, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import ScheduleView from './views/ScheduleView.vue';
 import WorkView from './views/WorkView.vue';
@@ -9,6 +9,7 @@ import NavigationDrawer from './components/NavigationDrawer.vue';
 import PrimaryChatPane from './components/PrimaryChatPane.vue';
 import QuickNoteOverlay from './components/QuickNoteOverlay.vue';
 import SidebarCreateForm from './components/SidebarCreateForm.vue';
+import MobileSecurityGate from './components/MobileSecurityGate.vue';
 import { bindViewport } from './viewport.mjs';
 import { getProviderLogo } from './layout-mode.mjs';
 import brandLogo from './assets/bob-logo.svg';
@@ -22,6 +23,7 @@ import InboxView from './views/InboxView.vue';
 import DesktopRightSidebar from './components/DesktopRightSidebar.vue';
 import { useInbox } from './composables/useInbox.mjs';
 import { useJarvisHome } from './composables/useJarvisHome.mjs';
+import { useMobileSecurityLock } from './composables/useMobileSecurityLock.mjs';
 
 const { t, locale } = useI18n();
 
@@ -134,6 +136,9 @@ shell.inbox = inbox;
 const jarvisHome = useJarvisHome(shell);
 shell.jarvisHome = jarvisHome;
 
+const securityLock = useMobileSecurityLock(kernelBridge);
+shell.securityLock = securityLock;
+
 provide('bobAppShell', shell);
 
 let releaseViewport = () => {};
@@ -182,12 +187,25 @@ onMounted(async () => {
   document.addEventListener('pointerdown', dismissConversationMenu);
   document.addEventListener('keydown', handleGlobalKeydown);
   document.addEventListener('visibilitychange', handleVisibilityChange);
-  await startup();
-  await jarvisHome.refreshJarvisState(sessionId.value);
-  if (available) {
-    deviceCapabilities.value = await kernelBridge.pairingCapabilities().catch(() => null);
+  await securityLock.refresh();
+  const bootAfterUnlock = async () => {
+    await startup();
+    await jarvisHome.refreshJarvisState(sessionId.value);
+    if (available) {
+      deviceCapabilities.value = await kernelBridge.pairingCapabilities().catch(() => null);
+    }
+    startPolling();
+  };
+  if (securityLock.isBlocked.value) {
+    const stopWatch = watch(securityLock.isBlocked, blocked => {
+      if (!blocked) {
+        stopWatch();
+        void bootAfterUnlock();
+      }
+    });
+    return;
   }
-  startPolling();
+  await bootAfterUnlock();
 });
 
 onUnmounted(() => {
@@ -213,7 +231,7 @@ onUnmounted(() => {
       { 'is-mobile': layoutState.isCompact, 'is-immersive': immersiveActive },
     ]"
   >
-    <header class="topbar">
+    <header v-if="!securityLock.isBlocked.value" class="topbar">
       <button type="button" class="icon-button topbar-nav-toggle" :aria-label="t('openNavigation')" :aria-expanded="navigationOpen" @click="navigationOpen = true">
         <svg class="topbar-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
         <span v-if="totalUnreadCount > 0" class="unread-dot" aria-hidden="true"></span>
@@ -298,7 +316,7 @@ onUnmounted(() => {
       </details>
     </header>
 
-    <div class="app-body-container">
+    <div v-if="!securityLock.isBlocked.value" class="app-body-container">
       <!-- Desktop Left Rail (Screen Desktop A/B) -->
       <nav v-if="!layoutState.isCompact" class="desktop-rail" role="navigation" aria-label="Desktop Rail">
         <button type="button" class="rail-item" :class="{ on: activeDrawer === 'chat' && !settingsOpen }" :title="t('navChat')" @click="switchPrimaryDrawer('chat')">
@@ -421,13 +439,13 @@ onUnmounted(() => {
     </div>
 
     <!-- Mobile Sliding Modal Drawer -->
-    <NavigationDrawer v-if="layoutState.isCompact" :docked="false" />
+    <NavigationDrawer v-if="layoutState.isCompact && !securityLock.isBlocked.value" :docked="false" />
 
-    <QuickNoteOverlay />
-    <SidebarCreateForm />
+    <QuickNoteOverlay v-if="!securityLock.isBlocked.value" />
+    <SidebarCreateForm v-if="!securityLock.isBlocked.value" />
 
     <!-- Mobile Bottom 5-Tab Navigation Bar: 对话 | 今天 | 收集箱 | 知识 | 设置 -->
-    <nav class="bottom-nav" role="navigation">
+    <nav v-if="!securityLock.isBlocked.value" class="bottom-nav" role="navigation">
       <button type="button" class="bottom-nav-item" :class="{ active: activeDrawer === 'chat' && !settingsOpen }" @click="switchPrimaryDrawer('chat')">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
         <span>{{ t('navChat') }}</span>
@@ -450,5 +468,6 @@ onUnmounted(() => {
         <span>{{ t('navSettings') }}</span>
       </button>
     </nav>
+    <MobileSecurityGate :security-lock="securityLock" />
   </div>
 </template>

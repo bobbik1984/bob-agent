@@ -73,7 +73,7 @@ pub fn is_node_pairing_code(raw: &str) -> bool {
 }
 
 impl NodePairingInvitation {
-    /// Encode as a compact `bob://pair?...` URI suitable for low-version terminal QR codes.
+    /// Encode as a full `bob://pair?...` URI with metadata.
     pub fn encode_qr_code(&self) -> String {
         let mut parts = vec![
             format!("u={}", url_encode(&self.base_url)),
@@ -86,6 +86,20 @@ impl NodePairingInvitation {
         ];
         if !self.harnesses.is_empty() {
             parts.push(format!("h={}", url_encode(&self.harnesses.join(","))));
+        }
+        format!("{NODE_PAIR_URI_PREFIX}{}", parts.join("&"))
+    }
+
+    /// Encode an ultra-compact `bob://pair?...` URI (<85 bytes) so CLI terminal QR codes
+    /// stay Version 4/5 (<= 41 columns wide) and never wrap in 80-col SSH terminals.
+    pub fn encode_compact_qr_code(&self) -> String {
+        let mut parts = vec![
+            format!("u={}", url_encode(&self.base_url)),
+            format!("p={}", url_encode(&self.pairing_id)),
+            format!("c={}", url_encode(&self.user_code)),
+        ];
+        if self.role == "web_host" {
+            parts.push("r=web_host".to_owned());
         }
         format!("{NODE_PAIR_URI_PREFIX}{}", parts.join("&"))
     }
@@ -142,7 +156,7 @@ impl NodePairingInvitation {
                 node_id = compute_node_id(&clean_url);
             }
             if label.trim().is_empty() {
-                label = clean_url.clone();
+                label = default_label_for_url(&clean_url);
             }
             Self {
                 v: 1,
@@ -181,6 +195,368 @@ pub fn compute_node_id(base_url: &str) -> String {
         h = h.wrapping_mul(31).wrapping_add(b as u64);
     }
     format!("node-{h:x}")
+}
+
+pub fn default_label_for_url(clean_url: &str) -> String {
+    if let Ok(parsed) = reqwest::Url::parse(clean_url) {
+        if let Some(host) = parsed.host_str() {
+            return match parsed.port() {
+                Some(port) => format!("{host}:{port}"),
+                None => host.to_owned(),
+            };
+        }
+    }
+    clean_url.to_owned()
+}
+
+pub fn is_private_or_tailnet_host(host: &str) -> bool {
+    let clean = host.trim().trim_start_matches('[').trim_end_matches(']');
+    if clean.eq_ignore_ascii_case("localhost") || clean == "::1" {
+        return true;
+    }
+    if let Ok(ipv4) = clean.parse::<std::net::Ipv4Addr>() {
+        let oct = ipv4.octets();
+        return oct[0] == 127
+            || oct[0] == 10
+            || (oct[0] == 192 && oct[1] == 168)
+            || (oct[0] == 172 && (16..=31).contains(&oct[1]))
+            || (oct[0] == 100 && (64..=127).contains(&oct[1]));
+    }
+    if let Ok(ipv6) = clean.parse::<std::net::Ipv6Addr>() {
+        return ipv6.is_loopback() || (ipv6.segments()[0] & 0xfe00) == 0xfc00;
+    }
+    false
+}
+
+fn clean_http_origin(url: &reqwest::Url) -> Result<String, &'static str> {
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || (url.path() != "/" && !url.path().is_empty())
+    {
+        return Err("NODE_ADDRESS_INVALID");
+    }
+    let host = url.host_str().ok_or("NODE_ADDRESS_INVALID")?;
+    let scheme = url.scheme();
+    Ok(match url.port() {
+        Some(port) => format!("{scheme}://{host}:{port}"),
+        None => format!("{scheme}://{host}"),
+    })
+}
+
+pub fn candidate_connect_origins(raw: &str) -> Result<Vec<String>, &'static str> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("NODE_ADDRESS_INVALID");
+    }
+    if trimmed.contains("://") {
+        let parsed = reqwest::Url::parse(trimmed).map_err(|_| "NODE_ADDRESS_INVALID")?;
+        let host = parsed.host_str().ok_or("NODE_ADDRESS_INVALID")?;
+        match parsed.scheme() {
+            "https" => return Ok(vec![clean_http_origin(&parsed)?]),
+            "http" => {
+                if !is_private_or_tailnet_host(host) {
+                    return Err("NODE_HTTPS_REQUIRED");
+                }
+                return Ok(vec![clean_http_origin(&parsed)?]);
+            }
+            _ => return Err("NODE_ADDRESS_INVALID"),
+        }
+    }
+    let parsed = reqwest::Url::parse(&format!("https://{trimmed}")).map_err(|_| "NODE_ADDRESS_INVALID")?;
+    let https_origin = clean_http_origin(&parsed)?;
+    let host = parsed.host_str().ok_or("NODE_ADDRESS_INVALID")?;
+    if is_private_or_tailnet_host(host) && parsed.port() != Some(443) {
+        let http_origin = match parsed.port() {
+            Some(port) => format!("http://{host}:{port}"),
+            None => format!("http://{host}"),
+        };
+        Ok(vec![http_origin, https_origin])
+    } else {
+        Ok(vec![https_origin])
+    }
+}
+
+pub fn discover_remote_node(raw_address: &str) -> Result<Value, &'static str> {
+    let origins = candidate_connect_origins(raw_address)?;
+    let client = reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(8))
+        .build()
+        .map_err(|_| "PAIRING_NETWORK_UNAVAILABLE")?;
+
+    for base in origins {
+        if let Ok(resp) = client.get(format!("{base}/api/node/v1/info")).send() {
+            if resp.status().is_success() {
+                if let Ok(info) = resp.json::<Value>() {
+                    if info.get("protocol").and_then(Value::as_str) == Some("bob-node-v1")
+                        && info.get("authentication").and_then(Value::as_str)
+                            == Some("owner_password")
+                    {
+                        let node_id = info
+                            .get("node_id")
+                            .and_then(Value::as_str)
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| compute_node_id(&base));
+                        return Ok(json!({
+                            "protocol": "bob-node-v1",
+                            "authentication": "owner_password",
+                            "authMode": "owner_password",
+                            "baseUrl": base,
+                            "nodeId": node_id,
+                            "suggestedLabel": default_label_for_url(&base),
+                        }));
+                    }
+                }
+            }
+        }
+        if let Ok(resp) = client.get(format!("{base}/api/capabilities")).send() {
+            if resp.status().is_success() {
+                if let Ok(caps) = resp.json::<Value>() {
+                    if caps.is_object() {
+                        return Ok(json!({
+                            "protocol": "bob-node-v1",
+                            "authentication": "pairing_code",
+                            "authMode": "pairing_code",
+                            "baseUrl": base,
+                            "nodeId": compute_node_id(&base),
+                            "suggestedLabel": default_label_for_url(&base),
+                        }));
+                    }
+                }
+            }
+        }
+    }
+    Err("NODE_UNREACHABLE")
+}
+
+pub fn connect_remote_node(
+    args: &Value,
+    device_name: &str,
+    local_topology: &Value,
+    now_ms: i64,
+) -> Result<Value, &'static str> {
+    if let Some(qr) = args
+        .get("qrCode")
+        .or_else(|| args.get("code"))
+        .or_else(|| args.get("uri"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let inv = NodePairingInvitation::decode_qr_code(qr, now_ms)?;
+        return exchange_and_sync_with_peer(&inv, device_name, local_topology);
+    }
+
+    let raw_address = args
+        .get("address")
+        .or_else(|| args.get("baseUrl"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    let base = candidate_connect_origins(raw_address)?
+        .into_iter()
+        .next()
+        .ok_or("NODE_ADDRESS_INVALID")?;
+    let label = args
+        .get("label")
+        .or_else(|| args.get("name"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| default_label_for_url(&base));
+
+    let password = args.get("password").and_then(Value::as_str).unwrap_or("");
+    let pairing_code = args
+        .get("pairingCode")
+        .or_else(|| args.get("pairing_code"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    let token_input = args
+        .get("token")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+
+    if !password.is_empty() {
+        let client = reqwest::blocking::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_secs(12))
+            .build()
+            .map_err(|_| "PAIRING_NETWORK_UNAVAILABLE")?;
+
+        let login_resp = client
+            .post(format!("{base}/api/node/v1/login"))
+            .json(&json!({ "password": password }))
+            .send()
+            .map_err(|_| "PAIRING_HOME_UNREACHABLE")?;
+        if login_resp.status().as_u16() == 429 {
+            return Err("NODE_RATE_LIMITED");
+        }
+        if !login_resp.status().is_success() {
+            return Err("NODE_AUTH_FAILED");
+        }
+        let login_json: Value = login_resp.json().map_err(|_| "NODE_AUTH_FAILED")?;
+        let owner_token = login_json
+            .get("access_token")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+            .ok_or("NODE_AUTH_FAILED")?;
+
+        let inv_resp = client
+            .post(format!("{base}/api/node/v1/invitations"))
+            .header("Authorization", format!("Bearer {owner_token}"))
+            .json(&json!({}))
+            .send()
+            .map_err(|_| "PAIRING_HOME_UNREACHABLE")?;
+        if !inv_resp.status().is_success() {
+            return Err("NODE_AUTH_FAILED");
+        }
+        let inv_json: Value = inv_resp.json().map_err(|_| "NODE_AUTH_FAILED")?;
+        let pairing_id = inv_json
+            .get("pairing_id")
+            .and_then(Value::as_str)
+            .ok_or("NODE_AUTH_FAILED")?;
+        let user_code = inv_json
+            .get("user_code")
+            .and_then(Value::as_str)
+            .ok_or("NODE_AUTH_FAILED")?;
+
+        let ex_resp = client
+            .post(format!("{base}/api/node/v1/exchange"))
+            .json(&json!({
+                "pairing_id": pairing_id,
+                "code": user_code,
+                "device_name": device_name,
+            }))
+            .send()
+            .map_err(|_| "PAIRING_HOME_UNREACHABLE")?;
+        if ex_resp.status().as_u16() == 429 {
+            return Err("NODE_RATE_LIMITED");
+        }
+        if !ex_resp.status().is_success() {
+            return Err("NODE_AUTH_FAILED");
+        }
+        let ex_json: Value = ex_resp.json().map_err(|_| "NODE_AUTH_FAILED")?;
+        let access_token = ex_json
+            .get("access_token")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+            .ok_or("NODE_AUTH_FAILED")?;
+        let node_id = ex_json
+            .get("node_id")
+            .and_then(Value::as_str)
+            .or_else(|| inv_json.get("node_id").and_then(Value::as_str))
+            .filter(|s| !s.trim().is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| compute_node_id(&base));
+
+        let mobile_qr = client
+            .post(format!("{base}/api/node/v1/invitations"))
+            .header("Authorization", format!("Bearer {owner_token}"))
+            .json(&json!({ "compact": true }))
+            .send()
+            .ok()
+            .filter(|r| r.status().is_success())
+            .and_then(|r| r.json::<Value>().ok())
+            .and_then(|m| {
+                let mp = m.get("pairing_id").and_then(Value::as_str)?.to_owned();
+                let mc = m.get("user_code").and_then(Value::as_str)?.to_owned();
+                let mx = m.get("expires_at").and_then(Value::as_i64).unwrap_or(now_ms + 300_000);
+                let inv = NodePairingInvitation {
+                    v: 1,
+                    role: "node".to_owned(),
+                    node_id: node_id.clone(),
+                    label: label.clone(),
+                    base_url: base.clone(),
+                    pairing_id: mp,
+                    user_code: mc,
+                    expires_at: mx,
+                    harnesses: Vec::new(),
+                };
+                Some(json!({
+                    "code": inv.encode_compact_qr_code(),
+                    "expires_at": mx,
+                }))
+            });
+
+        return Ok(json!({
+            "nodeId": node_id,
+            "label": label,
+            "baseUrl": base,
+            "role": "node",
+            "accessToken": access_token,
+            "credentialId": ex_json.get("credential_id").cloned().unwrap_or(Value::Null),
+            "expiresAt": ex_json.get("expires_at").cloned().unwrap_or(Value::Null),
+            "syncedTopology": json!({}),
+            "mobileQr": mobile_qr,
+        }));
+    }
+
+    if !pairing_code.is_empty() {
+        let inv = NodePairingInvitation {
+            v: 1,
+            role: "node".to_owned(),
+            node_id: compute_node_id(&base),
+            label,
+            base_url: base,
+            pairing_id: String::new(),
+            user_code: pairing_code.to_owned(),
+            expires_at: now_ms + 600_000,
+            harnesses: Vec::new(),
+        };
+        return exchange_and_sync_with_peer(&inv, device_name, local_topology);
+    }
+
+    if !token_input.is_empty() {
+        let client = reqwest::blocking::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_secs(12))
+            .build()
+            .map_err(|_| "PAIRING_NETWORK_UNAVAILABLE")?;
+
+        if let Ok(resp) = client
+            .post(format!("{base}/api/client/v1/topology/sync"))
+            .header("Authorization", format!("Bearer {token_input}"))
+            .json(local_topology)
+            .send()
+        {
+            if resp.status().is_success() {
+                let synced = resp.json::<Value>().unwrap_or_else(|_| json!({}));
+                return Ok(json!({
+                    "nodeId": compute_node_id(&base),
+                    "label": label,
+                    "baseUrl": base,
+                    "role": "node",
+                    "accessToken": token_input,
+                    "syncedTopology": synced,
+                }));
+            }
+        }
+        let dsh_resp = client
+            .post(format!("{base}/api/rpc/app_dsh_list"))
+            .header("Authorization", format!("Bearer {token_input}"))
+            .json(&json!({ "connectionId": "local" }))
+            .send()
+            .map_err(|_| "PAIRING_HOME_UNREACHABLE")?;
+        if !dsh_resp.status().is_success() {
+            return Err("NODE_AUTH_FAILED");
+        }
+        return Ok(json!({
+            "nodeId": compute_node_id(&base),
+            "label": label,
+            "baseUrl": base,
+            "role": "node",
+            "accessToken": token_input,
+            "syncedTopology": json!({}),
+        }));
+    }
+
+    Err("NODE_AUTH_REQUIRED")
 }
 
 pub fn detect_lan_or_tailscale_ip() -> String {
@@ -1425,6 +1801,56 @@ mod tests {
         let lines: Vec<&str> = rendered.lines().collect();
         assert!(lines.len() >= 15 && lines.len() <= 35);
         assert!(rendered.contains('█') && rendered.contains('▀'));
+    }
+
+    #[test]
+    fn compact_qr_stays_under_terminal_width_and_roundtrips() {
+        let inv = NodePairingInvitation {
+            v: 1,
+            role: "node".to_owned(),
+            node_id: "node-vps3".to_owned(),
+            label: "VPS3".to_owned(),
+            base_url: "https://vps3.bobbik.org".to_owned(),
+            pairing_id: "p123456789".to_owned(),
+            user_code: "AbCdEfGhIjKlMnOpQrStUv".to_owned(),
+            expires_at: 1_900_000_000_000,
+            harnesses: vec!["dsh".to_owned()],
+        };
+        let compact = inv.encode_compact_qr_code();
+        assert!(compact.len() <= 85, "compact URI too long: {compact}");
+        let art = render_terminal_qr(&compact).unwrap();
+        let max_cols = art.lines().map(|l| l.chars().count()).max().unwrap_or(0);
+        assert!(max_cols <= 45, "QR width exceeded 45 cols: {max_cols}");
+        let decoded = NodePairingInvitation::decode_qr_code(&compact, 1_800_000_000_000).unwrap();
+        assert_eq!(decoded.base_url, "https://vps3.bobbik.org");
+        assert_eq!(decoded.pairing_id, "p123456789");
+        assert_eq!(decoded.user_code, "AbCdEfGhIjKlMnOpQrStUv");
+        assert_eq!(decoded.label, "vps3.bobbik.org");
+        assert_eq!(decoded.role, "node");
+    }
+
+    #[test]
+    fn candidate_connect_origins_allows_tailscale_lan_http_and_blocks_public_http() {
+        assert_eq!(
+            candidate_connect_origins("http://100.64.0.5:9527").unwrap(),
+            vec!["http://100.64.0.5:9527"]
+        );
+        assert_eq!(
+            candidate_connect_origins("192.168.1.20:53020").unwrap(),
+            vec!["http://192.168.1.20:53020", "https://192.168.1.20:53020"]
+        );
+        assert_eq!(
+            candidate_connect_origins("vps3.bobbik.org").unwrap(),
+            vec!["https://vps3.bobbik.org"]
+        );
+        assert_eq!(
+            candidate_connect_origins("http://vps3.bobbik.org").unwrap_err(),
+            "NODE_HTTPS_REQUIRED"
+        );
+        assert_eq!(
+            candidate_connect_origins("https://user:pass@vps3.bobbik.org").unwrap_err(),
+            "NODE_ADDRESS_INVALID"
+        );
     }
 
     #[test]

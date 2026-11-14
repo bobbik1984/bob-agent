@@ -8,6 +8,10 @@ SPEC = importlib.util.spec_from_file_location("scanner_stage", Path(__file__).wi
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
+VAULT_SPEC = importlib.util.spec_from_file_location("vault_stage", Path(__file__).with_name("stage-android-vault.py"))
+VAULT_MODULE = importlib.util.module_from_spec(VAULT_SPEC)
+VAULT_SPEC.loader.exec_module(VAULT_MODULE)
+
 
 class ScannerStageTests(unittest.TestCase):
     def setUp(self):
@@ -51,6 +55,29 @@ class ScannerStageTests(unittest.TestCase):
         self.gradle.write_text(MODULE.BEGIN + MODULE.BEGIN + MODULE.END, encoding="utf-8")
         with self.assertRaises(RuntimeError):
             MODULE.stage(self.root)
+
+
+class VaultStageTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="bob-vault-test-")
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.generated = self.root / "src-tauri/gen/android/app/src/main"
+        self.generated.mkdir(parents=True)
+        (self.generated / "AndroidManifest.xml").write_text("<manifest><application /></manifest>", encoding="utf-8")
+        source = self.root / "src-tauri/android/DeviceVaultPlugin.kt"
+        source.parent.mkdir(parents=True)
+        source.write_bytes((Path(__file__).resolve().parents[1] / "src-tauri/android/DeviceVaultPlugin.kt").read_bytes())
+
+    def test_vault_staging_injects_biometric_permissions_idempotently(self):
+        VAULT_MODULE.stage(self.root)
+        manifest = (self.generated / "AndroidManifest.xml").read_text(encoding="utf-8")
+        self.assertEqual(manifest.count("android.permission.USE_BIOMETRIC"), 1)
+        self.assertEqual(manifest.count("android.permission.USE_FINGERPRINT"), 1)
+        VAULT_MODULE.stage(self.root)
+        manifest_after = (self.generated / "AndroidManifest.xml").read_text(encoding="utf-8")
+        self.assertEqual(manifest, manifest_after)
+        self.assertTrue((self.generated / "java/org/bobagent/vault/DeviceVaultPlugin.kt").is_file())
 
 
 if __name__ == "__main__":
