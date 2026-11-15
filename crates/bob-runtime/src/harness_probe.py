@@ -222,7 +222,15 @@ def probe(config):
                 report['process_reused'] = True
             elif tool == 'pi':
                 # Probe creates no lasting conversation and loads no project resources.
-                process = JsonLinesProcess([executable, '--mode', 'rpc', '--no-session',
+                # Use the same configured provider as the creation worker. Never return credentials.
+                model_args = []
+                profile = Path.home()/'.local/share/bob-native/pi-profile.json'
+                if profile.is_file():
+                    settings = json.loads(profile.read_text(encoding='utf-8'))
+                    env['PI_CODING_AGENT_DIR'] = str(profile.parent/'pi')
+                    env['BOB_PI_API_KEY'] = settings['api_key']
+                    model_args = ['--provider', settings['provider'], '--model', settings['model'], '--thinking', 'off']
+                process = JsonLinesProcess([executable, *model_args, '--mode', 'rpc', '--no-session',
                     '--no-extensions', '--no-skills', '--no-prompt-templates', '--no-themes'], work, env)
                 state = process.request({'id': 'state-1', 'type': 'get_state'})
                 if not isinstance(state, dict):

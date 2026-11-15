@@ -5,6 +5,43 @@ spec=importlib.util.spec_from_file_location('probe',Path(__file__).parents[1]/'s
 p=importlib.util.module_from_spec(spec);spec.loader.exec_module(p)
 
 class NativeTests(unittest.TestCase):
+ def test_tool_policy_interrupts_owned_worker_and_reenable(self):
+  path=Path(self.tmp.name)/'tool_policy.json'
+  cfg={'session_id':'claude-jsonl:original','policy_path':str(path)}
+  path.write_text(json.dumps({'tools':{'claude':False}}),encoding='utf-8')
+  self.assertTrue(p._policy_disabled(cfg))
+  with patch.object(p,'_worker_policy',cfg,create=True):
+   self.assertTrue(p._cancel_requested('any'))
+  path.write_text(json.dumps({'tools':{'claude':False},'devices':{'local':{'claude':True}}}),encoding='utf-8')
+  self.assertFalse(p._policy_disabled(cfg))
+  path.write_text('corrupt',encoding='utf-8')
+  self.assertTrue(p._policy_disabled(cfg))
+  self.assertFalse(p._policy_disabled({}))
+
+ def test_codex_failed_native_turn_keeps_reply_and_terminal_state(self):
+  root=Path(self.tmp.name);(root/'sessions').mkdir()
+  records=[{'type':'event_msg','payload':{'type':'task_started','turn_id':'turn'}},
+   {'type':'response_item','payload':{'type':'message','role':'assistant','content':[{'type':'output_text','text':'partial reply'}]}},
+   {'type':'event_msg','payload':{'type':'task_complete','turn_id':'turn','error':{'message':'stream disconnected before completion: Transport error: timeout'}}}]
+  (root/'sessions'/'original.jsonl').write_text(''.join(json.dumps(x)+'\n' for x in records),encoding='utf-8')
+  page=p.read_session_page({'codexDataDir':str(root)},'codex:original')
+  self.assertTrue(any('partial reply' in m['text'] for m in page['messages']))
+  self.assertEqual(page['request_results'][-1]['status'],'error')
+  self.assertEqual(page['request_results'][-1]['error_code'],'HARNESS_STREAM_DISCONNECTED')
+  records.append({'type':'event_msg','payload':{'type':'task_started','turn_id':'next'}})
+  (root/'sessions'/'original.jsonl').write_text(''.join(json.dumps(x)+'\n' for x in records),encoding='utf-8')
+  self.assertEqual(p.read_session_page({'codexDataDir':str(root)},'codex:original')['request_results'][-1]['status'],'running')
+
+ def test_codex_shared_writer_busy_never_starts_or_kills_owner(self):
+  class Shared:
+   closed=False
+   def close(self):self.closed=True
+  shared=Shared();cfg=dict(self.cfg(),session_id='codex:original',work_cwd=self.tmp.name)
+  with patch.object(p,'_open_loaded_codex',return_value=(shared,{'turns':[{'status':'inProgress'}]})),patch.object(p.shutil,'which',return_value='codex'),patch.object(p,'NativePipe',side_effect=AssertionError('must not spawn second writer')),patch.object(p,'_stream_update') as update,patch.object(p,'_stream_event'),patch.object(p,'_cancel_requested',return_value=False):
+   p._native_worker(cfg)
+   self.assertEqual(update.call_args.kwargs['error_code'],'HARNESS_SESSION_BUSY')
+   self.assertTrue(shared.closed)
+
  def test_setup_only_reports_ready_when_exact_native_history_is_readable(self):
   rid='setup-00000000-0000-4000-8000-000000000001'
   native='22222222-2222-4222-8222-222222222222'
@@ -1463,13 +1500,13 @@ class NativeTests(unittest.TestCase):
    p._agy_tables(db)
    db.execute('INSERT INTO requests VALUES(?,?,?,?)',(rid,sid,'h',json.dumps({'request_id':rid,'session_id':sid,'execution_status':'running','started_at':p._now()})))
    db.execute('INSERT INTO agy_supervisors VALUES(?,?,?,?)',(sid,'tok-1',8801,'cli'))
-  with patch.object(p,'_agy_process_owned',return_value=True),patch.object(p.os,'kill') as kill_mock:
+  with patch.object(p,'_agy_process_owned',return_value=True),patch.object(p.os,'getpgid',return_value=0,create=True),patch.object(p.os,'kill') as kill_mock:
    busy_res=p.request_native_cancel({'sessionId':sid,'requestId':'__bob_release_holder__'})
   self.assertEqual(busy_res['status'],'busy');self.assertFalse(busy_res['released']);kill_mock.assert_not_called()
   with p.closing(p._stream_db()) as db,db:
    db.execute('UPDATE requests SET body=? WHERE id=?',(json.dumps({'request_id':rid,'session_id':sid,'execution_status':'completed','started_at':p._now()}),rid))
    db.execute('INSERT OR REPLACE INTO agy_supervisors VALUES(?,?,?,?)',(sid,'tok-2',8802,'cli'))
-  with patch.object(p,'_agy_process_owned',return_value=True),patch.object(p.os,'kill') as kill_mock:
+  with patch.object(p,'_agy_process_owned',return_value=True),patch.object(p.os,'getpgid',return_value=0,create=True),patch.object(p.os,'kill') as kill_mock:
    rel_res=p.request_native_cancel({'sessionId':sid,'requestId':'__bob_release_holder__'})
   self.assertEqual(rel_res['status'],'released');self.assertTrue(rel_res['released'])
   kill_mock.assert_called_with(8802,p.signal.SIGTERM)

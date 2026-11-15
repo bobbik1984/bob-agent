@@ -8,7 +8,15 @@ pub fn read(data_dir: &Path) -> Value {
     let snapshot = std::fs::metadata(&path).ok().filter(|m| m.len() <= 65536)
         .and_then(|_| std::fs::read(&path).ok())
         .and_then(|b| serde_json::from_slice::<Value>(&b).ok()).unwrap_or(Value::Null);
-    sanitize(&snapshot, now)
+    let mut result=sanitize(&snapshot,now);
+    if let Ok(policy)=crate::tool_policy::read(data_dir){
+        for (provider,tool) in [("claude","claude"),("codex","codex"),("antigravity","agy")]{
+            if policy["tools"][tool]==false && !policy["devices"].as_object().is_some_and(|ds|ds.values().any(|d|d[tool]==true)){
+                result[provider]=json!({"status":"disabled","reason":"TOOL_DISABLED","windows":[]});
+            }
+        }
+    }
+    result
 }
 
 /// A paired Web host returns the public quota projection, not its provider cache.

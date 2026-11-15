@@ -258,11 +258,13 @@ function submitLabelKey() {
                   <span class="tool-chip-name">{{ tool.label || t(tool.labelKey) }}</span>
                   <span class="tool-chip-count">
                     <template v-if="!tool.loaded">{{ t('dshLoading') }}</template>
-                    <template v-else-if="tool.available">{{ tool.count }}</template>
-                    <template v-else>{{ t('createToolNoWorkspaceShort') }}</template>
+                    <template v-else-if="tool.available">{{ t(tool.stale?'createToolStale':tool.state==='authenticated'?'createToolReady':'createToolAuthUnknown') }}</template>
+                    <template v-else>{{ t(tool.state==='login_required'?'createToolLoginRequired':'createToolUnavailable') }}</template>
                   </span>
                 </button>
               </div>
+
+              <button v-if="creationConnectionId" type="button" :disabled="creationNodeLoading || creationBusy || Boolean(remoteCreation)" @click="selectCreationDevice(creationDeviceId, true)">{{ t('createReloadTools') }}</button>
 
               <div v-if="isRemoteMode" class="daemon-hint">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -282,17 +284,9 @@ function submitLabelKey() {
 
               <label class="field-label">
                 <span>{{ t('createSessionWorkspace') }}</span>
-                <select
-                  v-model="creationWorkspace"
-                  class="modal-control"
-                  required
-                  :disabled="creationLoading || !creationWorkspaces.length"
-                >
-                  <option disabled value="">{{ t(creationLoading ? 'dshLoading' : 'createSelectWorkspace') }}</option>
-                  <option v-for="workspace in creationWorkspaces" :key="workspace" :value="workspace">
-                    {{ workspace }}
-                  </option>
-                </select>
+                <input v-model="creationWorkspace" list="bob-create-workspaces" :disabled="creationBusy || Boolean(remoteCreation)" :placeholder="t('createWorkspacePath')" />
+                <datalist id="bob-create-workspaces"><option v-for="workspace in creationWorkspaces" :key="workspace" :value="workspace" /></datalist>
+                <small>{{ t('createWorkspaceAuthorization') }}</small>
               </label>
 
               <label v-if="creationMode !== 'dsh' && creationWorkspace" class="field-label">

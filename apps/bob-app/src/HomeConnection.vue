@@ -11,6 +11,7 @@ import { extractPairingCode } from './qr-image-decoder.mjs';
 import {deviceGroups} from './device-paths.mjs';
 import {checkPath,pathState,pathHealth} from './path-health.mjs';
 import NodeConnect from './NodeConnect.vue';
+import NodeToolSettings from './NodeToolSettings.vue';
 const addNode = ref(false);
 const webScannerOpen = ref(false);
 import { createPairingScanController } from './pairing-scan-controller.mjs';
@@ -307,11 +308,13 @@ onUnmounted(() => {
   <div class="home-connection">
     <section class="hub-card" :aria-label="t('connectionListTitle')">
       <div class="hub-card-header"><h3>{{ t('connectionListTitle') }}</h3><button type="button" @click="addNode=true">{{ t('connectionAdd') }}</button></div>
+      <NodeToolSettings :global="true" />
       <NodeConnect v-if="addNode" @close="addNode=false" @connected="loadConnections();emit('changed')" />
       <p v-if="connectionError" role="alert">{{ t(connectionError) }}</p>
       <p v-if="!connections.length && !connectionForm" class="view-card-desc">{{ t('connectionEmpty') }}</p>
       <article v-for="device in devices" :key="device.id" class="connection-device">
         <h4>{{ device.label }}</h4>
+        <NodeToolSettings :paths="device.paths" />
         <button type="button" @click="editConnection(null,device.id)">{{ t('connectionAddPath') }}</button>
         <div v-for="node in device.paths" :key="node.id" class="connection-list-row">
           <div><p>{{ node.url || node.baseUrl }}</p><small>{{ t(healthKey(node)) }}</small></div>

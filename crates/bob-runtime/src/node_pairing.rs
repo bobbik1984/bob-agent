@@ -1180,6 +1180,7 @@ fn forwarded_rpc_timeout_secs(command: &str, args: &Value) -> u64 {
 
 fn forwarded_preview_error(body: &Value) -> &'static str {
     match body["error"].as_str().unwrap_or("") {
+        "TOOL_DISABLED"=>"TOOL_DISABLED",
         "DSH_DOCUMENT_RENDERER_UNAVAILABLE"=>"DSH_DOCUMENT_RENDERER_UNAVAILABLE",
         "DSH_DOCUMENT_SANDBOX_UNAVAILABLE"=>"DSH_DOCUMENT_SANDBOX_UNAVAILABLE",
         "DSH_DOCUMENT_RENDER_TIMEOUT"=>"DSH_DOCUMENT_RENDER_TIMEOUT",
@@ -1235,7 +1236,7 @@ pub fn forward_dsh_rpc_to_endpoint_with_target(
     if !success {return Err(forwarded_preview_error(&body));}
     let mut result = if let Some(ok) = body.get("ok").and_then(Value::as_bool) {
         if !ok {
-            return Err(if command=="app_dsh_preview" {forwarded_preview_error(&body)} else {"DSH_UNAVAILABLE"});
+            return Err(if command=="app_dsh_preview" || body["error"]=="TOOL_DISABLED" {forwarded_preview_error(&body)} else {"DSH_UNAVAILABLE"});
         }
         body.get("result").cloned().unwrap_or(Value::Null)
     } else {

@@ -12,6 +12,15 @@ class NativePreviewTests(unittest.TestCase):
   self.page={'workspace':str(self.root),'messages':[{'role':'assistant','text':'[Review](docs/view.html)'}]}
   self.mock=patch.object(p,'read_session_page',return_value=self.page);self.mock.start()
  def tearDown(self):self.mock.stop();self.tmp.cleanup()
+ def test_tool_image_reference_and_inline_code(self):
+  for text in ['image(view_image({path:"'+str(self.root/'docs/view.html')+'"}))','`docs/view.html`']:
+   self.page['messages'][0]['text']=text
+   result=p.preview_native_file(self.cfg)
+   self.assertEqual(base64.b64decode(result['data']),b'<h1>Review</h1>')
+ def test_reference_does_not_match_url_or_filename_prefix(self):
+  for text in ['https://example.invalid/docs/view.html','docs/view.html.backup','docs/view.html?secret=1']:
+   self.page['messages'][0]['text']=text
+   with self.assertRaisesRegex(ValueError,'NOT_REFERENCED'):p.preview_native_file(self.cfg)
  def test_relative_absolute_and_cache(self):
   result=p.preview_native_file(self.cfg)
   self.assertEqual(base64.b64decode(result['data']),b'<h1>Review</h1>')

@@ -153,6 +153,18 @@ def collect(config):
             provider=source['provider']
             if provider not in PROVIDERS:raise ValueError('unsupported_provider')
             try:
+                policy=read_json(path.parent/'tool_policy.json')
+                tool='agy' if provider=='antigravity' else provider
+                if policy.get('tools',{}).get(tool) is False and not any(v.get(tool) is True for v in policy.get('devices',{}).values()):
+                    cache['providers'][provider]={'last_error':'TOOL_DISABLED'}
+                    atomic(path,cache)
+                    continue
+            except FileNotFoundError:
+                pass
+            except Exception:
+                continue
+
+            try:
                 adapter={'codex':codex,'antigravity':antigravity,'snapshot':snapshot}[source['adapter']]
                 cache['providers'][provider]=adapter(source)
                 print(provider+': observed',flush=True)

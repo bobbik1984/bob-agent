@@ -413,6 +413,7 @@ fn discover_local_cli_harnesses(data_dir: &std::path::Path) -> Vec<String> {
 }
 
 pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) -> Result<Value, &'static str> {
+    bob_runtime::tool_policy::check_rpc(&ctx.runtime.data_dir,command,args)?;
     let at = now_millis();
     let data_dir = &ctx.runtime.data_dir;
     match command {
@@ -1948,7 +1949,7 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 Err(e) => return Err(e),
             };
             match command {
-                "app_dsh_create" => client.create_session(
+                "app_dsh_create" => client.create_session_in_authorized_workspace(&ctx.runtime.data_dir,
                     bob_runtime::dsh_session::SessionAddress {
                         connection_id: connection.into(),
                         session_id: args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into(),
@@ -2802,11 +2803,95 @@ pub fn handle_client_v1_http(
     (404, json!({ "code": "CLIENT_ROUTE_NOT_FOUND" }))
 }
 
-fn execute_unlocked_harness_rpc(
+fn execute_unlocked_harness_rpc(data_dir:&Path,command:&str,args:&Value)->Result<Value,&'static str>{
+ let mut value=execute_unlocked_harness_rpc_inner(data_dir,command,args)?;
+ let connection=args["connectionId"].as_str().unwrap_or("local");
+ if command=="app_dsh_page" {
+  value["execution_enabled"]=json!(bob_runtime::tool_policy::enabled(data_dir,connection,bob_runtime::tool_policy::session_tool(args["sessionId"].as_str().unwrap_or(""))));
+ }
+ if command=="app_dsh_inventory" {
+  if let Some(rows)=value["tools"].as_array_mut(){for row in rows{
+   let tool=row["id"].as_str().unwrap_or("").to_owned();
+   if let Some(enabled)=bob_runtime::tool_policy::configured(data_dir,connection,&tool)?{
+    let synced=row["enabled"]==enabled;
+    row["policy_synced"]=json!(synced);row["enabled"]=json!(enabled);
+    if !enabled {row["can_create"]=json!(false);row["reason"]=json!("TOOL_DISABLED");}
+   }
+  }}
+ }
+ if command=="app_dsh_list" {
+  fn annotate(value:&mut Value,data:&Path,connection:&str){
+   match value {
+    Value::Array(rows)=>for row in rows{annotate(row,data,connection)},
+    Value::Object(obj)=>{
+     if let Some(id)=obj.get("session_id").or_else(||obj.get("id")).and_then(Value::as_str).map(str::to_owned){
+      if id.contains(':') || id.starts_with("session-"){
+       obj.insert("execution_enabled".into(),json!(bob_runtime::tool_policy::enabled(data,connection,bob_runtime::tool_policy::session_tool(&id))));
+      }
+     }
+     for child in obj.values_mut(){if child.is_array(){annotate(child,data,connection)}}
+    },_=>{}
+   }
+  }
+  annotate(&mut value,data_dir,connection);
+ }
+ Ok(value)
+}
+fn execute_unlocked_harness_rpc_inner(
     data_dir: &Path,
     command: &str,
     args: &Value,
 ) -> Result<Value, &'static str> {
+    bob_runtime::tool_policy::check_rpc(data_dir,command,args)?;
+    if command=="app_dsh_tool_policy_apply" {
+        if args["connectionId"]!="local"{return Err("NODE_SCOPE_DENIED");}
+        let tool=args["tool"].as_str().ok_or("TOOL_POLICY_TOOL_INVALID")?;
+        let enabled=args["enabled"].as_bool().ok_or("TOOL_POLICY_INVALID")?;
+        if bob_runtime::tool_policy::configured(data_dir,"local",tool)?!=Some(enabled){
+            bob_runtime::tool_policy::set(data_dir,"local",tool,enabled,false)?;
+            if enabled {bob_runtime::tool_inventory::refresh(data_dir);}
+        }
+        if !enabled {let _=bob_runtime::agy_directory::cancel_disabled_tool(data_dir,tool);}
+        return bob_runtime::tool_policy::read(data_dir);
+    }
+    if command=="app_dsh_tool_policy_set" {
+        let connection=args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+        let tool=args["tool"].as_str().ok_or("TOOL_POLICY_TOOL_INVALID")?;
+        let enabled=args["enabled"].as_bool().ok_or("TOOL_POLICY_INVALID")?;
+        let all=args["all"].as_bool().unwrap_or(false);
+        if all && connection!="local"{return Err("NODE_SCOPE_DENIED");}
+        let policy=bob_runtime::tool_policy::set(data_dir,connection,tool,enabled,all)?;
+        if !enabled && (all || connection=="local"){let _=bob_runtime::agy_directory::cancel_disabled_tool(data_dir,tool);}
+        let runtime=ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
+        let hub=runtime.load_hub_state();
+        let targets:Vec<String>=if all{
+            hub["remoteNodes"].as_array().map(|ns|ns.iter().filter(|n|n["enabled"]!=false).filter_map(|n|n["id"].as_str().map(str::to_owned)).collect()).unwrap_or_default()
+        }else{vec![connection.into()]};
+        let mut results=vec![];
+        for target in targets{
+            if target=="local"{results.push(json!({"connectionId":target,"synced":true}));continue;}
+            let a=json!({"connectionId":target,"tool":tool,"enabled":enabled});
+            let result=bob_runtime::node_pairing::route_paired_node_rpc(&runtime,&target,"app_dsh_tool_policy_apply",&a);
+            let synced=matches!(&result,Ok(Some(_)));
+            let _=bob_runtime::tool_policy::acknowledge(data_dir,&target,tool,enabled,synced);
+            results.push(match result{Ok(Some(_))=>json!({"connectionId":target,"synced":true}),_=>json!({"connectionId":target,"synced":false})});
+        }
+        if enabled && (all||connection=="local"){bob_runtime::tool_inventory::refresh(data_dir);}
+        return Ok(json!({"policy":policy,"nodes":results}));
+    }
+    if command=="app_dsh_inventory" {
+        let connection=args["connectionId"].as_str().unwrap_or("local");
+        if connection!="local"{
+            let runtime=ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
+            for tool in bob_runtime::tool_policy::TOOLS{
+                if let Some(enabled)=bob_runtime::tool_policy::configured(data_dir,connection,tool)?{
+                    let a=json!({"connectionId":connection,"tool":tool,"enabled":enabled});
+                    let applied=bob_runtime::node_pairing::route_paired_node_rpc(&runtime,connection,"app_dsh_tool_policy_apply",&a);
+                    let _=bob_runtime::tool_policy::acknowledge(data_dir,connection,tool,enabled,matches!(applied,Ok(Some(_))));
+                }
+            }
+        }
+    }
     if command == "app_claude_preview" || command == "app_dsh_preview" {
         if let Some(path) = args.get("path").and_then(Value::as_str) {
             if bob_browser::assert_profile_download_forbidden(std::path::Path::new(path)).is_err() {
@@ -2822,6 +2907,11 @@ fn execute_unlocked_harness_rpc(
         }
     }
     match command {
+        "app_dsh_inventory" => {
+            if args["connectionId"]!="local" {return Err("HARNESS_LOCAL_NODE_REQUIRED");}
+            bob_runtime::tool_inventory::snapshot(data_dir,args["refresh"].as_bool().unwrap_or(false))
+        },
+        "app_dsh_workspace_grant" => bob_runtime::tool_inventory::authorize(data_dir,args),
         "app_context_list" | "app_context_read" | "app_context_refresh" | "app_context_tasks" => {
             context_capsule::rpc(data_dir, command, args)
         }
@@ -3094,7 +3184,7 @@ fn execute_unlocked_harness_rpc(
                 Err(e) => return Err(e),
             };
             match command {
-                "app_dsh_create" => client.create_session(
+                "app_dsh_create" => client.create_session_in_authorized_workspace(data_dir,
                     bob_runtime::dsh_session::SessionAddress {
                         connection_id: connection.into(),
                         session_id: args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into(),
@@ -3393,7 +3483,7 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
             let allowed=match scope {
                 Ok(ref role) if role=="owner" => !path.starts_with("/api/client/v1/"),
                 Ok(_) => path == "/api/ws/browser-takeover" || path.starts_with("/api/f/") || path.strip_prefix("/api/rpc/").is_some_and(|cmd|matches!(cmd,
-                    "app_dsh_live"|"app_dsh_create"|"app_dsh_cancel"|"app_dsh_answer"|"app_native_setup"|"app_native_events"|"app_native_cancel"|"app_native_permission"|"app_dsh_list"|"app_dsh_page"|"app_dsh_history"|"app_dsh_preview"|"app_dsh_prompt"|"app_dsh_receipt"|
+                    "app_dsh_tool_policy_apply"|"app_dsh_tool_policy_set"|"app_dsh_inventory"|"app_dsh_workspace_grant"|"app_dsh_live"|"app_dsh_create"|"app_dsh_cancel"|"app_dsh_answer"|"app_native_setup"|"app_native_events"|"app_native_cancel"|"app_native_permission"|"app_dsh_list"|"app_dsh_page"|"app_dsh_history"|"app_dsh_preview"|"app_dsh_prompt"|"app_dsh_receipt"|
                     "app_harness_discover"|"app_harness_check_auth"|"app_harness_verify_capabilities"|
                     "app_jarvis_chat"|"app_jarvis_approve"|"app_jarvis_reject"|"app_jarvis_approvals_list"|"app_jarvis_budget_get"|"app_jarvis_budget_set"|"app_jarvis_worker_tasks"|"app_jarvis_worker_cancel"|"app_model_presets_list"|
                     "app_features_list"|"app_feature_keep"|"app_feature_rollback"|"app_feature_toggle"|"app_feature_call"|"app_feature_storage_save"|"app_feature_report_error"|
@@ -3766,7 +3856,7 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
         }
         if matches!(
             command.trim(),
-            "app_dsh_live" | "app_dsh_create" | "app_dsh_cancel" | "app_dsh_answer" | "app_native_setup" | "app_native_events" | "app_native_cancel" | "app_native_permission" | "app_dsh_receipt"
+            "app_dsh_tool_policy_apply" | "app_dsh_tool_policy_set" | "app_dsh_inventory" | "app_dsh_workspace_grant" | "app_dsh_live" | "app_dsh_create" | "app_dsh_cancel" | "app_dsh_answer" | "app_native_setup" | "app_native_events" | "app_native_cancel" | "app_native_permission" | "app_dsh_receipt"
                 | "app_dsh_page"
                 | "app_dsh_preview"
                 | "app_dsh_list"
@@ -5335,3 +5425,25 @@ mod tests {
     }
 }
 
+
+/// Reconcile offline device policy after reconnection without opening Settings.
+pub fn start_tool_policy_sync(data:std::path::PathBuf){
+ std::thread::spawn(move||loop{
+  if let Ok(policy)=bob_runtime::tool_policy::read(&data){
+   if policy["revision"].as_u64().unwrap_or(0)>0 {
+    if let Ok(runtime)=ModelHubRuntime::with_file_vault(data.clone()){
+     let hub=runtime.load_hub_state();
+     if let Some(nodes)=hub["remoteNodes"].as_array(){
+      for node in nodes {
+       if node["enabled"]==false {continue;}
+       if let Some(id)=node["id"].as_str().filter(|id|*id!="local"){
+        let _=execute_unlocked_harness_rpc(&data,"app_dsh_inventory",&json!({"connectionId":id}));
+       }
+      }
+     }
+    }
+   }
+  }
+  std::thread::sleep(std::time::Duration::from_secs(60));
+ });
+}

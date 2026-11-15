@@ -277,6 +277,8 @@ fn main() {
         legacy_db_path: legacy_db_path.clone(),
     };
 
+    bob_runtime::tool_inventory::start_monitor(data_dir.clone());
+    bob_node::start_tool_policy_sync(data_dir.clone());
     let server = spawn_node_server(config).expect("failed to start bob-node server");
     println!(
         "bob-node listening on http://{} (data_dir: {:?}, static_dir: {:?}, legacy_db: {:?})",

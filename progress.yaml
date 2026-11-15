@@ -32,6 +32,8 @@ phases:
     status: done
 - name: 🏗️ 第一大项：基础架构与多节点接管 (Stage 1 / Stage 2 / Stage 4)
   tasks:
+  - text: '节点工具清单/目录授权分离与工具启用策略已发布：VPS2/VPS3/X1T Claude 均停用、历史可读，重启和重新启用验证通过；审批中撤销/离线恢复/浏览器手机矩阵仍待，见 native-session-stream evidence'
+    status: in_progress
   - text: '[Stage 1] Claude 终端会话「双模分流」：识别 --remote-control 只读看板模式；普通终端占用时同步拦截并支持一键切换 Bob 接管'
     status: done
   - text: '[Stage 2] 跨设备工作区与成果全链路：打通 Codex/Claude 绝对路径图片安全映射、X1T Blender 渲染成果回传预览、磨砂高斯模糊背景与 PDF/网页包渲染'

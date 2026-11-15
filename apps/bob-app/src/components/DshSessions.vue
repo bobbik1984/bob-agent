@@ -326,6 +326,7 @@ async function cancelNative(){
  finally{cancelBusy.value=false;}
 }
 const nativeDrafts=ref({});
+const nativeFailureText=computed(()=>{const rows=history.value?.request_results||[];const latest=[...rows].sort((a,b)=>(b.observed_at||0)-(a.observed_at||0))[0];if(!latest||!['error','not_accepted'].includes(latest.status))return '';const code=latest.error_code||'HARNESS_FAILED';return t(code==='HARNESS_SESSION_BUSY'?'nativeSessionWriterBusy':code==='HARNESS_STREAM_DISCONNECTED'?'nativeStreamDisconnected':'nativeExecutionFailed')+' · '+code;});
 const nativeUnresolved=computed(()=>Object.entries(nativeDrafts.value).some(([k,v])=>!k.startsWith('external-codex-')&&v.status==='unknown')||(history.value?.request_results||[]).some(v=>v.status==='unknown'));const isExternalCodexWaitingApproval=computed(()=>Object.entries(nativeDrafts.value).some(([k,v])=>k.startsWith('external-codex-')&&(v.activity?.approvals||[]).some(a=>a.status==='pending')));const isExternalCodexRunning=computed(()=>Object.entries(nativeDrafts.value).some(([k,v])=>k.startsWith('external-codex-')&&v.active));let nativeCursor=0,nativeEpoch='',nativeTimer,nativeMore=false;
 async function refreshNativeEvents(){
  const g=generation,id=selected.value?.id;
@@ -379,7 +380,7 @@ async function refreshNativeEvents(){
     current.activity=unconfirmActivity(current.activity);
      if(cancelRequest.value===rid){cancelRequest.value=null;notice.value=t(event.kind==='cancelled'?'nativeCancelled':event.kind==='completed'?'dshSyncCompleted':'nativeCancelUnconfirmed');}
     if(awaitingReply.value===rid)awaitingReply.value=null;
-    if((event.kind==='error'||event.kind==='unknown')&&!rid.startsWith('external-codex-'))error.value=t('nativeExecutionFailed')+' · '+String(event.payload.code||'HARNESS_FAILED');
+    if(event.kind==='error'||(event.kind==='unknown'&&!rid.startsWith('external-codex-')))error.value=t('nativeExecutionFailed')+' · '+String(event.payload.code||'HARNESS_FAILED');
     if(event.kind==='completed'){current.completed=true;error.value='';}
    }
    nativeDrafts.value={...nativeDrafts.value,[rid]:current};
@@ -511,7 +512,16 @@ const sessionVisualAssets = computed(() => {
   if (!selected.value || !displayMessages.value?.length) return [];
   const assetsMap = new Map();
   const fileRegex = /(?:!?\[([^\]]*)\]\(([^)]+)\)|`([^`]+)`|([a-zA-Z0-9_\-./\\]+\.(?:png|jpe?g|webp|svg|html?))|(\/[^\s`"'<>]+\.(?:png|jpe?g|webp|svg|html?)))/gi;
-  for (const m of displayMessages.value) {
+  for (const m of history.value?.messages || []) {
+    // Native hosts expose the same observed references used for file reads.
+    if (Array.isArray(m.file_references)) {
+      for (const path of m.file_references) {
+        const ext = path.match(/\.(png|jpe?g|webp|html)$/i)?.[1]?.toLowerCase();
+        if (!ext || assetsMap.has(path)) continue;
+        assetsMap.set(path, {path, messageSequence:m.sequence, name:path.split('/').pop(), ext, isHtml:ext==='html', role:m.role});
+      }
+      continue;
+    }
     const text = m.text || '';
     let match;
     while ((match = fileRegex.exec(text)) !== null) {
@@ -659,7 +669,7 @@ const filteredDisplayMessages=computed(()=>{
  if(!q)return displayMessages.value;
  return displayMessages.value.filter(m=>String(m.text||'').toLocaleLowerCase().includes(q));
 });
-function fault(e){const code=String(e?.message || e);if(code.includes('AGY_'))return t('agyHistoryPending');return `${t(code.includes('DSH_RECEIPT_UNKNOWN')?'dshUncertain':code.includes('DSH_HISTORY_TOO_LARGE')?'dshHistoryTooLarge':code.includes('DSH_HISTORY_TIMEOUT')?'dshHistoryTimeout':code.includes('DSH_HISTORY_UNAVAILABLE')?'dshHistoryUnavailable':'dshError')} · ${code.match(/DSH_[A-Z_]+/)?.[0] || 'DSH_UNAVAILABLE'}`}
+function fault(e){const code=String(e?.message || e);if(code.includes('TOOL_DISABLED'))return t('toolPolicyDisabled');if(code.includes('AGY_'))return t('agyHistoryPending');return `${t(code.includes('DSH_RECEIPT_UNKNOWN')?'dshUncertain':code.includes('DSH_HISTORY_TOO_LARGE')?'dshHistoryTooLarge':code.includes('DSH_HISTORY_TIMEOUT')?'dshHistoryTimeout':code.includes('DSH_HISTORY_UNAVAILABLE')?'dshHistoryUnavailable':'dshError')} · ${code.match(/DSH_[A-Z_]+/)?.[0] || 'DSH_UNAVAILABLE'}`}
 async function load(){resetDshStop();dshQuestionView.value=null;const g=++generation;clearTimeout(timer);busy.value=true;error.value='';selected.value=null;history.value=null;sessions.value=[];try{const items=await kernelBridge.dshList(connection.value);if(g===generation&&!disposed)sessions.value=items;}catch(e){if(g===generation)error.value=fault(e)}finally{if(g===generation)busy.value=false}}
 watch(connection,()=>{if(connection.value&&!props.target)load()});
 function validatePage(h,id){if(h.address.session_id!==id||h.address.connection_id!==connection.value||!Number.isSafeInteger(h.cursor)||!Number.isSafeInteger(h.before)||!Array.isArray(h.messages))throw Error('DSH_IDENTITY_MISMATCH')}
@@ -841,7 +851,7 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
   <div ref="chatContent" data-chat-content>
   <header v-if="!target"><h3>{{ t('dshTitle') }}</h3><select v-model="connection" :disabled="sending" :aria-label="t('dshChooseNode')"><option value="">{{ t('dshChooseNode') }}</option><option v-for="n in nodes" :key="n.id" :value="n.id">{{ n.label || n.name || n.baseUrl || n.url }}</option></select></header>
   <p v-if="!target" class="dsh-note">{{ t('dshSource') }}</p>
-  <p v-if="error && syncStatus!=='offline_cached'" role="alert">{{ error }}</p><p v-if="nativeUnresolved" role="status">{{ t('nativeExecutionUnconfirmed') }}</p><p v-else-if="notice" role="status">{{ notice }}</p>
+  <p v-if="(error || nativeFailureText) && syncStatus!=='offline_cached'" role="alert">{{ error || nativeFailureText }}</p><p v-if="nativeUnresolved" role="status">{{ t('nativeExecutionUnconfirmed') }}</p><p v-else-if="notice" role="status">{{ notice }}</p>
   <template v-if="connection && !selected">
    <div class="dsh-tools"><input v-model="search" type="search" :placeholder="t('dshSearch')" :aria-label="t('dshSearch')"><button :disabled="busy" @click="load">{{ t('dshRefresh') }}</button></div>
    <p v-if="busy" class="terminal-status-line" role="status"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ stripDots(t('dshLoading')) }}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
@@ -976,19 +986,20 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
    </section>
    <p v-if="activityLabel && !dshQuestionBlocking && !dshStop" class="dsh-activity" role="status" aria-live="polite"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span> <span>{{activityLabel}}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
    <div class="dsh-compose-box">
-    <textarea ref="composerInput" v-model="draft" :disabled="sending || isClaudeRemoteControl" :placeholder="t(isClaudeRemoteControl ? 'claudeRemoteControlTitle' : 'dshPrompt')" :aria-label="t('dshPrompt')" rows="2" @keydown="onComposeKeydown" @paste="onComposerPaste" @dragover.prevent @drop.prevent="onComposerDrop"></textarea>
+    <p v-if="history?.execution_enabled===false || selected?.execution_enabled===false" role="status">{{t('toolPolicyDisabled')}}</p>
+    <textarea ref="composerInput" v-model="draft" :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl" :placeholder="t(isClaudeRemoteControl ? 'claudeRemoteControlTitle' : 'dshPrompt')" :aria-label="t('dshPrompt')" rows="2" @keydown="onComposeKeydown" @paste="onComposerPaste" @dragover.prevent @drop.prevent="onComposerDrop"></textarea>
     <div v-if="attachments.length" class="composer-attachments"><span v-for="att in attachments" :key="att.id" class="composer-attachment-chip"><img v-if="att.base64 && att.type?.startsWith('image/')" :src="'data:' + att.type + ';base64,' + att.base64" alt="" class="chip-thumb" /><span class="chip-file-name">{{ att.name }}</span><button type="button" class="chip-remove-btn" :aria-label="t('removeAttachment')" @click="removeAttachment(att.id)">×</button></span></div>
     <div class="dsh-compose-toolbar">
      <div class="dsh-compose-left-tools">
       <input ref="fileInput" type="file" multiple class="visually-hidden" @change="onFilesSelected" />
-      <button type="button" class="composer-tool-btn" :disabled="sending || isClaudeRemoteControl" :title="t('attachFileBtn')" :aria-label="t('attachFileBtn')" @click="openFilePicker"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
-      <button type="button" class="composer-tool-btn voice-btn" :class="{recording:isListening}" :disabled="sending || isClaudeRemoteControl" :title="t(isListening ? 'voiceInputListening' : 'voiceInputBtn')" :aria-label="t(isListening ? 'voiceInputListening' : 'voiceInputBtn')" @click="toggleVoiceInput"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg></button>
+      <button type="button" class="composer-tool-btn" :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl" :title="t('attachFileBtn')" :aria-label="t('attachFileBtn')" @click="openFilePicker"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+      <button type="button" class="composer-tool-btn voice-btn" :class="{recording:isListening}" :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl" :title="t(isListening ? 'voiceInputListening' : 'voiceInputBtn')" :aria-label="t(isListening ? 'voiceInputListening' : 'voiceInputBtn')" @click="toggleVoiceInput"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg></button>
       <CustomSelect
         v-if="supportsApprovalMode"
         v-model="approvalMode"
         class="dsh-permission-mode-select"
         :options="permissionModeOptions"
-        :disabled="sending || isClaudeRemoteControl"
+        :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl"
         :aria-label="t('permissionModeLabel')"
         :title="t('permissionModeLabel')"
       />
@@ -996,7 +1007,7 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
      </div>
      <button v-if="canStopDsh" type="button" class="composer-submit-btn" :disabled="!!dshStop || sending" @click="stopDsh">{{ t(dshStop ? 'dshStopChecking' : 'dshStop') }}</button>
      <button v-else-if="cancellableRequest" type="button" class="composer-submit-btn" :disabled="cancelBusy || cancelRequest===cancellableRequest" @click="cancelNative">{{ t(cancelRequest===cancellableRequest?'nativeCancelPending':'nativeCancel') }}</button>
-      <button v-else type="submit" class="composer-submit-btn" :disabled="sending || isClaudeRemoteControl || !!pending || nativeUnresolved || dshQuestionBlocking || (!draft.trim() && !attachments.length) || (!history && !selected?.resumable)">{{ t(sending?'dshSending':'send') }}</button>
+      <button v-else type="submit" class="composer-submit-btn" :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl || !!pending || nativeUnresolved || dshQuestionBlocking || (!draft.trim() && !attachments.length) || (!history && !selected?.resumable)">{{ t(sending?'dshSending':'send') }}</button>
     </div>
    </div>
    <p v-if="pending && !sending" role="status">{{ t('dshUncertain') }} <button type="button" @click="checkReceipt">{{ t('dshCheckReceipt') }}</button> <button type="button" @click="dismissPending">{{ t('dshUnlockEdit') }}</button></p>

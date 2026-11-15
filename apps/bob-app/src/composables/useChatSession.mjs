@@ -125,6 +125,8 @@ function dshSetupBridge(owner) {
     catalog: () => call('app_catalog'),
     projectLinks: () => call('app_project_links'),
     createProject: (projectId,title) => call('app_project_create',{projectId,title}),
+    dshInventory: (connectionId,refresh=false) => call('app_dsh_inventory',{connectionId,refresh}),
+    dshWorkspaceGrant: (connectionId,path) => call('app_dsh_workspace_grant',{connectionId,path}),
     dshList: connectionId => call('app_dsh_list',{connectionId}),
     dshCreate: (connectionId,sessionId,workspace,title) => call('app_dsh_create',{connectionId,sessionId,workspace,title}),
     nativeSetup: args => call('app_native_setup',args),
@@ -134,12 +136,19 @@ function dshSetupBridge(owner) {
 const creationNode = computed(() => creationNodes.value.find(node => node.id === creationConnectionId.value));
 let workspaceRead = 0;
 
-function workspacesForNodeTool(rows, tool) {
-  if (!Array.isArray(rows)) return [];
-  return [...new Set(rows
-    .filter(row => (tool === 'dsh' ? row.source_kind === 'dsh_native' : row.harness === tool)
-      && row.directoryStale !== true && typeof row.workspace === 'string' && row.workspace)
-    .map(row => row.workspace))].sort();
+function workspacesForNodeTool(inventory, tool) {
+  return [...new Set((inventory?.workspaces || []).filter(w=>w.read_only!==true).map(w=>w.path).filter(Boolean))].sort();
+}
+let inventoryTimer;
+async function pollCreationInventory(connectionId, deviceId) {
+  if(!creatingKind.value || creationDeviceId.value!==deviceId)return;
+  try {
+    const inventory=await dshSetupBridge(pairedCreationOwner.value).dshInventory(connectionId,false);
+    if(!creatingKind.value || creationDeviceId.value!==deviceId)return;
+    creationNodeSessionsCache.value={...creationNodeSessionsCache.value,[connectionId]:inventory};
+    if(!creationMode.value){const tool=inventory.tools?.find(t=>t.installed===true&&t.can_create);if(tool)selectCreationTool(tool.id);}
+    if(inventory.refreshing)inventoryTimer=setTimeout(()=>pollCreationInventory(connectionId,deviceId),2000);
+  }catch{creationError.value='createNodeUnavailable';}
 }
 
 const creationAvailableTools = computed(() => {
@@ -164,7 +173,9 @@ const creationAvailableTools = computed(() => {
       kind: 'remote',
       workspaces,
       count: workspaces.length,
-      available: hasCache ? workspaces.length > 0 : true,
+      available: rows?.tools?.some(item=>item.id===tool && item.installed===true && item.can_create===true) || false,
+      state: rows?.tools?.find(item=>item.id===tool)?.auth_state || 'unknown',
+      stale: rows?.stale===true || rows?.tools?.find(item=>item.id===tool)?.stale===true,
       loaded: hasCache,
     };
   });
@@ -183,12 +194,13 @@ async function loadCreationWorkspaces() {
   creationLoading.value = Boolean(node && Object.hasOwn(remoteHarnesses,tool));
   if (!creationLoading.value) return;
   try {
-    const rows = await dshSetupBridge(pairedCreationOwner.value).dshList(node.id);
+    const rows = await dshSetupBridge(pairedCreationOwner.value).dshInventory(node.id);
     if (read !== workspaceRead) return;
-    const normalized = Array.isArray(rows) ? rows : [];
+    if (!Array.isArray(rows?.tools)) throw Error('DSH_DIRECTORY_INVALID');
+    const normalized = rows;
     creationNodeSessionsCache.value = { ...creationNodeSessionsCache.value, [node.id]: normalized };
     creationWorkspaces.value = workspacesForNodeTool(normalized, tool);
-    if (!creationWorkspaces.value.length) creationError.value = 'createNoToolWorkspaces';
+
   } catch {
     if (read === workspaceRead) creationError.value = 'createNodeUnavailable';
   } finally {
@@ -998,8 +1010,9 @@ function chooseBestWorkspaceForSelection(workspaces) {
   return workspaces[0];
 }
 
-async function selectCreationDevice(deviceId) {
+async function selectCreationDevice(deviceId, forceRefresh = false) {
   if (creationBusy.value || remoteCreation.value) return;
+  clearTimeout(inventoryTimer);
   creationDeviceId.value = deviceId;
   creationError.value = '';
   creationWorkspace.value = '';
@@ -1026,23 +1039,25 @@ async function selectCreationDevice(deviceId) {
   const read = ++workspaceRead;
   try {
     let rows = creationNodeSessionsCache.value[connectionId];
-    if (!rows) {
-      rows = await dshSetupBridge(pairedCreationOwner.value).dshList(connectionId);
+    { // Read the node-owned snapshot, never rescan history from the UI.
+      rows = await dshSetupBridge(pairedCreationOwner.value).dshInventory(connectionId,forceRefresh);
       if (read !== workspaceRead) return;
+      if (!Array.isArray(rows?.tools)) throw Error('DSH_DIRECTORY_INVALID');
       creationNodeSessionsCache.value = {
         ...creationNodeSessionsCache.value,
-        [connectionId]: Array.isArray(rows) ? rows : [],
+        [connectionId]: rows,
       };
     }
     const cached = creationNodeSessionsCache.value[connectionId] || [];
-    const usableTools = creationToolOrder.filter(tool => workspacesForNodeTool(cached, tool).length > 0);
+    const usableTools = creationToolOrder.filter(tool => cached.tools?.some(item=>item.id===tool && item.installed===true && item.can_create===true));
+    if(cached.refreshing)inventoryTimer=setTimeout(()=>pollCreationInventory(connectionId,deviceId),2000);
     if (usableTools.includes(creationMode.value)) {
       selectCreationTool(creationMode.value);
     } else if (usableTools.length) {
       selectCreationTool(usableTools[0]);
     } else {
       creationMode.value = '';
-      creationError.value = 'createNoToolsOnDevice';
+      creationError.value = cached.refreshing ? '' : 'createNoToolsOnDevice';
     }
   } catch {
     if (read === workspaceRead) {
@@ -1073,7 +1088,7 @@ function selectCreationTool(toolId) {
   const workspaces = workspacesForNodeTool(rows, toolId);
   creationWorkspaces.value = workspaces;
   creationWorkspace.value = chooseBestWorkspaceForSelection(workspaces);
-  if (!workspaces.length) creationError.value = 'createNoToolWorkspaces';
+
 }
 
 function startCreateProject() {
@@ -1087,6 +1102,7 @@ function startCreateConversation(projectId = null) {
 function cancelCreateItem() {
   if (creationBusy.value) return;
   clearTimeout(nativeSetupTimer);
+  clearTimeout(inventoryTimer);
   workspaceRead++;
   creatingKind.value = null;
 }
@@ -1100,7 +1116,7 @@ async function submitRemoteCreation(title, checking) {
     return;
   }
   const node = creationNode.value;
-  if (!node || !creationWorkspace.value || (!remoteCreation.value && !creationWorkspaces.value.includes(creationWorkspace.value))) {
+  if (!node || !creationWorkspace.value) {
     creationError.value = 'createNodeUnavailable';
     return;
   }
@@ -1149,6 +1165,7 @@ async function submitRemoteCreation(title, checking) {
     creationError.value = 'createRetryStorageError';
     return;
   }
+  if (!checking) await bridge.dshWorkspaceGrant(attempt.connectionId, attempt.workspace);
   remoteCreation.value = attempt;
   if (!checking && attempt.kind === 'project') {
     const snap = await bridge.createProject(attempt.projectId, attempt.title);

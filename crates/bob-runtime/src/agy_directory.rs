@@ -111,22 +111,22 @@ pub fn discover_local_grant(connection_id: &str) -> Option<Value> {
     if !cp_dbs.is_empty() {
         harnesses.push("dsh".to_owned());
     }
-    if claude_opt.is_some() {
+    if claude_opt.is_some() || crate::tool_inventory::executable("claude").is_some() {
         harnesses.push("claude".to_owned());
     }
-    if pi_opt.is_some() {
+    if pi_opt.is_some() || crate::tool_inventory::executable("pi").is_some() {
         harnesses.push("pi".to_owned());
     }
-    if codex_opt.is_some() {
+    if codex_opt.is_some() || crate::tool_inventory::executable("codex").is_some() {
         harnesses.push("codex".to_owned());
     }
-    if !agy_dir.is_empty() {
+    if !agy_dir.is_empty() || crate::tool_inventory::executable("agy").is_some() {
         harnesses.push("agy".to_owned());
     }
     if harnesses.is_empty() {
         return None;
     }
-    let claude_tools: Vec<String> = if claude_opt.is_some() {
+    let claude_tools: Vec<String> = if claude_opt.is_some() || crate::tool_inventory::executable("claude").is_some() {
         vec![
             "Read".to_owned(),
             "Grep".to_owned(),
@@ -144,10 +144,10 @@ pub fn discover_local_grant(connection_id: &str) -> Option<Value> {
     Some(json!({
         "connectionId": connection_id,
         "sshTarget": "local",
-        "agyDataDir": agy_dir,
-        "claudeDataDir": claude_opt,
-        "piDataDir": pi_opt,
-        "codexDataDir": codex_opt,
+        "agyDataDir": if agy_dir.is_empty() {home.join(".gemini/antigravity-cli").to_string_lossy().into_owned()} else {agy_dir},
+        "claudeDataDir": claude_opt.unwrap_or_else(||claude_dir.to_string_lossy().into_owned()),
+        "piDataDir": pi_opt.unwrap_or_else(||pi_dir.to_string_lossy().into_owned()),
+        "codexDataDir": codex_opt.unwrap_or_else(||codex_dir.to_string_lossy().into_owned()),
         "controlPlaneDbs": cp_dbs,
         "harnesses": harnesses,
         "claudeTools": claude_tools,
@@ -408,6 +408,7 @@ fn run_host_python(ssh_target: &str, arg_str: &str, timeout_secs: u64, source: &
 /// Probe only tools explicitly granted to this connection, on that host.
 /// Inputs never supply executable paths, shell text, credentials, or a new host.
 pub fn probe_native_harness(data: &Path, connection: &str, tool: &str, discovery_only: bool) -> Result<Value, &'static str> {
+    crate::tool_policy::require(data,connection,tool)?;
     if !["codex", "pi", "agy", "claude"].contains(&tool) {
         return Err("HARNESS_TOOL_UNSUPPORTED");
     }
@@ -534,16 +535,16 @@ pub fn setup_native_session(data: &Path, connection: &str, args: &Value) -> Resu
     let grant = all.iter().find(|g| g.connection_id == connection).ok_or("DSH_CONNECTION_REQUIRED")?;
     require_native_harness_grant(grant, &format!("{tool}:setup"))?;
     let text = if action == "start" {
+        crate::tool_policy::require(data,connection,tool)?;
         let text = args["text"].as_str().filter(|s| !s.trim().is_empty() && s.len() <= 32000)
             .ok_or("HARNESS_SETUP_INVALID")?;
-        // Cached client-supplied paths never grant authority to start a tool.
-        let rows = fetch_list(data, connection)?;
-        if !rows.iter().any(|row| row["workspace"] == workspace && row["harness"] == tool) {
-            return Err("HARNESS_WORKSPACE_MISSING");
-        }
+        // Directory authorization is independent of prior conversations.
+        if !grant.is_local() {return Err("HARNESS_LOCAL_NODE_REQUIRED");}
+        crate::host_tools::WorkspaceGrantStore::open(data)?.resolve_authorized_path(workspace,true)?;
+        if crate::tool_inventory::executable(tool).is_none(){return Err("HARNESS_EXECUTABLE_MISSING");}
         Some(text)
     } else { None };
-    let payload = json!({"mode":"setup","action":action,"harness":tool,"workspace":workspace,
+    let payload = json!({"mode":"setup","policyPath":data.join("tool_policy.json"),"action":action,"harness":tool,"workspace":workspace,
         "requestId":request,"text":text,"agyDataDir":grant.agy_data_dir,"claudeDataDir":grant.claude_data_dir,
         "piDataDir":grant.pi_data_dir,"codexDataDir":grant.codex_data_dir});
     let bytes = run_ssh_python(&grant.ssh_target, &payload.to_string(), 25)?;
@@ -628,6 +629,7 @@ pub fn prompt_session_with_details(
     attachments: Option<&Value>,
 ) -> Result<Value, &'static str> {
     use sha2::{Sha256,Digest};
+    crate::tool_policy::require(data,connection,crate::tool_policy::session_tool(session_id))?;
     if !owns_readable_session(session_id) {
         return Err("DSH_SESSION_NOT_FOUND");
     }
@@ -647,6 +649,7 @@ pub fn prompt_session_with_details(
     let approval_mode = resolve_approval_mode(session_id, approval_mode_override, &claude_tools);
     let arg_str=serde_json::to_string(&json!({
         "mode": "prompt",
+        "policyPath": if g.is_local(){Some(data.join("tool_policy.json"))}else{None},
         "approvalMode": approval_mode,
         "claudeTools": claude_tools,
         "takeover": takeover,
@@ -704,6 +707,7 @@ fn require_native_harness_grant(grant: &HostGrant, session: &str) -> Result<(), 
 
 pub fn native_permission(data: &Path, connection: &str, session: &str, request: &str, permission: &str, option: Option<&str>) -> Result<Value, &'static str> {
     use sha2::{Sha256,Digest};
+    if option.is_some(){crate::tool_policy::require(data,connection,crate::tool_policy::session_tool(session))?;}
     if !session.starts_with("agy:") && !session.starts_with("claude-jsonl:") && !session.starts_with("codex:") { return Err("HARNESS_APPROVAL_UNSUPPORTED") }
     if permission.is_empty() || permission.len()>128 || option.is_some_and(|x|x.len()>128) { return Err("HARNESS_APPROVAL_INVALID") }
     let all=grants(data)?;
@@ -963,4 +967,12 @@ mod native_grant_tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert_ne!(err, "HARNESS_APPROVAL_UNSUPPORTED");
     }
+}
+
+pub fn cancel_disabled_tool(data:&Path,tool:&str)->Result<Value,&'static str>{
+ let _=ensure_local_grant_registered(data,"local");
+ let all=grants(data)?;
+ let g=all.iter().find(|g|g.connection_id=="local").ok_or("DSH_CONNECTION_REQUIRED")?;
+ let bytes=run_ssh_python(&g.ssh_target,&json!({"mode":"policy_cancel","tool":tool}).to_string(),15)?;
+ serde_json::from_slice(&bytes).map_err(|_|"HARNESS_CANCEL_UNCONFIRMED")
 }

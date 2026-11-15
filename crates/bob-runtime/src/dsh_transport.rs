@@ -453,6 +453,14 @@ impl DshClient {
  /// Reuse a native identity after an ambiguous response. DSH checks the
  /// identity's cwd when adopting an existing session.
  pub fn create_session(&self, address: SessionAddress, workspace: &str, title: &str) -> Result<Value, &'static str> {
+  self.create_session_checked(address,workspace,title,false)
+ }
+ pub fn create_session_in_authorized_workspace(&self, data:&std::path::Path, address:SessionAddress, workspace:&str,title:&str)->Result<Value,&'static str>{
+  if address.connection_id!="local" {return Err("HARNESS_LOCAL_NODE_REQUIRED");}
+  crate::host_tools::WorkspaceGrantStore::open(data)?.resolve_authorized_path(workspace,true)?;
+  self.create_session_checked(address,workspace,title,true)
+ }
+ fn create_session_checked(&self,address:SessionAddress,workspace:&str,title:&str,authorized:bool)->Result<Value,&'static str>{
   let id = &address.session_id;
   let uuid = id.strip_prefix("session-").ok_or("DSH_SESSION_REQUIRED")?;
   if uuid.len() != 36 || !uuid.bytes().enumerate().all(|(i, b)|
@@ -463,7 +471,7 @@ impl DshClient {
   }
   let list = self.list()?;
   let rows = list.as_array().ok_or("DSH_PROTOCOL")?;
-  if !rows.iter().any(|row| row["workspace"].as_str() == Some(workspace)) {
+  if !authorized && !rows.iter().any(|row| row["workspace"].as_str() == Some(workspace)) {
    return Err("DSH_WORKSPACE_NOT_AVAILABLE");
   }
   if let Some(row) = rows.iter().find(|row| row["id"].as_str() == Some(id.as_str())) {
@@ -678,6 +686,7 @@ impl DshClient {
 
 // Durable one-shot dispatch receipts. A crash or ambiguous response never permits replay.
 pub fn dispatch_once(dir:&std::path::Path, connection:&str, session:&str, text:&str, id:&str, send:impl FnOnce()->Result<Value,&'static str>)->Result<Value,&'static str>{
+ crate::tool_policy::require(dir,connection,crate::tool_policy::session_tool(session))?;
  use sha2::{Digest,Sha256};
  let receipts=dir.join("dsh-dispatch-receipts");
  std::fs::create_dir_all(&receipts).map_err(|_|"DSH_RECEIPT_WRITE_FAILED")?;

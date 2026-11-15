@@ -1264,6 +1264,7 @@ pub fn dispatch_prompt(
     user_text: &str,
     opts: ClaudeDispatchOptions,
 ) -> Result<ClaudeExecutionReceipt, &'static str> {
+    crate::tool_policy::require(data_dir,&grant.connection_id,"claude")?;
     let trimmed_text = user_text.trim();
     if trimmed_text.is_empty() || trimmed_text.len() > MAX_PROMPT_BYTES {
         return Err("CLAUDE_TEXT_REQUIRED");

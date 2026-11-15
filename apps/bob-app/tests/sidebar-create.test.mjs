@@ -12,11 +12,11 @@ const workspace = '/projects/demo';
 function mount(bridge, storage = new Map()) {
   const opened = [];
   const ctx = vm.createContext({
-    markRecentProject,
+    markRecentProject, setTimeout, clearTimeout,
     ref: value => ({value}),
     computed: get => ({get value() { return get(); }}),
     ctx: {modelHub: {value: {state: {remote_nodes: [identity]}}}},
-    kernelBridge: bridge,
+    kernelBridge: {dshInventory:async()=>({tools:[{id:'dsh',installed:true,can_create:true},{id:'codex',installed:true,can_create:true}],workspaces:[{path:workspace}]}),dshWorkspaceGrant:async()=>({path:workspace}),...bridge},
     localStorage: {
       getItem: key => storage.get(key),
       setItem: (key,value) => storage.set(key,value),

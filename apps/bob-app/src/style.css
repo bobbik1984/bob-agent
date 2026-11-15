@@ -2708,7 +2708,8 @@ textarea {
   right: 0;
   height: 2px;
   background: var(--color-error);
-  z-index: 5;
+  /* Above events (6) and dragging events (8), without intercepting input. */
+  z-index: 9;
   pointer-events: none;
 }
 .current-time-dot {

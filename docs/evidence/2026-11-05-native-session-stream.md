@@ -646,3 +646,46 @@ Claude授权快照与审批期间撤销实测（2026-11-07）：执行前持久�
 - 统一5194浏览器确认“已恢复最新回复状态”、207字符回复、执行记录File readonly-check.txt已完成、文件实际预览marker/count及返回会话。目录Claude/AGY/DSH图标可见，Codex可访问图片标识可见；Pi官方SVG已随包提供，尚无真实Pi目录行视觉验收。
 - 新增精确AGY请求身份/源正文/终态恢复及摘要后完整条目补读回归。127项Python、33项Rust通过，前端151模块构建通过。前端index-C1O6IkrL.js / index-BbPySbzH.css；候选bob-node SHA256 01bdb6f8d5e1408aa213635277be4cdbc4eec217bd261c61b7993fa2d1ffb3a1。
 - 仅更新私有候选及统一本地页面；无生产发布/APK/Office安装。未证明任意外部Claude/AGY运行进程热附着、整机恢复或全部工具/审批/不可变成果事件恢复。
+
+## 2026-11-15 Codex daemon writer 与失败同步
+
+- 真实会话：Winter Shelter 交接文档会话；三次网页回执为 HARNESS_RESUME_REJECTED，last_protocol_frame=2，无 native_turn_id/turn_start_requested。只复现恢复握手，官方返回 already has an active writer，没有调用 turn/start。
+- 同用户进程文件句柄证明官方 Codex 0.169.0 常驻 app-server 持有该 thread-writer-lock；tmux 内 CLI 连接该 daemon。原生终态 task_complete.error 为 stream disconnected before completion: Transport error: timeout，时间 2026-11-15 00:18:26（UTC+8），不能解释成网页三次恢复失败的同一错误。
+- 修复：原会话执行优先复用官方已加载 socket；正在执行拒绝或沿显式接管；失败保留部分回复。原生日志最新轮次状态与错误码加入 request_results，网页据此收敛活动，失败文案独立于临时刷新错误。
+- 检查：Linux 136 流式测试、15 预览、5 历史检查通过，网页 Vite 构建通过；旧 AGY 释放测试补 mock getpgid，消除虚拟 PID 对宿主 /proc 的依赖，不改变生产取消逻辑。
+- 真实只读候选：i18n 助手回复存在，外部轮次 error/HARNESS_STREAM_DISCONNECTED，连接已加载 daemon 成功且最新 turn=failed；没有发送新指令。
+- VPS2 发布 SHA256：b9e92188e87313384722290c9b1d6e04057f9d0689b2c1084ca1dd4fd25475a2；静态入口 SHA256 640f9e54cec0045c724f3a05ad29b3d42c93a7d47606ee62b0db48b309257700；服务本机 HTTP 回读通过。备份标识 quota-device-20261114-164352-b38965ed（服务器 UTC）。X1T 同哈希节点已发布，备份后原服务重启验证通过，Codex 常驻进程未重启。
+- 边界：未重发用户 APK 指令，未把“连接与读取通过”写成新任务执行验收；公网登录后浏览器和手机终验未运行。
+
+最终生产回读：VPS2→X1T 的 app_dsh_page 返回 i18n 助手正文及 error/HARNESS_STREAM_DISCONNECTED；app_dsh_preview 返回原图 103760 字节，SHA256 3eea79edce473a8f7d0b381081bf0518fa856da198fe2e5fe67584308b44114c。最后静态入口 SHA256 70ec748327b31bca4742d59fb23995cf704777bb1604e27ec22763b6acca3cb2，备份 quota-device-20261114-165230-52624f0f。新建窗口空缓存修正随该前端发布，17 项目录/发送检查通过；未声称复现截图首次空返回或完成登录后 UI 验收。
+
+## 2026-11-15 节点工具清单与首会话验证
+
+- 旧耦合已确认：前端从历史行推断工具与工作区；原生 setup 后端还要求该 Harness 在同目录已有会话。现在独立节点快照与 WorkspaceGrantStore 分开校验，DSH 新建同样使用目录授权。
+- 定向验证：29 项前端创建/桥接检查、2 项工具清单/目录权限 Rust 检查通过；15 项预览、5 项历史索引和 136 项流式 Python 回归通过，发布构建通过。
+- VPS2：Codex、AGY 在新验证目录得到 BOB_INVENTORY_OK；未授权时 HOST_PATH_OUTSIDE_WORKSPACE，授权后 ready。
+- VPS3：Pi、Codex 同样成功；AGY 1.2.16 官方命令拒绝 acp 参数，不能宣称已接通。未升级工具，节点清单将它与“缺工作区”区分。
+- 空历史边界：VPS3 Pi 使用完全空的 BOB_LOCAL_HOME 与空会话目录，仅保留实际程序 PATH 和现有 provider 配置，授权后首次创建 ready，回复 BOB_INVENTORY_OK。未安装新软件。
+- X1T：Codex 首会话成功；Claude 2.1.323 真实返回官方账号限制/验证要求，记为 HARNESS_TURN_FAILED，不算正常回复验收。没有重发 Winter Shelter 生成 APK 指令或修改用户项目文件。
+- 实测发现 Pi 探测与执行的 provider 配置不一致，已复用同配置；探测超时保留旧快照并标记 stale。后台启动及 120 秒周期刷新，页面不读取历史来发现工具。
+- 本轮暂未进行手机验收，也未生成 APK。部署回执在验证完成后追加。
+
+### 本轮发布与生产复核
+
+- 三节点运行二进制 SHA256：d6fe751f340afb73c7078a0ee354c02cb9d70dbc8cb52cd37a8c6c95a9333f40。
+- 网页服务实际 JS：index-B9Xh9zEF.js，含工具清单与目录授权新入口；网页目录摘要 a208d73e7ba7fb3ee8a959fa9ea10f4454bdd98fa5aea04863fde58de5b5e38c。
+- VPS2 回退备份标识 quota-device-20261114-174024-9483f6fe；X1T/VPS3 各自旧程序保留 before-tool-inventory 时间戳备份。服务 active 与运行文件摘要均核对。
+- 生产网页后端到三节点：inventory 返回真实工具状态；已验证 Codex 回执全部 ready / BOB_INVENTORY_OK；有效目录授权后能在独立 workspaces 清单读回。无效相对目录被拒绝，但远端转发错误仍折叠为 DSH_UNAVAILABLE，未将该提示问题标为完成。
+- X1T DSH 在新授权目录创建 session-81895171-2a94-463b-971e-5814a87873fe 成功，清单 authenticated / can_create=true；未发送项目开发指令。
+- VPS2 后台快照 observed_at 从 1794678026450 推进到 1794678146068，符合 120 秒维护周期。公网自动 HTTP 请求遭 403，登录浏览器和手机端未验收；未打包 APK。
+
+
+### 2026-11-15 工具启用与历史只读
+- 候选和生产节点统一二进制 SHA256：257ec89df31f8405c175b98a2e46551ff638e39c528b9eb279bd5e6022de3e49。
+- 检查：15 个 preview、5 个历史索引、137 个 native stream、1 个 Rust policy、16 个 Bot 授权、4 个 quota normalization 通过；前端定向测试与 Vite 通过。
+- VPS2、VPS3、X1T 的隔离候选均执行停用、创建/续聊/审批拒绝、实际进程重启、重新启用配置、再次停用。重新启用仅核对策略与 inventory，不发 Claude 模型请求。
+- 真实历史目录分别返回 1 / 8 / 9 条 Claude 会话。每节点打开一条原历史，execution_enabled=false；历史文件与关联未修改。
+- 生产 app_dsh_tool_policy_set(all=true, claude=false) 三路径 synced=true。生产 inventory disabled、历史正文读取、续聊 TOOL_DISABLED 均通过。
+- VPS2、VPS3、X1T 服务发布时均重启并核对运行二进制哈希。VPS2 原子发布备份 quota-device-20261115-033431-e4200576；远端节点保留 before-tool-policy 备份。
+- 额度采集器从 Git 基线核对一致后更新，保留 collector.before-tool-policy.py；全局停用工具跳过主动采集。节点 inventory 不再探测停用工具。
+- 未执行公开登录浏览器视觉、手机、实际审批等待任务取消与离线重连矩阵；不生成 APK。外部独立 CLI 不强杀。

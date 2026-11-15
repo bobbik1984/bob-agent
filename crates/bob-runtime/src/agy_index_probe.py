@@ -502,9 +502,34 @@ def _reconcile(sid):
     out.extend(_stream_records(sid))
     return out
 
+
+def _native_file_references(message):
+    """References observed in native history; never accept a caller's reference list."""
+    body=message.get('text','')
+    refs=set(re.findall(r'\[Attachment:\s*[^->\]]+->\s*([^\]]+)\]',body))
+    if message.get('role') not in ('assistant','step'):return refs
+    refs.update(re.findall(r'!?\[[^\]]*\]\(<?([^\s)>]+)>?(?:\s+[^)]*)?\)',body))
+    refs.update(re.findall(r'`([^`\n]+)`',body))
+    refs.update(line.strip() for line in body.splitlines())
+    # Scan whole tokens, not substrings of URLs or longer filenames. This also
+    # recognizes paths inside tool calls such as view_image({path:"/work/a.png"}).
+    for token in re.findall(r'[^\s`"\'<>()[\]{},;=]+',body):
+        if re.search(r'\.(?:png|jpe?g|webp|html)$',token,re.I):refs.add(token)
+    from urllib.parse import urlsplit, unquote
+    for reference in tuple(refs):
+        if not reference.startswith('file:'):continue
+        try:
+            uri=urlsplit(reference)
+            if uri.scheme=='file' and not uri.netloc and not uri.query and not uri.fragment:
+                decoded=unquote(uri.path,errors='strict')
+                if decoded.startswith('/') and '\x00' not in decoded:refs.add(decoded)
+        except (ValueError,UnicodeError):pass
+    return {x for x in refs if x and not any(c in x for c in '\\:%?#\x00')}
+
 def read_session_page(cfg, sid):
     ev, ws, h, jpath = [], '', 'dsh', ''
     codex_turn_texts = {}
+    native_results = []
     native_user_ids = set()
     agy_meta = {}
     cli_interrupted = False
@@ -668,7 +693,14 @@ def read_session_page(cfg, sid):
                     next_turn = payload.get('turn_id')
                     if next_turn != current_turn:tool_calls.clear()
                     current_turn = next_turn
+                    if next_turn and payload.get('type') == 'task_started':
+                        native_results = [{'request_id':'external-codex-'+raw+'-'+next_turn,'status':'running','observed_at':ts}]
                 elif o.get('type') == 'event_msg' and payload.get('type') in ('task_complete','turn_aborted'):
+                    turn_id = payload.get('turn_id') or current_turn
+                    if turn_id:
+                        failed = bool(payload.get('error'))
+                        code = 'HARNESS_STREAM_DISCONNECTED' if 'stream disconnected' in str(payload.get('error','')).lower() else 'HARNESS_TURN_FAILED'
+                        native_results = [{'request_id':'external-codex-'+raw+'-'+turn_id,'status':'error' if failed else 'cancelled' if payload.get('type')=='turn_aborted' else 'completed','error_code':code if failed else None,'observed_at':ts}]
                     current_turn = None
                     tool_calls.clear()
                 if o.get('type') == 'session_meta':
@@ -741,7 +773,7 @@ def read_session_page(cfg, sid):
             if anchor:native_user_ids.add(anchor)
         native_parts=codex_turn_texts.get(r.get('native_turn_id')) or []
         native_reply_present=bool(native_parts) and '\n\n'.join(native_parts)==at
-        if at and r.get('execution_status') in ('completed','cancelled') and at not in ra and not native_reply_present and not (sid.startswith('claude-jsonl:') and ev and at.startswith('Execution error:')):
+        if at and r.get('execution_status') in ('completed','cancelled','error') and at not in ra and not native_reply_present and not (sid.startswith('claude-jsonl:') and ev and at.startswith('Execution error:')):
             ended=int(r.get('ended_at') or sat)
             idx=next((i for i,(_,_,ets) in enumerate(ev) if ended and ets and ets>ended),len(ev))
             ev.insert(idx,('assistant',at,ended))
@@ -761,8 +793,10 @@ def read_session_page(cfg, sid):
             msgs = [{'sequence': 1, 'role': 'assistant', 'text': '\n\n'.join(parts), 'timestamp': _now()}]
         else:
             msgs = [{'sequence': 1, 'role': 'assistant', 'text': f'Session `{sid}` loaded (`{ws or "default"}`).', 'timestamp': _now()}]
+    for message in msgs:
+        message['file_references']=sorted(_native_file_references(message))
     out = {'harness': h, 'workspace': ws, 'messages': msgs, 'cli_interrupted': cli_interrupted,
-           'request_results': [{'request_id': r['request_id'], 'status': r.get('execution_status', 'completed')} for r in recs if r.get('request_id')]}
+           'request_results': [{'request_id': r['request_id'], 'status': r.get('execution_status', 'completed'), 'error_code':r.get('error_code'), 'observed_at':r.get('ended_at') or r.get('started_at')} for r in recs if r.get('request_id')] + native_results}
     if cfg.get('mode') == 'page':
         holder = None
         if sid.startswith('claude-jsonl:'):
@@ -913,24 +947,7 @@ def preview_native_file(cfg):
         raise ValueError('DSH_FILE_TYPE_UNSUPPORTED')
     refs=set()
     for message in page.get('messages',[]):
-        body=re.sub(r'`[\s\S]*?`','',message.get('text',''))
-        if message.get('role')=='assistant':
-            refs.update(re.findall(r'!?\[[^\]]*\]\(<?([^\s)>]+)>?(?:\s+[^)]*)?\)',body))
-            refs.update(re.findall(r'([^\n]+)',body))
-        refs.update(re.findall(r'\[Attachment:\s*[^->\]]+->\s*([^\]]+)\]',body))
-        refs.update(re.findall(r'`([^`\n]+)`',body))
-    # Native assistants may emit local file URIs; normalize only their
-    # explicit references, never the requested path or workspace boundary.
-    from urllib.parse import urlsplit, unquote
-    for reference in tuple(refs):
-        if not reference.startswith('file:'): continue
-        try:
-            uri = urlsplit(reference)
-            if uri.scheme == 'file' and not uri.netloc and not uri.query and not uri.fragment:
-                decoded = unquote(uri.path, errors='strict')
-                if decoded.startswith('/') and '\x00' not in decoded:
-                    refs.add(decoded)
-        except (ValueError, UnicodeError): pass
+        refs.update(_native_file_references(message))
     if requested not in refs and relative.as_posix() not in refs and str(root/relative) not in refs:
         raise ValueError('DSH_FILE_NOT_REFERENCED')
     data=_read_artifact_bytes(root,relative)
@@ -1309,7 +1326,38 @@ def request_native_cancel(cfg):
     return {'session_id':sid,'request_id':rid,'status':'cancel_requested'}
 
 
+def cancel_policy_executions(tool):
+    # Only Bob-owned receipts; never signal independently started terminals.
+    with closing(_stream_db()) as db:
+        rows=db.execute('SELECT id,session,body FROM requests').fetchall()
+    count=0
+    for rid,sid,body in rows:
+        record=json.loads(body)
+        harness=record.get('setup_harness') or sid.split(':',1)[0]
+        if harness=='claude-jsonl':harness='claude'
+        if harness!=tool or record.get('execution_status') not in ('accepted','running'):
+            continue
+        _stream_update(rid,cancel_requested_at=_now(),cancel_reason='TOOL_DISABLED')
+        count+=1
+    return {'cancel_requested':count}
+
+def _policy_disabled(cfg):
+    path = cfg.get('policy_path')
+    if not path:
+        return False
+    tool = cfg.get('new_harness') or cfg.get('session_id','').split(':',1)[0]
+    if tool == 'claude-jsonl': tool = 'claude'
+    try:
+        p = json.loads(Path(path).read_text(encoding='utf-8'))
+        return not p.get('devices',{}).get('local',{}).get(tool,p.get('tools',{}).get(tool,True))
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return True
+
 def _cancel_requested(rid):
+    if _policy_disabled(globals().get('_worker_policy',{})):
+        return True
     with closing(_stream_db()) as db:
         row=db.execute('SELECT body FROM requests WHERE id=?',(rid,)).fetchone()
     return bool(row and json.loads(row[0]).get('cancel_requested_at'))
@@ -2493,6 +2541,8 @@ def validate_new_native_id(raw):
 
 
 def _native_worker(cfg):
+    global _worker_policy
+    _worker_policy = cfg
     sid, rid, text = cfg['session_id'], cfg['request_id'], cfg['text']
     tool, raw = sid.split(':', 1)
     creating = cfg.get('new_harness')
@@ -2514,20 +2564,26 @@ def _native_worker(cfg):
         if tool == 'codex':
             if not creating and cfg.get('takeover') is True:
                 _release_codex_terminal_holder(raw, cfg.get('jsonl_path') or '')
-            pipe = NativePipe([exe,'app-server'],cwd,env)
-            pipe.send({'id':1,'method':'initialize','params':{'clientInfo':{'name':'bob-native','version':'1.0.1'}}})
-            init_deadline=time.monotonic()+30
-            while True:
-                frame=pipe.receive(timeout=max(1,init_deadline-time.monotonic()))
-                if frame.get('method'):
-                    if 'id' in frame:pipe.send({'id':frame['id'],'error':{'code':-32000,'message':'Bob read-only verification denies tool approval'}})
+            pipe, loaded = _open_loaded_codex(raw) if not creating else (None, None)
+            if pipe is not None:
+                turns = (loaded or {}).get('turns') or []
+                if turns and turns[-1].get('status') == 'inProgress':
+                    raise ValueError('HARNESS_SESSION_BUSY')
+            else:
+                pipe = NativePipe([exe,'app-server'],cwd,env)
+                pipe.send({'id':1,'method':'initialize','params':{'clientInfo':{'name':'bob-native','version':'1.0.1'}}})
+                init_deadline=time.monotonic()+30
+                while True:
+                    frame=pipe.receive(timeout=max(1,init_deadline-time.monotonic()))
+                    if frame.get('method'):
+                        if 'id' in frame:pipe.send({'id':frame['id'],'error':{'code':-32000,'message':'Bob read-only verification denies tool approval'}})
+                        if time.monotonic()>=init_deadline:raise ValueError('HARNESS_TIMEOUT')
+                        continue
+                    if frame.get('id')==1:
+                        if 'error' in frame:raise ValueError('HARNESS_INITIALIZE_REJECTED')
+                        break
                     if time.monotonic()>=init_deadline:raise ValueError('HARNESS_TIMEOUT')
-                    continue
-                if frame.get('id')==1:
-                    if 'error' in frame:raise ValueError('HARNESS_INITIALIZE_REJECTED')
-                    break
-                if time.monotonic()>=init_deadline:raise ValueError('HARNESS_TIMEOUT')
-            pipe.send({'method':'initialized','params':{}})
+                pipe.send({'method':'initialized','params':{}})
             codex_interactive = (not creating and cfg.get('approval_mode') == 'interactive')
             params = {'cwd':cwd, 'approvalPolicy':'on-request' if codex_interactive else 'never', 'sandbox':'workspace-write' if codex_interactive else 'read-only'}
             if not creating:
@@ -2626,7 +2682,9 @@ def _native_worker(cfg):
                     continue
                 if frame.get('id')==2:
                     _stream_update(rid,resume_response_received=True)
-                    if 'error' in frame: raise ValueError('HARNESS_RESUME_REJECTED')
+                    if 'error' in frame:
+                        code = 'HARNESS_SESSION_BUSY' if 'active writer' in str(frame['error']).lower() else 'HARNESS_RESUME_REJECTED'
+                        raise ValueError(code)
                     thread = frame.get('result',{}).get('thread',{})
                     if creating:
                         raw = validate_new_native_id(thread.get('id'))
@@ -2942,7 +3000,7 @@ def setup_native_session(cfg):
             raise ValueError('HARNESS_SETUP_INVALID')
         source = globals().get('__BOB_PROBE_SRC__') or Path(__file__).read_text(encoding='utf-8')
         worker = {'session_id':sid,'request_id':rid,'text':text,'work_cwd':cwd,'project_cwd':cwd,
-                  'new_harness':tool,'approval_mode':'deny','claude_tools':[],
+                  'new_harness':tool,'policy_path':cfg.get('policyPath'),'approval_mode':'deny','claude_tools':[],
                   'pi_session_dir':cfg.get('piDataDir') or ''}
         if tool == 'pi' and not worker['pi_session_dir']:
             raise ValueError('HARNESS_WORKSPACE_MISSING')
@@ -2974,6 +3032,7 @@ def setup_native_session(cfg):
 
 
 def prompt_session(cfg):
+    policy_path = cfg.get("policyPath")
     sid, text, rid = (cfg.get('sessionId') or '').strip(), (cfg.get('text') or '').strip(), (cfg.get('requestId') or '').strip()
     if not sid or not text or not rid:
         raise ValueError('DSH_REQUEST_REQUIRED')
@@ -3140,7 +3199,7 @@ def prompt_session(cfg):
                     text = f"{text}\n\n{new_marker}"
         except Exception:
             pass
-    cfg = {'session_id':sid,'request_id':rid,'text':text,'project_cwd':pcwd,'work_cwd':wcwd,'jsonl_path':jpath}
+    cfg = {'session_id':sid,'request_id':rid,'text':text,'project_cwd':pcwd,'work_cwd':wcwd,'jsonl_path':jpath,'policy_path':policy_path}
     cfg['approval_mode'] = approval_mode
     cfg['claude_tools'] = claude_tools
     if takeover:
@@ -3613,6 +3672,8 @@ if __name__ == '__main__':
             m = cfg.get('mode', 'list')
             if m == 'page':
                 print(json.dumps(read_session_page(cfg, cfg.get('sessionId', '')), ensure_ascii=False))
+            elif m == 'policy_cancel':
+                print(json.dumps(cancel_policy_executions(cfg.get('tool'))))
             elif m == 'setup':
                 try: print(json.dumps(setup_native_session(cfg),ensure_ascii=False))
                 except ValueError as exc:

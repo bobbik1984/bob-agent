@@ -17,7 +17,7 @@ function mountCreateModalState(bridge, projects = [], remoteNodes = null) {
   const storage = new Map();
   const navigationOpen = { value: true };
   const ctx = vm.createContext({
-    markRecentProject,
+    markRecentProject, setTimeout, clearTimeout,
     ref: value => ({ value }),
     computed: get => ({ get value() { return get(); } }),
     ctx: {
@@ -76,16 +76,12 @@ function mountCreateModalState(bridge, projects = [], remoteNodes = null) {
 test('create modal cascades Project -> Device -> Available Tools on Device -> Best Workspace', async () => {
   const actions = mountCreateModalState(
     {
-      dshList: async (nodeId) => {
+      dshInventory: async (nodeId) => {
         if (nodeId === 'vps2') {
-          return [
-            { harness: 'codex', workspace: '/srv/alpha' },
-            { harness: 'agy', workspace: '/srv/alpha' },
-            { harness: 'agy', workspace: '/srv/beta' },
-            { source_kind: 'dsh_native', workspace: '/srv/dsh-only' },
-          ];
+          return {tools:['codex','agy','dsh'].map(id=>({id,installed:true,can_create:true})),
+            workspaces:[{path:'/srv/alpha'},{path:'/srv/beta'}]};
         }
-        return [];
+        return {tools:[],workspaces:[]};
       },
     },
     [{ id: 'proj-beta', title: 'Beta', workspace: '/srv/beta' }],
@@ -104,11 +100,11 @@ test('create modal cascades Project -> Device -> Available Tools on Device -> Be
   assert.equal(actions.creationMode.value, 'dsh');
   const toolMap = Object.fromEntries(actions.creationAvailableTools.value.map(item => [item.id, item]));
   assert.equal(toolMap.dsh.available, true);
-  assert.equal(toolMap.dsh.count, 1);
+  assert.equal(toolMap.dsh.count, 2);
   assert.equal(toolMap.agy.available, true);
   assert.equal(toolMap.agy.count, 2);
   assert.equal(toolMap.claude.available, false);
-  assert.equal(toolMap.claude.count, 0);
+  assert.equal(toolMap.claude.count, 2);
   assert.equal(toolMap.pi.available, false);
 
   // Switching to AGY picks workspace matching the selected project's workspace hint
@@ -126,14 +122,12 @@ test('create modal cascades Project -> Device -> Available Tools on Device -> Be
 test('VPS2 host node (id="local") is isolated from built-in local chat via node:local key', async () => {
   const actions = mountCreateModalState(
     {
-      dshList: async (nodeId) => {
+      dshInventory: async (nodeId) => {
         if (nodeId === 'local') {
-          return [
-            { harness: 'claude', workspace: '/opt/quant_lab' },
-            { source_kind: 'dsh_native', workspace: '/srv/dsh-host' },
-          ];
+          return {tools:['claude','dsh'].map(id=>({id,installed:true,can_create:true})),
+            workspaces:[{path:'/opt/quant_lab'},{path:'/srv/dsh-host'}]};
         }
-        return [];
+        return {tools:[],workspaces:[]};
       },
     },
     [{ id: 'proj-quant', title: 'Quant Lab', workspace: '/opt/quant_lab' }],
@@ -195,4 +189,13 @@ test('zh-CN.json and en-US.json keep 100% key parity for all creation, quota, an
     assert.ok(zhJson[required], `missing zh-CN key: ${required}`);
     assert.ok(enJson[required], `missing en-US key: ${required}`);
   }
+});
+
+test('installed tool with zero history and zero workspace grants remains selectable', async()=>{
+ const a=mountCreateModalState({dshInventory:async()=>({tools:[{id:'pi',installed:true,can_create:true,auth_state:'unknown'}],workspaces:[]}),dshList:()=>{throw Error('history must not be queried')}});
+ a.startCreateConversation();await a.selectCreationDevice('vps2');
+ assert.equal(a.creationMode.value,'pi');assert.equal(a.creationError.value,'');
+ assert.equal(a.creationAvailableTools.value.find(t=>t.id==='pi').available,true);
+ assert.equal(a.creationWorkspaces.value.length,0);
+ a.creationWorkspace.value='/srv/new-project';assert.equal(a.creationWorkspace.value,'/srv/new-project');
 });

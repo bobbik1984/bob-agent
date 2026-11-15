@@ -9,6 +9,8 @@
 //! - `ModelHubRuntime` managing `model_providers.json`, `model_hub_state.json`,
 //!   `online_cache.json`, BYOK execution, and Online Client API v1 calls.
 
+pub mod tool_inventory;
+pub mod tool_policy;
 pub mod agy_directory;
 pub mod budget;
 pub mod capability_borrowing;
