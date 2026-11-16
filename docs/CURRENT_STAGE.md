@@ -983,3 +983,30 @@ TP4 扩展矩阵仍保留：真实审批等待中停用、已有长任务取消�
   - `~/work/common/chief_briefing.py` + `~/work/common/test_chief_briefing.py`：跨节点可移植的脱敏战报聚合脚本（产出 `interchange/chief_briefing.{yaml,json,md}`）。
   - `crates/bob-node/src/chief_service.rs`（新增）及 `bot_access.rs`、`jarvis.rs`、`lib.rs`：扩展 `Grant` 权限（`briefing_read`、`orders_submit`、`orders_read`），新增 `bob_briefing` / `bob_order_submit` / `bob_orders` MCP 工具，将待批指令接入 Jarvis 统一审批卡队列（`chief-order-*`），新增机主专用 `app_chief_orders_list` / `app_chief_order_complete` 回执接口。
 - **验收状态**：已完成。`~/work/common/test_chief_briefing.py` 在 `X1C` 与 `VPS2`（`srv1471410`）双端单测 `2/2` 通过，`VPS2` 经 Syncthing 自动收敛并独立生成 `interchange/chief_briefing.{json,yaml,md}`（零 `X1C` 在线依赖）；`X1T` 完成首批 6 个核心 Git 仓库克隆落位 `/home/bobbik/work/code/` 并注册至 DSH `workspace.json`（共 13 个工作区），`VPS2`/`VPS3` GitHub SSH 环境就绪；`cargo test --offline -p bob-node --lib -- --test-threads=1` 全量 `55/55` 通过（含新增 `chief_service` 3 项多参谋长平权流转+人工审批回执、零损耗退订吊销、幂等冲突与 `403 BOT_SCOPE_DENIED` 隔离测试，以及 `bot_access` 16 项、`jarvis` 6 项模块并发单测通过；注：Windows 多线程并发跑全套测试时既有 `bob-runtime::worker_ledger` 存在 NTFS `rename` 偶发文件锁争用，串行 `--test-threads=1` 全绿）。
+
+---
+
+### 5.4 原生执行记录折叠、待批独立卡片、工作区自动授权与手机浏览器通知（2026-11-16）
+
+- **目标与改动**：
+  1. **执行记录默认折叠 + 待批双重分离**：[NativeActivity.vue](apps/bob-app/src/components/NativeActivity.vue) 与 [native-activity.mjs](apps/bob-app/src/native-activity.mjs) 将工具执行日志与仅旁观记录收进默认折叠的 `<details>`，把当前可操作确认项渲染为折叠区外独立卡片，并显示剩余分钟数；[DshSessions.vue](apps/bob-app/src/components/DshSessions.vue) 在输入框上方同步悬浮快捷确认条（`.dsh-pending-approval-bar`），支持直接允许/拒绝/一键定位卡片或开启提醒。
+  2. **新增「工作区自动读写 (`workspace_auto`)」档位 + 30 分钟等待窗口**：[agy_directory.rs](crates/bob-runtime/src/agy_directory.rs) 与 [agy_index_probe.py](crates/bob-runtime/src/agy_index_probe.py) 将超时上限由 5 分钟延至 30 分钟（`1800000ms`，超时仍安全拒绝），并在 `workspace_auto` 下自动放行工作区目录内的常规读写与命令、对高危命令（如 `rm -rf`/`git reset --hard`/`git push --force`/`sudo` 等）、跨工作区路径与 `AskUserQuestion` 继续挂起人工确认；前端选择持久化至 `localStorage`。
+  3. **浏览器与手机 PWA 系统通知 + VAPID Web Push 唤醒**：新增 [approval-notifications.mjs](apps/bob-app/src/approval-notifications.mjs)，更新 [sw.js](apps/bob-app/public/sw.js)、[main.js](apps/bob-app/src/main.js)、[useJarvisHome.mjs](apps/bob-app/src/composables/useJarvisHome.mjs)、[SettingsView.vue](apps/bob-app/src/views/SettingsView.vue)（任务设置页提供系统通知状态、一键开启与测试通知，含 iOS 主屏幕 PWA 引导）及 [push_channels.rs](crates/bob-node/src/push_channels.rs) / [lib.rs](crates/bob-node/src/lib.rs) / [jarvis.rs](crates/bob-node/src/jarvis.rs) / [chief_service.rs](crates/bob-node/src/chief_service.rs) 的防重复 VAPID 空载荷推送唤醒与 `app_push_status`/`app_push_test`。
+- **验收状态**：源码及单元测试全绿（连同 `§5.5` 一起提交发布至 `bob-online` 与 `X1T`）：
+  - 前端 Node 单测（含新增 [approval-ux-notify.test.mjs](apps/bob-app/tests/approval-ux-notify.test.mjs) 等 8 项首批用例）：**`63/63` 通过**（`0 failed`）；
+  - Python 原生流单测 `test_native_stream.py`：**`139/139` 通过**（含新增 30 分钟 TTL 与 `workspace_auto` 放行/高危拦截用例）；
+  - Rust 定向离线单测：`bob-runtime` `agy_directory` **`10/10` 通过**、`bob-node` `push_channels` **`6/6` 通过**、`bob-node` `chief_service` **`3/3` 通过**。
+
+---
+
+### 5.5 日程/待办 ISO 日期确定性解析、防三年年份偏移门禁与个人事务自动刷新（2026-11-16）
+
+- **根因定位**：`BobToolBus`（[tool_bus.rs](crates/bob-runtime/src/tool_bus.rs)）原将 `schedule_create` / `todo_add` 的时间参数暴露为 `epoch millis` 整数（`start_at` / `due_at`），导致模型心算时间戳时发生 `1700265600000`（`2023-11-18 08:00` UTC+8，向过去偏移三年）错误；且 `schedule_list` 仅返整数毫秒，前端对话结束亦未自动刷新 `personalOps`。
+- **关键改动**：
+  1. **确定性本地 ISO 日期解析与合法性校验**（[assistant.rs](crates/bob-runtime/src/assistant.rs)）：强化 `parse_datetime_utc8_ms` 支持 `+08:00` / `Z` / 点号与斜杠分隔及真日历合法性校验（拒绝如 `2026-02-30`）；新增 `utc8_civil_date`、`parse_flexible_datetime_utc8_ms`（支持无年份简写 `MM-DD` / `MM.DD` / `MM/DD` 按当前本地时间推算及跨年滚动）与 `rebase_past_year_if_needed` 保护旧版提案通道。
+  2. **ToolBus 字符串日期入参、年份错位硬拒绝与零弹窗直写**（[tool_bus.rs](crates/bob-runtime/src/tool_bus.rs)、[native_harness.rs](crates/bob-runtime/src/native_harness.rs)）：`schedule_create` 与 `todo_add` 主参数切换为本地 ISO 字符串 `start_time` / `end_time` / `due_time` / `reminder_time`（`kind='event'` 要求 `start_time`，可选 `allow_past: true` 才允许历史年份）；内置 `validate_not_hallucinated_year` 在工具写入 SQLite 前硬拦截过去年份或未来超 5 年的幻觉日期（含兼容旧整数入参回落），保持 `card: None`（无额外确认弹窗，顺畅直记），并在返回与 `schedule_list` 中注入可读 `start_local` / `end_local` 字段；同步强化 Clerk/Maker 提示词锚定当前年份并简明复述已保存日期。
+  3. **前端实时刷新与线上异常数据修复**：[useJarvisHome.mjs](apps/bob-app/src/composables/useJarvisHome.mjs) 在 `runJarvisTurn`、`refreshWorkerTasks` 终态与 `approveAction` 后自动触发 `loadPersonalOps()` 刷新日程页；已于 `VPS2`（`Hostinger`）`/opt/bob-online/data/kernel.sqlite` 先生成一致在线备份 `/opt/bob-online/backups/kernel-before-sched-fix-20261116.sqlite` 后将 `sched-1794814964794`（「白鹅潭高品质现场交流会」）由 `1700265600000` 修正为 `1794877200000`（`2026-11-17 09:00` UTC+8）。
+- **验收状态**：本地定向上游/下游测试全绿，即将连同 `§5.4` 提交并编译部署至 `VPS2`（`bob-online`）与 `X1T`（`bob-node-access`）：
+  - `cargo test --offline -p bob-runtime --lib`（`tool_bus` `7/7` 含 `test_schedule_create_iso_string_and_year_guardrail`、`assistant` `4/4`、`native_harness` `9/9`、`routines` `9/9`）全部通过；
+  - `cargo test --offline -p bob-node --lib`（`push_channels` `6/6`、`chief_service` `3/3`）通过；
+  - `test_native_stream.py` **`139/139` 通过**；前端 9 组关联单测 **`78/78` 通过**。

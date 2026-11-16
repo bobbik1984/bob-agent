@@ -2259,6 +2259,61 @@ def _permission_owner_alive(rec, sid):
         return all(v.encode() in argv for v in ('native_worker',sid,rec['request_id']))
     except (OSError,ValueError,KeyError):return False
 
+NATIVE_APPROVAL_TTL_MS = 30 * 60 * 1000
+_HIGH_RISK_CMD_RE = re.compile(
+    r'(?:^|[;\s&|`(])(?:sudo\b|mkfs(?:\.[a-z0-9]+)?\b|dd\s+if=|shutdown\b|reboot\b|poweroff\b|'
+    r'rm\s+-[^\n]*r|rmdir\s+/s|del\s+/[sq]|remove-item\b[^\n]*-recurse|'
+    r'git\s+reset\s+--hard|git\s+clean\s+-[^\n]*f|git\s+push\b[^\n]*(?:--force|-f\b)|'
+    r'systemctl\s+(?:stop|disable|mask)|kill\s+-9\b|drop\s+(?:table|database)\b|truncate\s+table\b)',
+    re.IGNORECASE,
+)
+
+
+def _is_high_risk_tool_call(tool_name, payload, work_cwd=None):
+    name = str(tool_name or '').strip()
+    if name == 'AskUserQuestion':
+        return True
+    cmds, paths = [], []
+
+    def _collect(node, depth):
+        if depth > 4:
+            return
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k in ('command', 'cmd') and isinstance(v, str) and v.strip():
+                    cmds.append(v.strip())
+                elif k in ('file_path', 'filePath', 'path', 'target_file', 'cwd') and isinstance(v, str) and v.strip():
+                    paths.append(v.strip())
+                elif isinstance(v, (dict, list)):
+                    _collect(v, depth + 1)
+        elif isinstance(node, list):
+            for item in node[:32]:
+                if isinstance(item, (dict, list)):
+                    _collect(item, depth + 1)
+
+    _collect(payload, 0)
+    if name in ('Bash', 'item/commandExecution/requestApproval') and not cmds:
+        return True
+    for cmd in cmds:
+        if _HIGH_RISK_CMD_RE.search(cmd) or any(tok in cmd.lower() for tok in ('/.ssh', '~\\.ssh', '/.aws', '/etc/passwd', '/etc/shadow')):
+            return True
+    if paths:
+        base = Path(work_cwd).expanduser().resolve() if work_cwd else None
+        for raw_p in paths:
+            low = raw_p.replace('\\', '/').lower()
+            if any(tok in low for tok in ('/.ssh', '/.aws', '/etc/passwd', '/etc/shadow', '/.gnupg')):
+                return True
+            if base is not None:
+                try:
+                    p_obj = Path(raw_p).expanduser()
+                    cand = (p_obj if p_obj.is_absolute() else (base / p_obj)).resolve()
+                    if cand != base and base not in cand.parents:
+                        return True
+                except OSError:
+                    return True
+    return False
+
+
 def _handle_claude_permission(cfg, pipe, frame):
     request=frame.get('request') or {};identity=frame.get('request_id')
     if not isinstance(identity,str) or not identity or len(identity)>128:raise ValueError('HARNESS_PROTOCOL_INVALID')
@@ -2285,7 +2340,15 @@ def _handle_claude_permission(cfg, pipe, frame):
         'sessionId':cfg['session_id'].split(':',1)[1],
         'toolCall':{'title':tool_name,'input':tool_input,'tool_use_id':request.get('tool_use_id')},
         'options':options}}
-    if tool_name in cfg.get('claude_tools',[]) and len(json.dumps(tool_input,ensure_ascii=False))<=8192 and cfg.get('approval_mode')=='interactive' and _open_native_permission(cfg,normalized,1):return
+    mode = cfg.get('approval_mode')
+    if tool_name in cfg.get('claude_tools',[]) and len(json.dumps(tool_input,ensure_ascii=False))<=8192:
+        if (mode=='read_only' and tool_name in ('Read','Grep','Glob','WebFetch','WebSearch')) or (
+            mode=='workspace_auto' and not _is_high_risk_tool_call(tool_name,tool_input,cfg.get('work_cwd'))
+        ):
+            pipe.send({'type':'control_response','response':{'subtype':'success','request_id':identity,'response':{'behavior':'allow','updatedInput':tool_input}}})
+            return
+        if mode in ('interactive','workspace_auto','read_only') and _open_native_permission(cfg,normalized,1):
+            return
     pipe.send({'type':'control_response','response':{'subtype':'success','request_id':identity,'response':{'behavior':'deny','message':'Tool execution has not been approved'}}})
 
 def _open_native_permission(cfg, frame, serial):
@@ -2318,7 +2381,7 @@ def _open_native_permission(cfg, frame, serial):
             options=[x for x in options if x['kind']!='allow_once']
             detail=detail[:8192]+'…'
         entry={'id':str(uuid.uuid4()),'frame':{'id':identity},'serial':serial,'options':options,'title':str(tool.get('title') or '')[:512],'detail':detail,
-            'owner':_permission_owner(rec,cfg['session_id']),'pid':rec['pid'],'expires_at':_now()+300000,'status':'pending'}
+            'owner':_permission_owner(rec,cfg['session_id']),'pid':rec['pid'],'expires_at':_now()+NATIVE_APPROVAL_TTL_MS,'status':'pending'}
         if frame.get('protocol')=='claude':
             entry.update(protocol='claude',original_input=frame['original_input'])
         elif frame.get('protocol')=='codex':
@@ -2349,7 +2412,7 @@ def submit_native_permission(cfg):
         if sid.startswith('claude-jsonl:') and any(x['id']==choice and x['kind']=='allow_once' for x in entry['options']):
             policy=rec.get('tool_authorization') or {}
             current=cfg.get('claudeTools',[])
-            if policy.get('version')!=1 or policy.get('approval_mode')!='interactive' or entry.get('title') not in policy.get('tools',[]) or not isinstance(current,list) or entry.get('title') not in current:
+            if policy.get('version')!=1 or policy.get('approval_mode') not in ('interactive','workspace_auto','read_only') or entry.get('title') not in policy.get('tools',[]) or not isinstance(current,list) or entry.get('title') not in current:
                 raise ValueError('HARNESS_TOOL_NOT_GRANTED')
         entry.update(status='queued',choice=choice)
         db.execute('UPDATE native_permissions SET body=? WHERE id=?',(json.dumps(entry),pid))
@@ -2475,7 +2538,7 @@ class AgyAcpSession:
                 self.pipe.send({'jsonrpc': '2.0', 'method': 'session/cancel', 'params': {'sessionId': self.raw}})
                 cancel_sent = True
                 _stream_update(rid, cancel_dispatched_at=_now())
-            if cfg.get('approval_mode') == 'interactive':
+            if cfg.get('approval_mode') in ('interactive', 'workspace_auto', 'read_only'):
                 _flush_native_permissions(cfg, self.pipe)
             frame = self.pipe.receive(.5)
             if frame is None: continue
@@ -2487,7 +2550,13 @@ class AgyAcpSession:
                 if len(json.dumps(frame, ensure_ascii=False).encode('utf-8')) > 262144:
                     raise ValueError('HARNESS_OUTPUT_LIMIT')
                 _capture_agy_event(cfg, frame, wanted)
-                if frame['method'] == 'session/request_permission' and cfg.get('approval_mode') == 'interactive':
+                if frame['method'] == 'session/request_permission' and cfg.get('approval_mode') in ('interactive', 'workspace_auto'):
+                    if cfg.get('approval_mode') == 'workspace_auto' and not _is_high_risk_tool_call('agy', params.get('toolCall') or {}, cfg.get('work_cwd')):
+                        allow_id = next((o.get('optionId') for o in (params.get('options') or []) if isinstance(o, dict) and o.get('kind') == 'allow_once' and o.get('optionId')), None)
+                        if allow_id:
+                            self.pipe.send({'jsonrpc': '2.0', 'id': frame['id'], 'result': {'outcome': {'outcome': 'selected', 'optionId': allow_id}}})
+                            _capture_agy_event(cfg, frame, wanted, decision='approved')
+                            continue
                     if _open_native_permission(cfg, frame, wanted): continue
                 if self.deny_request(frame):
                     if frame['method'] == 'session/request_permission':
@@ -2528,7 +2597,7 @@ def _claude_tool_arguments(cfg):
     if not isinstance(tools,list) or len(tools)>32 or any(not isinstance(t,str) or not re.fullmatch(r'[A-Z][A-Za-z0-9_]{0,63}',t) or t=='Default' for t in tools):
         raise ValueError('HARNESS_TOOL_POLICY_INVALID')
     tools=list(dict.fromkeys(tools))
-    if cfg.get('approval_mode')!='interactive' or not tools:
+    if cfg.get('approval_mode') not in ('interactive','workspace_auto','read_only') or not tools:
         return ['--tools','','--permission-mode','plan']
     return ['--tools',','.join(tools),'--permission-mode','default',
         '--permission-prompt-tool','stdio','--settings',
@@ -2584,7 +2653,7 @@ def _native_worker(cfg):
                         break
                     if time.monotonic()>=init_deadline:raise ValueError('HARNESS_TIMEOUT')
                 pipe.send({'method':'initialized','params':{}})
-            codex_interactive = (not creating and cfg.get('approval_mode') == 'interactive')
+            codex_interactive = (not creating and cfg.get('approval_mode') in ('interactive', 'workspace_auto'))
             params = {'cwd':cwd, 'approvalPolicy':'on-request' if codex_interactive else 'never', 'sandbox':'workspace-write' if codex_interactive else 'read-only'}
             if not creating:
                 params['threadId'] = raw
@@ -2643,7 +2712,7 @@ def _native_worker(cfg):
                 elif codex_stream.turn_id:
                     pipe.send({'id':4,'method':'turn/interrupt','params':{'threadId':raw,'turnId':codex_stream.turn_id}});cancel_sent=True
                 if cancel_sent: _stream_update(rid,cancel_dispatched_at=_now())
-            if tool in ('claude','codex') and cfg.get('approval_mode')=='interactive':_flush_native_permissions(cfg,pipe)
+            if tool in ('claude','codex') and cfg.get('approval_mode') in ('interactive','workspace_auto','read_only'):_flush_native_permissions(cfg,pipe)
             frame, already_answered = ready_frames.popleft() if ready_frames else (pipe.receive(timeout=0.5), False)
             if frame is None: continue
             _stream_update(rid,last_protocol_frame=str(frame.get('method') or frame.get('event') or frame.get('type') or frame.get('id'))[:100])
@@ -2655,9 +2724,12 @@ def _native_worker(cfg):
                     if codex_stream.turn_id:
                         _capture_codex_event(sid,raw,frame,'worker:'+rid,rid,codex_stream.turn_id)
                     if not already_answered:
-                        codex_interactive = (not creating and cfg.get('approval_mode') == 'interactive')
+                        codex_interactive = (not creating and cfg.get('approval_mode') in ('interactive', 'workspace_auto'))
                         if codex_interactive and identity and codex_stream.turn_id and str(frame.get('method')).endswith('/requestApproval'):
                             fp = frame.get('params') if isinstance(frame.get('params'), dict) else {}
+                            if cfg.get('approval_mode') == 'workspace_auto' and not _is_high_risk_tool_call(str(frame.get('method')), fp, cfg.get('work_cwd')):
+                                pipe.send({'id': frame['id'], 'result': {'decision': 'accept'}})
+                                continue
                             cmd = fp.get('command')
                             fpath = fp.get('filePath') or fp.get('path') or fp.get('reason')
                             title = str(cmd or fpath or frame.get('method') or 'Codex approval')[:512]
@@ -2697,7 +2769,7 @@ def _native_worker(cfg):
                         _stream_update(rid,execution_status='cancelled',ended_at=_now(),cancel_confirmed_by='not_dispatched')
                         _stream_event(cfg,'cancelled');return
                     _stream_update(rid,native_session_id=raw,turn_start_requested=True)
-                    codex_interactive = (not creating and cfg.get('approval_mode') == 'interactive')
+                    codex_interactive = (not creating and cfg.get('approval_mode') in ('interactive', 'workspace_auto'))
                     pipe.send({'id':3,'method':'turn/start','params':{'threadId':raw,'input':[{'type':'text','text':text}],
                         'approvalPolicy':'on-request' if codex_interactive else 'never',
                         'sandboxPolicy':{'type':'workspaceWrite'} if codex_interactive else {'type':'readOnly'}}})
@@ -3114,7 +3186,8 @@ def prompt_session(cfg):
     if sid.startswith('agy:') and not (idx and idx.is_file() and row):
         raise ValueError('HARNESS_SESSION_NOT_FOUND')
     if not Path(wcwd).is_dir():raise ValueError('HARNESS_WORKSPACE_MISSING')
-    approval_mode = 'interactive' if cfg.get('approvalMode') == 'interactive' else 'deny'
+    raw_mode = cfg.get('approvalMode')
+    approval_mode = raw_mode if raw_mode in ('interactive', 'workspace_auto', 'read_only') else 'deny'
     claude_tools=cfg.get('claudeTools',[]) if sid.startswith('claude-jsonl:') else []
     takeover=bool(cfg.get('takeover'))
     _claude_tool_arguments({'approval_mode':approval_mode,'claude_tools':claude_tools})

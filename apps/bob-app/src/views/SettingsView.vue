@@ -157,6 +157,66 @@ async function saveMonthlySpendCap(val) {
     capSavedNotice.value = false;
   }, 2000);
 }
+
+const approvalNotifyState = ref({
+  supported: false,
+  permission: 'unsupported',
+  isIos: false,
+  isStandalone: false,
+  isIosNeedsHomeScreen: false,
+});
+const approvalNotifyBusy = ref(false);
+const approvalNotifyFeedback = ref('');
+
+function refreshApprovalNotifyState() {
+  const helper = globalThis.__bobApprovalNotifications;
+  if (helper?.getApprovalNotificationState) {
+    approvalNotifyState.value = helper.getApprovalNotificationState();
+  }
+}
+
+watch(
+  () => settingsOpen?.value,
+  () => {
+    refreshApprovalNotifyState();
+  },
+  { immediate: true },
+);
+
+async function handleEnableApprovalNotifications() {
+  const helper = globalThis.__bobApprovalNotifications;
+  if (!helper?.enableApprovalNotifications || approvalNotifyBusy.value) return;
+  approvalNotifyBusy.value = true;
+  approvalNotifyFeedback.value = '';
+  try {
+    const res = await helper.enableApprovalNotifications(kernelBridge);
+    if (res?.state) {
+      approvalNotifyState.value = res.state;
+    } else {
+      refreshApprovalNotifyState();
+    }
+  } finally {
+    approvalNotifyBusy.value = false;
+  }
+}
+
+async function handleSendTestApprovalNotification() {
+  const helper = globalThis.__bobApprovalNotifications;
+  if (!helper?.sendTestApprovalNotification || approvalNotifyBusy.value) return;
+  approvalNotifyBusy.value = true;
+  try {
+    await helper.sendTestApprovalNotification(kernelBridge, {
+      title: t('approvalNotifyPushTitle'),
+      body: t('approvalNotifyTestSent'),
+    });
+    approvalNotifyFeedback.value = t('approvalNotifyTestSent');
+    setTimeout(() => {
+      approvalNotifyFeedback.value = '';
+    }, 3000);
+  } finally {
+    approvalNotifyBusy.value = false;
+  }
+}
 </script>
 
 <template>
@@ -892,6 +952,57 @@ async function saveMonthlySpendCap(val) {
             </div>
           </section>
 
+          <!-- Mobile / Browser Approval Notifications Card -->
+          <section class="hub-card approval-notify-card">
+            <div class="hub-card-header">
+              <div class="hub-card-title-group">
+                <svg class="hub-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                  <path d="M9 12l2 2 4-4" />
+                </svg>
+                <h3>{{ t('approvalNotifyCardTitle') }}</h3>
+                <span class="hub-count-pill">
+                  {{
+                    t(
+                      approvalNotifyState.permission === 'granted'
+                        ? 'approvalNotifyStatusGranted'
+                        : approvalNotifyState.permission === 'denied'
+                          ? 'approvalNotifyStatusDenied'
+                          : approvalNotifyState.permission === 'default'
+                            ? 'approvalNotifyStatusDefault'
+                            : 'approvalNotifyStatusUnsupported',
+                    )
+                  }}
+                </span>
+              </div>
+              <span v-if="approvalNotifyFeedback" class="save-feedback-pill">{{ approvalNotifyFeedback }}</span>
+            </div>
+            <p class="view-card-desc">{{ t('approvalNotifyCardDesc') }}</p>
+            <p v-if="approvalNotifyState.isIosNeedsHomeScreen" class="notify-ios-hint">
+              {{ t('approvalNotifyIosPwaHint') }}
+            </p>
+            <div class="approval-notify-actions">
+              <button
+                v-if="approvalNotifyState.supported && approvalNotifyState.permission !== 'granted'"
+                type="button"
+                class="spend-preset-btn active"
+                :disabled="approvalNotifyBusy"
+                @click="handleEnableApprovalNotifications"
+              >
+                {{ t('approvalNotifyEnableBtn') }}
+              </button>
+              <button
+                v-if="approvalNotifyState.permission === 'granted'"
+                type="button"
+                class="spend-preset-btn"
+                :disabled="approvalNotifyBusy"
+                @click="handleSendTestApprovalNotification"
+              >
+                {{ t('approvalNotifyTestBtn') }}
+              </button>
+            </div>
+          </section>
+
           <!-- Monthly Spend Cap Card -->
           <section class="hub-card spend-cap-card">
             <div class="hub-card-header">
@@ -1429,5 +1540,28 @@ async function saveMonthlySpendCap(val) {
 .security-lock-switch.on .security-lock-switch-thumb {
   transform: translateX(1.18rem);
   background: var(--text-on-accent);
+}
+
+.approval-notify-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+
+.notify-ios-hint {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-warning);
+  background: var(--bg-secondary);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 0.45rem 0.65rem;
+  line-height: 1.4;
+}
+
+.approval-notify-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-xs);
 }
 </style>

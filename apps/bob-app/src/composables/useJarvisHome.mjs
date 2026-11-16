@@ -290,6 +290,9 @@ export function useJarvisHome(ctx = {}) {
           await ctx.reload().catch(() => null);
         }
         await refreshJarvisState(sessionId, { skipWorkerTasks: true });
+        try {
+          await ctx.loadPersonalOps?.();
+        } catch {}
       }
     } catch {}
 
@@ -361,6 +364,13 @@ export function useJarvisHome(ctx = {}) {
       pendingApprovals.value.splice(idx, 1, { ...pendingApprovals.value[idx], ...card });
     } else {
       pendingApprovals.value.push(card);
+    }
+    if (card?.id && (!card.status || card.status === 'pending')) {
+      globalThis.__bobApprovalNotifications?.notifyPendingApproval?.({
+        id: String(card.id),
+        title: String(card.title || 'Bob'),
+        body: String(card.summary || card.technicalDetail || ''),
+      });
     }
   }
 
@@ -537,6 +547,9 @@ export function useJarvisHome(ctx = {}) {
     if (typeof ctx.reload === 'function') {
       await ctx.reload();
     }
+    try {
+      await ctx.loadPersonalOps?.();
+    } catch {}
   }
 
   async function rejectAction(cardId) {
@@ -851,6 +864,9 @@ export function useJarvisHome(ctx = {}) {
     } finally {
       jarvisStreaming.value = false;
       jarvisSpeaking.value = false;
+      try {
+        void ctx.loadPersonalOps?.();
+      } catch {}
     }
   }
 

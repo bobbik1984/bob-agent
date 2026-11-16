@@ -437,8 +437,9 @@ impl BobToolBus {
                     "properties": {
                         "title": { "type": "string", "description": "Todo title" },
                         "notes": { "type": "string", "description": "Optional notes or details" },
-                        "due_at": { "type": "integer", "description": "Optional due timestamp in epoch millis" },
-                        "reminder_at": { "type": "integer", "description": "Optional reminder timestamp in epoch millis" }
+                        "due_time": { "type": "string", "description": "Optional due date/time in local time: 'YYYY-MM-DD HH:mm' or 'YYYY-MM-DD' (use the year from Current local time)" },
+                        "reminder_time": { "type": "string", "description": "Optional reminder time in local time: 'YYYY-MM-DD HH:mm'" },
+                        "allow_past": { "type": "boolean", "description": "Set true ONLY if the user explicitly asked to record a historical item in a past year" }
                     },
                     "required": ["title"]
                 }),
@@ -456,13 +457,14 @@ impl BobToolBus {
                     "type": "object",
                     "properties": {
                         "title": { "type": "string", "description": "Schedule item title" },
-                        "kind": { "type": "string", "enum": ["event", "todo"], "description": "Type: event (has start/end time) or todo" },
-                        "start_at": { "type": "integer", "description": "Start timestamp in epoch millis" },
-                        "end_at": { "type": "integer", "description": "Optional end timestamp in epoch millis" },
-                        "reminder_at": { "type": "integer", "description": "Optional reminder timestamp in epoch millis" },
-                        "notes": { "type": "string", "description": "Optional details or instructions" }
+                        "kind": { "type": "string", "enum": ["event", "todo"], "description": "Type: event (calendar event, default) or todo" },
+                        "start_time": { "type": "string", "description": "Start date/time in local time: 'YYYY-MM-DD HH:mm' or 'YYYY-MM-DD' (defaults to 09:00). Required when kind is 'event'. Always use Current local time's year unless specified." },
+                        "end_time": { "type": "string", "description": "Optional end date/time in local time: 'YYYY-MM-DD HH:mm'" },
+                        "reminder_time": { "type": "string", "description": "Optional reminder date/time in local time: 'YYYY-MM-DD HH:mm'" },
+                        "notes": { "type": "string", "description": "Optional details, meeting ID, or location" },
+                        "allow_past": { "type": "boolean", "description": "Set true ONLY if the user explicitly asked to record a historical event in a past year" }
                     },
-                    "required": ["title"]
+                    "required": ["title", "start_time"]
                 }),
                 risk_level: ActionRiskLevel::ReadOnly,
             },
@@ -1220,12 +1222,29 @@ impl BobToolBus {
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string();
-                let start_at = args
-                    .get("due_at")
-                    .or_else(|| args.get("start_at"))
-                    .and_then(Value::as_i64)
-                    .unwrap_or(now);
-                let reminder_at = args.get("reminder_at").and_then(Value::as_i64);
+                let allow_past = args
+                    .get("allow_past")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let due_opt = resolve_tool_time_arg(
+                    args,
+                    &["due_time", "start_time"],
+                    &["due_at", "start_at"],
+                    now,
+                )?;
+                if let Some(ts) = due_opt {
+                    validate_not_hallucinated_year(ts, now, allow_past, "due_time")?;
+                }
+                let start_at = due_opt.unwrap_or(now);
+                let reminder_at = resolve_tool_time_arg(
+                    args,
+                    &["reminder_time"],
+                    &["reminder_at"],
+                    now,
+                )?;
+                if let Some(ts) = reminder_at {
+                    validate_not_hallucinated_year(ts, now, allow_past, "reminder_time")?;
+                }
 
                 let id = format!("sched-{}", now);
                 let item = app
@@ -1244,8 +1263,7 @@ impl BobToolBus {
                     .map_err(|e| format!("SCHEDULE_ERROR: {e:?}"))?;
 
                 Ok(ToolBusOutcome::Executed {
-                    output: serde_json::to_value(&item)
-                        .map_err(|e| format!("SERIALIZATION_ERROR: {e}"))?,
+                    output: annotate_schedule_item_json(&item)?,
                     card: None,
                 })
             }
@@ -1258,12 +1276,46 @@ impl BobToolBus {
                     .get("kind")
                     .and_then(Value::as_str)
                     .unwrap_or("event");
-                let start_at = args
-                    .get("start_at")
-                    .and_then(Value::as_i64)
-                    .unwrap_or(now);
-                let end_at = args.get("end_at").and_then(Value::as_i64);
-                let reminder_at = args.get("reminder_at").and_then(Value::as_i64);
+                let allow_past = args
+                    .get("allow_past")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let start_opt = resolve_tool_time_arg(
+                    args,
+                    &["start_time", "due_time"],
+                    &["start_at"],
+                    now,
+                )?;
+                if kind == "event" && start_opt.is_none() {
+                    return Err(format!(
+                        "MISSING_START_TIME: schedule_create with kind='event' requires start_time ('YYYY-MM-DD HH:mm' or 'YYYY-MM-DD'). Current local time is '{}'.",
+                        crate::assistant::format_utc8_datetime(now)
+                    ));
+                }
+                if let Some(ts) = start_opt {
+                    validate_not_hallucinated_year(ts, now, allow_past, "start_time")?;
+                }
+                let start_at = start_opt.unwrap_or(now);
+                let end_at = resolve_tool_time_arg(args, &["end_time"], &["end_at"], now)?;
+                if let Some(e) = end_at {
+                    validate_not_hallucinated_year(e, now, allow_past, "end_time")?;
+                    if e < start_at {
+                        return Err(format!(
+                            "INVALID_END_TIME: end_time '{}' must not be earlier than start_time '{}'.",
+                            crate::assistant::format_utc8_datetime(e),
+                            crate::assistant::format_utc8_datetime(start_at)
+                        ));
+                    }
+                }
+                let reminder_at = resolve_tool_time_arg(
+                    args,
+                    &["reminder_time"],
+                    &["reminder_at"],
+                    now,
+                )?;
+                if let Some(r) = reminder_at {
+                    validate_not_hallucinated_year(r, now, allow_past, "reminder_time")?;
+                }
                 let notes = args
                     .get("notes")
                     .and_then(Value::as_str)
@@ -1287,8 +1339,7 @@ impl BobToolBus {
                     .map_err(|e| format!("SCHEDULE_ERROR: {e:?}"))?;
 
                 Ok(ToolBusOutcome::Executed {
-                    output: serde_json::to_value(&item)
-                        .map_err(|e| format!("SERIALIZATION_ERROR: {e}"))?,
+                    output: annotate_schedule_item_json(&item)?,
                     card: None,
                 })
             }
@@ -1296,10 +1347,13 @@ impl BobToolBus {
                 let items = app
                     .list_schedule_items()
                     .map_err(|e| format!("SCHEDULE_LIST_ERROR: {e:?}"))?;
+                let annotated: Vec<Value> = items
+                    .iter()
+                    .map(annotate_schedule_item_json)
+                    .collect::<Result<Vec<_>, _>>()?;
 
                 Ok(ToolBusOutcome::Executed {
-                    output: serde_json::to_value(&items)
-                        .map_err(|e| format!("SERIALIZATION_ERROR: {e}"))?,
+                    output: Value::Array(annotated),
                     card: None,
                 })
             }
@@ -2325,6 +2379,83 @@ impl BobToolBus {
     }
 }
 
+fn resolve_tool_time_arg(
+    args: &Value,
+    str_keys: &[&str],
+    int_keys: &[&str],
+    now: i64,
+) -> Result<Option<i64>, String> {
+    for key in str_keys {
+        if let Some(val) = args.get(*key) {
+            if let Some(raw) = val.as_str() {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let parsed = crate::assistant::parse_flexible_datetime_utc8_ms(trimmed, now)
+                    .ok_or_else(|| {
+                        format!(
+                            "INVALID_DATETIME: cannot parse {key}='{trimmed}'. Expected 'YYYY-MM-DD HH:mm' or 'YYYY-MM-DD'. Current local time is '{}'.",
+                            crate::assistant::format_utc8_datetime(now)
+                        )
+                    })?;
+                return Ok(Some(parsed));
+            } else if !val.is_null() {
+                return Err(format!(
+                    "INVALID_DATETIME: {key} must be a string in 'YYYY-MM-DD HH:mm' or 'YYYY-MM-DD' format. Current local time is '{}'.",
+                    crate::assistant::format_utc8_datetime(now)
+                ));
+            }
+        }
+    }
+    for key in int_keys {
+        if let Some(ms) = args.get(*key).and_then(Value::as_i64) {
+            return Ok(Some(ms));
+        }
+    }
+    Ok(None)
+}
+
+fn validate_not_hallucinated_year(
+    ts_ms: i64,
+    now: i64,
+    allow_past: bool,
+    field_name: &str,
+) -> Result<(), String> {
+    if allow_past || ts_ms <= 0 {
+        return Ok(());
+    }
+    let (parsed_year, parsed_month, parsed_day) = crate::assistant::utc8_civil_date(ts_ms);
+    let (cur_year, _, _) = crate::assistant::utc8_civil_date(now);
+    if parsed_year < cur_year || parsed_year > cur_year + 5 {
+        return Err(format!(
+            "SCHEDULE_YEAR_OUT_OF_RANGE: {field_name} resolved to '{}' (year {parsed_year}), but current local time is '{}' (year {cur_year}). Re-call using year {cur_year} (e.g. '{cur_year:04}-{parsed_month:02}-{parsed_day:02}'), or set allow_past=true ONLY if the user explicitly requested year {parsed_year}.",
+            crate::assistant::format_utc8_datetime(ts_ms),
+            crate::assistant::format_utc8_datetime(now)
+        ));
+    }
+    Ok(())
+}
+
+fn annotate_schedule_item_json(item: &bob_kernel::personal_ops::ScheduleItem) -> Result<Value, String> {
+    let mut val = serde_json::to_value(item).map_err(|e| format!("SERIALIZATION_ERROR: {e}"))?;
+    if let Some(obj) = val.as_object_mut() {
+        let start_local = if item.start_at > 0 {
+            Value::String(crate::assistant::format_utc8_datetime(item.start_at))
+        } else {
+            Value::Null
+        };
+        let end_local = item
+            .end_at
+            .filter(|&v| v > 0)
+            .map(|v| Value::String(crate::assistant::format_utc8_datetime(v)))
+            .unwrap_or(Value::Null);
+        obj.insert("start_local".to_string(), start_local);
+        obj.insert("end_local".to_string(), end_local);
+    }
+    Ok(val)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2567,6 +2698,125 @@ mod tests {
                 assert_eq!(routines.len(), 1);
             }
             _ => panic!("Expected Executed for routine_list"),
+        }
+    }
+
+    #[test]
+    fn test_schedule_create_iso_string_and_year_guardrail() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = create_test_app(dir.path());
+        let mut bus = BobToolBus::with_approval_store(dir.path()).unwrap();
+
+        let (cur_year, _, _) = crate::assistant::utc8_civil_date(crate::now_millis());
+        let valid_date = format!("{cur_year:04}-11-17");
+
+        // 1. ISO date string succeeds seamlessly without confirmation card
+        let ok_outcome = bus
+            .execute(
+                "schedule_create",
+                &json!({
+                    "title": "白鹅潭高品质现场交流会",
+                    "start_time": valid_date,
+                    "notes": "RMeet号：987500685"
+                }),
+                ToolExecutionMode::Interactive,
+                &mut app,
+            )
+            .unwrap();
+        match ok_outcome {
+            ToolBusOutcome::Executed { output, card } => {
+                assert!(card.is_none());
+                assert_eq!(output["title"], "白鹅潭高品质现场交流会");
+                assert_eq!(output["start_local"], format!("{cur_year:04}-11-17 09:00"));
+            }
+            _ => panic!("Expected Executed for schedule_create"),
+        }
+
+        // 2. schedule_list annotates items with human-readable start_local
+        let list_outcome = bus
+            .execute("schedule_list", &json!({}), ToolExecutionMode::Interactive, &mut app)
+            .unwrap();
+        match list_outcome {
+            ToolBusOutcome::Executed { output, card } => {
+                assert!(card.is_none());
+                let arr = output.as_array().unwrap();
+                assert_eq!(arr.len(), 1);
+                assert_eq!(arr[0]["start_local"], format!("{cur_year:04}-11-17 09:00"));
+            }
+            _ => panic!("Expected Executed for schedule_list"),
+        }
+
+        // 3. Past-year ISO string (cur_year - 3) is deterministically rejected without persisting
+        let past_str = format!("{:04}-11-18 08:00", cur_year - 3);
+        let past_err = bus
+            .execute(
+                "schedule_create",
+                &json!({
+                    "title": "Past Hallucination",
+                    "start_time": past_str
+                }),
+                ToolExecutionMode::Interactive,
+                &mut app,
+            )
+            .unwrap_err();
+        assert!(past_err.contains("SCHEDULE_YEAR_OUT_OF_RANGE"));
+
+        // 4. Legacy 2023 epoch millis (1700265600000) is also rejected without persisting
+        let legacy_err = bus
+            .execute(
+                "schedule_create",
+                &json!({
+                    "title": "Epoch Hallucination",
+                    "start_at": 1700265600000_i64
+                }),
+                ToolExecutionMode::Interactive,
+                &mut app,
+            )
+            .unwrap_err();
+        assert!(legacy_err.contains("SCHEDULE_YEAR_OUT_OF_RANGE"));
+        assert_eq!(app.list_schedule_items().unwrap().len(), 1);
+
+        // 5. Explicit allow_past: true permits historical events intentionally
+        let allow_past_outcome = bus
+            .execute(
+                "schedule_create",
+                &json!({
+                    "title": "Historical Retrospective",
+                    "start_time": past_str,
+                    "allow_past": true
+                }),
+                ToolExecutionMode::Interactive,
+                &mut app,
+            )
+            .unwrap();
+        match allow_past_outcome {
+            ToolBusOutcome::Executed { output, card } => {
+                assert!(card.is_none());
+                assert_eq!(output["start_local"], past_str);
+            }
+            _ => panic!("Expected Executed for allow_past schedule_create"),
+        }
+
+        // 6. Yearless shorthand "11.17" resolves to current/next year cleanly
+        let short_outcome = bus
+            .execute(
+                "schedule_create",
+                &json!({
+                    "title": "Yearless Shorthand",
+                    "start_time": "11.17 14:30"
+                }),
+                ToolExecutionMode::Interactive,
+                &mut app,
+            )
+            .unwrap();
+        match short_outcome {
+            ToolBusOutcome::Executed { output, card } => {
+                assert!(card.is_none());
+                let start_local = output["start_local"].as_str().unwrap();
+                assert!(start_local.ends_with("-11-17 14:30"));
+                assert!(!start_local.starts_with("2023"));
+            }
+            _ => panic!("Expected Executed for yearless schedule_create"),
         }
     }
 }

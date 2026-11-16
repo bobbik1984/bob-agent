@@ -1511,4 +1511,59 @@ class NativeTests(unittest.TestCase):
   self.assertEqual(rel_res['status'],'released');self.assertTrue(rel_res['released'])
   kill_mock.assert_called_with(8802,p.signal.SIGTERM)
 
+ def test_native_permission_ttl_is_thirty_minutes_and_expires_to_deny(self):
+  from unittest.mock import Mock
+  self.assertEqual(p.NATIVE_APPROVAL_TTL_MS,1800000)
+  sid='claude-jsonl:original';rid='ttl-30m'
+  cfg={'session_id':sid,'request_id':rid,'approval_mode':'interactive','claude_tools':['Bash']}
+  rec=dict(cfg,execution_status='running',pid=123,started_at=p._now(),tool_authorization={'version':1,'approval_mode':'interactive','tools':['Bash']})
+  with p.closing(p._stream_db()) as db,db:
+   db.execute('INSERT INTO requests VALUES(?,?,?,?)',(rid,sid,'h',json.dumps(rec)))
+  t0=p._now()
+  pipe=Mock()
+  p._handle_claude_permission(cfg,pipe,{'request_id':'p-ttl','request':{'subtype':'can_use_tool','tool_name':'Bash','input':{'command':'rm -rf /tmp/demo'}}})
+  t1=p._now()
+  pipe.send.assert_not_called()
+  with p.closing(p._stream_db()) as db,db:
+   entry=json.loads(db.execute('SELECT body FROM native_permissions WHERE request=?',(rid,)).fetchone()[0])
+   self.assertGreaterEqual(entry['expires_at'],t0+1800000)
+   self.assertLessEqual(entry['expires_at'],t1+1800000)
+   entry['expires_at']=p._now()-1
+   db.execute('UPDATE native_permissions SET body=? WHERE id=?',(json.dumps(entry),entry['id']))
+  p._flush_native_permissions(cfg,pipe)
+  pipe.send.assert_called_once()
+  self.assertEqual(pipe.send.call_args.args[0]['response']['response']['behavior'],'deny')
+
+ def test_workspace_auto_allows_safe_in_workspace_and_intercepts_high_risk(self):
+  from unittest.mock import Mock
+  ws=Path(self.tmp.name)/'repo';ws.mkdir(parents=True)
+  sid='claude-jsonl:original';rid='ws-auto-claude'
+  cfg={'session_id':sid,'request_id':rid,'approval_mode':'workspace_auto','work_cwd':str(ws),'claude_tools':['Read','Edit','Bash','AskUserQuestion']}
+  rec=dict(cfg,execution_status='running',pid=123,started_at=p._now(),tool_authorization={'version':1,'approval_mode':'workspace_auto','tools':['Read','Edit','Bash','AskUserQuestion']})
+  with p.closing(p._stream_db()) as db,db:
+   p._permission_schema(db)
+   db.execute('INSERT INTO requests VALUES(?,?,?,?)',(rid,sid,'h',json.dumps(rec)))
+  pipe=Mock()
+  p._handle_claude_permission(cfg,pipe,{'request_id':'safe-read','request':{'subtype':'can_use_tool','tool_name':'Edit','input':{'file_path':'src/app.py'}}})
+  p._handle_claude_permission(cfg,pipe,{'request_id':'safe-cmd','request':{'subtype':'can_use_tool','tool_name':'Bash','input':{'command':'pytest -q'}}})
+  self.assertEqual(pipe.send.call_count,2)
+  for c in pipe.send.call_args_list:
+   self.assertEqual(c.args[0]['response']['response']['behavior'],'allow')
+  with p.closing(p._stream_db()) as db:
+   self.assertEqual(db.execute('SELECT COUNT(*) FROM native_permissions WHERE request=?',(rid,)).fetchone()[0],0)
+  self.assertTrue(p._is_high_risk_tool_call('Bash',{'command':'git push --force origin main'},str(ws)))
+  self.assertTrue(p._is_high_risk_tool_call('Bash',{'command':'rm -rf ./dist'},str(ws)))
+  self.assertTrue(p._is_high_risk_tool_call('Edit',{'file_path':'../outside.txt'},str(ws)))
+  self.assertFalse(p._is_high_risk_tool_call('Edit',{'file_path':str(ws/'sub'/'ok.txt')},str(ws)))
+  self.assertTrue(p._is_high_risk_tool_call('AskUserQuestion',{'questions':[{'question':'Which?'}]},str(ws)))
+  pipe_risk=Mock()
+  p._handle_claude_permission(cfg,pipe_risk,{'request_id':'risk-cmd','request':{'subtype':'can_use_tool','tool_name':'Bash','input':{'command':'git reset --hard HEAD~1'}}})
+  pipe_risk.send.assert_not_called()
+  with p.closing(p._stream_db()) as db:
+   entry=json.loads(db.execute('SELECT body FROM native_permissions WHERE request=?',(rid,)).fetchone()[0])
+  with patch.object(p,'_permission_owner_alive',return_value=True):
+   p.submit_native_permission({'sessionId':sid,'requestId':rid,'permissionId':entry['id'],'optionId':'allow_once','claudeTools':['Read','Edit','Bash','AskUserQuestion']})
+  p._flush_native_permissions(cfg,pipe_risk)
+  self.assertEqual(pipe_risk.send.call_args.args[0]['response']['response']['behavior'],'allow')
+
 if __name__=='__main__':unittest.main()

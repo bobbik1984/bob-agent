@@ -242,6 +242,12 @@ pub fn save_suspended_turns(
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, raw.as_bytes()).map_err(|_| "SUSPENDED_SAVE_FAILED")?;
     std::fs::rename(&tmp, &path).map_err(|_| "SUSPENDED_SAVE_FAILED")?;
+    for approval_id in file.turns.keys() {
+        crate::push_channels::notify_approval_wakeup_async(
+            data_dir.to_path_buf(),
+            approval_id.clone(),
+        );
+    }
     Ok(())
 }
 

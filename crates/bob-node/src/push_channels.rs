@@ -22,10 +22,30 @@ use ring::signature::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::VecDeque;
 use std::io::Write;
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
+
+static NOTIFIED_APPROVAL_IDS: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
+
+pub fn mark_approval_notified_once(id: &str) -> bool {
+    let key = id.trim();
+    if key.is_empty() {
+        return false;
+    }
+    let queue = NOTIFIED_APPROVAL_IDS.get_or_init(|| Mutex::new(VecDeque::new()));
+    let mut guard = queue.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.iter().any(|item| item == key) {
+        return false;
+    }
+    if guard.len() >= 256 {
+        guard.pop_front();
+    }
+    guard.push_back(key.to_string());
+    true
+}
 
 // ---------------------------------------------------------------------------
 // 1. VAPID Web Push Store & Crypto
@@ -232,6 +252,103 @@ impl PushStore {
         }
 
         Ok(sent)
+    }
+
+    pub fn send_web_push_wakeups(&mut self, now_secs: i64) -> Result<usize, &'static str> {
+        if self.data.subscriptions.is_empty() {
+            return Ok(0);
+        }
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .map_err(|_| "CLIENT_BUILD_FAILED")?;
+
+        let mut sent = 0usize;
+        let mut expired_endpoints: Vec<String> = Vec::new();
+        for sub in &self.data.subscriptions {
+            let Ok(auth_header) = self.create_vapid_auth_header(&sub.endpoint, now_secs) else {
+                continue;
+            };
+            if let Ok(resp) = client
+                .post(&sub.endpoint)
+                .header("Authorization", auth_header)
+                .header("TTL", "1800")
+                .header("Urgency", "high")
+                .body(Vec::new())
+                .send()
+            {
+                let status = resp.status().as_u16();
+                if (200..300).contains(&status) {
+                    sent += 1;
+                } else if status == 404 || status == 410 {
+                    expired_endpoints.push(sub.endpoint.clone());
+                }
+            }
+        }
+        if !expired_endpoints.is_empty() {
+            self.data
+                .subscriptions
+                .retain(|s| !expired_endpoints.iter().any(|e| e == &s.endpoint));
+            let _ = self.save_atomic();
+        }
+        Ok(sent)
+    }
+}
+
+pub fn notify_approval_wakeup_async(data_dir: PathBuf, approval_key: String) {
+    if !mark_approval_notified_once(&approval_key) {
+        return;
+    }
+    let Ok(mut store) = PushStore::open(&data_dir) else {
+        return;
+    };
+    if store.list_subscriptions().is_empty() {
+        return;
+    }
+    std::thread::spawn(move || {
+        let _ = store.send_web_push_wakeups(now_millis() / 1000);
+    });
+}
+
+pub fn notify_native_page_approvals(data_dir: &Path, page: &Value) {
+    let mut approvals_to_notify: Vec<String> = Vec::new();
+    if let Some(snapshots) = page.get("snapshots").and_then(Value::as_array) {
+        for snap in snapshots {
+            collect_pending_approval_ids(snap.get("activity"), &mut approvals_to_notify);
+        }
+    }
+    if let Some(events) = page.get("events").and_then(Value::as_array) {
+        for evt in events {
+            if evt.get("kind").and_then(Value::as_str) == Some("activity_snapshot") {
+                collect_pending_approval_ids(
+                    evt.get("payload").and_then(|p| p.get("activity")),
+                    &mut approvals_to_notify,
+                );
+            }
+        }
+    }
+    for permission_id in approvals_to_notify {
+        notify_approval_wakeup_async(data_dir.to_path_buf(), permission_id);
+    }
+}
+
+fn collect_pending_approval_ids(activity: Option<&Value>, out: &mut Vec<String>) {
+    let Some(arr) = activity
+        .and_then(|a| a.get("approvals"))
+        .and_then(Value::as_array)
+    else {
+        return;
+    };
+    for a in arr {
+        let is_pending = a.get("status").and_then(Value::as_str) == Some("pending")
+            && a.get("actionable").and_then(Value::as_bool) == Some(true);
+        if is_pending {
+            if let Some(pid) = a.get("permission_id").and_then(Value::as_str) {
+                if !pid.trim().is_empty() {
+                    out.push(pid.trim().to_string());
+                }
+            }
+        }
     }
 }
 
@@ -599,5 +716,30 @@ mod tests {
         assert_eq!(val["ok"], json!(true));
         assert_eq!(val["service"], json!("bob-jarvis"));
         assert_eq!(val["version"], json!("1.0.1"));
+    }
+
+    #[test]
+    fn test_approval_wakeup_dedup_and_empty_store_noop() {
+        assert!(!mark_approval_notified_once("   "));
+        assert!(mark_approval_notified_once("perm-wakeup-unique-1"));
+        assert!(!mark_approval_notified_once("perm-wakeup-unique-1"));
+        assert!(mark_approval_notified_once("perm-wakeup-unique-2"));
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut store = PushStore::open(dir.path()).expect("open push store");
+        assert_eq!(store.send_web_push_wakeups(1762000000).unwrap(), 0);
+        notify_native_page_approvals(
+            dir.path(),
+            &json!({
+                "snapshots": [{
+                    "activity": {
+                        "approvals": [
+                            {"permission_id": "perm-wakeup-unique-3", "status": "pending", "actionable": true}
+                        ]
+                    }
+                }]
+            }),
+        );
+        assert!(!mark_approval_notified_once("perm-wakeup-unique-3"));
     }
 }

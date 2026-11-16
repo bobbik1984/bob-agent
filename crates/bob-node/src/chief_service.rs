@@ -551,6 +551,7 @@ fn execute_order_submit(
     store.orders.push(order.clone());
     store.version += 1;
     save_store(data_dir, &store)?;
+    crate::push_channels::notify_approval_wakeup_async(data_dir.to_path_buf(), order.approval_id.clone());
 
     Ok(json!({
         "ok": true,

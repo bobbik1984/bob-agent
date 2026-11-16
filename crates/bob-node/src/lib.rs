@@ -486,6 +486,23 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
             store.add_subscription(sub)?;
             Ok(json!({ "ok": true }))
         }
+        "app_push_status" => {
+            let store = push_channels::PushStore::open(&ctx.runtime.data_dir)?;
+            Ok(json!({
+                "ok": true,
+                "subscriptionCount": store.list_subscriptions().len(),
+                "publicKey": store.public_key(),
+            }))
+        }
+        "app_push_test" => {
+            let mut store = push_channels::PushStore::open(&ctx.runtime.data_dir)?;
+            let sent = store.send_web_push_wakeups(at / 1000)?;
+            Ok(json!({
+                "ok": true,
+                "sent": sent,
+                "subscriptionCount": store.list_subscriptions().len(),
+            }))
+        }
         "app_proactivity_get" => {
             let store = bob_runtime::growth::ProactivityStore::open(&ctx.runtime.data_dir)?;
             Ok(store.config.to_json_value())
@@ -2964,13 +2981,17 @@ fn execute_unlocked_harness_rpc_inner(
             let connection=args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
             let session=args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
             if connection=="local" { let _=bob_runtime::agy_directory::ensure_local_grant_registered(data_dir,"local"); }
-            match bob_runtime::agy_directory::native_events(data_dir,connection,session,args["after"].as_i64().unwrap_or(0),args["epoch"].as_str()) {
+            let out = match bob_runtime::agy_directory::native_events(data_dir,connection,session,args["after"].as_i64().unwrap_or(0),args["epoch"].as_str()) {
                 Err("DSH_CONNECTION_REQUIRED") if connection!="local" => {
                     let runtime=ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
                     bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(&runtime,connection,command,args)
                 },
                 value=>value
+            };
+            if let Ok(ref page) = out {
+                push_channels::notify_native_page_approvals(data_dir, page);
             }
+            out
         }
         "app_dsh_receipt" => {
             let connection = args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
@@ -3491,7 +3512,7 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
                     "app_jarvis_chat"|"app_jarvis_approve"|"app_jarvis_reject"|"app_jarvis_approvals_list"|"app_jarvis_budget_get"|"app_jarvis_budget_set"|"app_jarvis_worker_tasks"|"app_jarvis_worker_cancel"|"app_chief_orders_list"|"app_chief_order_complete"|"app_model_presets_list"|
                     "app_features_list"|"app_feature_keep"|"app_feature_rollback"|"app_feature_toggle"|"app_feature_call"|"app_feature_storage_save"|"app_feature_report_error"|
                     "app_routines_list"|"app_routine_save"|"app_routine_trial"|"app_routine_toggle"|"app_routine_delete"|"app_routine_drafts_list"|
-                    "app_push_vapid_public_key"|"app_push_subscribe"|"app_proactivity_get"|"app_proactivity_set"|"app_morning_brief"|"app_dream_run"|"app_kb_search"|
+                    "app_push_vapid_public_key"|"app_push_subscribe"|"app_push_status"|"app_push_test"|"app_proactivity_get"|"app_proactivity_set"|"app_morning_brief"|"app_dream_run"|"app_kb_search"|
                     "app_browser_sessions_list"|"app_browser_session_open"|"app_browser_session_clear"|"app_browser_takeover_complete"|"app_browser_takeover_save_routine"|
                     "app_host_workspaces_list"|"app_host_workspace_grant"|"app_host_workspace_revoke"|"app_host_queue_list"|"app_host_queue_enqueue"|"app_host_queue_reconcile")),
                 Err(_) => false,

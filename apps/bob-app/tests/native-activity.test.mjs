@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {unconfirmActivity,settleNativeActivity,orderedNativeActivities,actionableApproval,waitingNativeApproval} from '../src/native-activity.mjs';
+import {unconfirmActivity,settleNativeActivity,orderedNativeActivities,actionableApproval,waitingNativeApproval,partitionNativeActivity} from '../src/native-activity.mjs';
 test('disconnect preserves confirmed results but invalidates active tools and approvals without mutating cache',()=>{
  const original={partial:true,items:[{id:'a',status:'running'},{id:'b',status:'completed'},{id:'c',status:'error'}],approvals:[{id:'p',status:'pending'}]};
  const result=unconfirmActivity(original);

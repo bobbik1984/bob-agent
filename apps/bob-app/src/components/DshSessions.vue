@@ -22,7 +22,22 @@ const awayFromLatest=ref(false),chatContent=ref(null);
 const chatScroll=createChatScroll(value=>{awayFromLatest.value=value;});
 watch([reader,chatContent],()=>chatScroll.bind(reader.value),{flush:'post'});
 const pullUpDistance=ref(0),attachments=ref([]),fileInput=ref(null);let touchStartY=null,wheelOverscroll=0,wheelResetTimer;
-const approvalMode=ref('interactive'),takeoverPrompt=ref(null),terminalHolderOverride=ref(null),bobHolderOverride=ref(null),handoffCardOpen=ref(false),releasingHolder=ref(false),copiedCliCmd=ref(false);
+const APPROVAL_MODES = ['interactive', 'workspace_auto', 'read_only', 'deny'];
+function readSavedApprovalMode() {
+  try {
+    const store = typeof localStorage !== 'undefined' ? localStorage : globalThis.localStorage;
+    const saved = store?.getItem?.('bob.dsh.approvalMode');
+    if (saved && APPROVAL_MODES.includes(saved)) return saved;
+  } catch {}
+  return 'interactive';
+}
+const approvalMode=ref(readSavedApprovalMode()),takeoverPrompt=ref(null),terminalHolderOverride=ref(null),bobHolderOverride=ref(null),handoffCardOpen=ref(false),releasingHolder=ref(false),copiedCliCmd=ref(false);
+watch(approvalMode, val => {
+  try {
+    const store = typeof localStorage !== 'undefined' ? localStorage : globalThis.localStorage;
+    if (APPROVAL_MODES.includes(val)) store?.setItem?.('bob.dsh.approvalMode', val);
+  } catch {}
+});
 const composerInput = ref(null);
 async function cancelTakeover() {
   if (sending.value) return;
@@ -133,6 +148,7 @@ function confirmTakeoverSend(){
 }
 const permissionModeOptions=computed(()=>[
   { value: 'interactive', label: t('permissionModeInteractive') },
+  { value: 'workspace_auto', label: t('permissionModeWorkspaceAuto') },
   { value: 'read_only', label: t('permissionModeReadOnly') },
   { value: 'deny', label: t('permissionModePlan') },
 ]);
@@ -403,6 +419,17 @@ async function refreshNativeEvents(){
      pendingDecision.value=null;
     }
    }
+   if(globalThis.__bobApprovalNotifications?.notifyPendingApproval){
+    for(const entry of pendingNativeApprovals.value){
+     const ttlText=t('nativeApprovalRemainingMin',{minutes:remainingBarMinutes(entry.approval)});
+     const rawTitle=entry.approval.title==='AskUserQuestion'?t('nativeQuestionTitle'):(entry.approval.title||t('nativeApprovalLocal'));
+     void globalThis.__bobApprovalNotifications.notifyPendingApproval({
+      id:entry.approval.permission_id,
+      title:t('approvalNotifyPushTitle'),
+      body:`${rawTitle} (${ttlText})`,
+     });
+    }
+   }
    await nextTick();if(follow&&chatScroll.following&&g===generation)scrollToBottom();
  }catch(e){if(g===generation){syncStatus.value='offline_cached';nativeEpoch='';replying.value=false;nativeDrafts.value=Object.fromEntries(Object.entries(nativeDrafts.value).map(([k,v])=>[k,{...v,active:false,activity:unconfirmActivity(v.activity)}]));}}
  finally{if(g===generation&&!disposed)nativeTimer=setTimeout(refreshNativeEvents,nativeMore?0:replying.value||awaitingReply.value?400:5000);}
@@ -419,6 +446,66 @@ function nativeTextInHistory(text){
  return runs.some(body=>{let offset=0;for(const chunk of chunks){const at=body.indexOf(chunk,offset);if(at<0)return false;offset=at+chunk.length;}return true;});
 }
 const nativeActivities=computed(()=>orderedNativeActivities(nativeDrafts.value));
+function isActionableNativeApproval(approval,now=Date.now()){
+ return Boolean(
+  approval?.actionable===true&&
+  approval?.status==='pending'&&
+  typeof approval?.permission_id==='string'&&
+  approval.permission_id.length>0&&
+  Number.isFinite(approval?.expires_at)&&
+  approval.expires_at>now
+ );
+}
+const pendingNativeApprovals=computed(()=>{
+ const now=Date.now();
+ const out=[];
+ for(const record of nativeActivities.value){
+  for(const approval of record.activity?.approvals||[]){
+   if(isActionableNativeApproval(approval,now)){
+    out.push({requestId:record.id,approval});
+   }
+  }
+ }
+ return out;
+});
+const approvalNotifyPermission=ref(
+ globalThis.__bobApprovalNotifications?.getApprovalNotificationState?.()?.permission||'unsupported'
+);
+async function enableApprovalAlerts(){
+ const helper=globalThis.__bobApprovalNotifications;
+ if(!helper?.enableApprovalNotifications)return;
+ const res=await helper.enableApprovalNotifications(kernelBridge);
+ approvalNotifyPermission.value=res?.state?.permission||approvalNotifyPermission.value;
+}
+function formatBarApprovalDetail(approval){
+ const raw=String(approval?.detail||'').trim();
+ if(!raw)return '';
+ try{
+  const parsed=JSON.parse(raw);
+  if(approval?.title==='AskUserQuestion'&&Array.isArray(parsed?.questions)&&parsed.questions.length>0){
+   return String(parsed.questions[0]?.question||parsed.questions[0]?.header||'').trim();
+  }
+  if(typeof parsed?.command==='string'&&parsed.command.trim())return parsed.command.trim();
+  if(typeof parsed?.file_path==='string'&&parsed.file_path.trim())return parsed.file_path.trim();
+  if(typeof parsed?.filePath==='string'&&parsed.filePath.trim())return parsed.filePath.trim();
+ }catch{}
+ return raw;
+}
+function remainingBarMinutes(approval){
+ const left=Number(approval?.expires_at||0)-Date.now();
+ return Math.max(1,Math.ceil(left/60000));
+}
+function barApprovalOptionLabel(option){
+ const label=String(option?.label||'').trim();
+ if(label&&label!=='allow_once'&&label!=='reject_once')return label;
+ return t('nativeApproveOnce');
+}
+function scrollToNativeApproval(permissionId){
+ try{
+  const el=reader.value?.querySelector?.(`[data-native-approval-id="${permissionId}"]`);
+  el?.scrollIntoView?.({behavior:'smooth',block:'center'});
+ }catch{}
+}
 const busyPermission=ref(''),pendingDecision=ref(null),approvalErrors=ref({});
 async function decidePermission(requestId,permissionId,optionId){
  if(busyPermission.value||!selected.value)return;
@@ -944,6 +1031,45 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
      <button type="button" class="dsh-takeover-secondary" :disabled="sending" @click="cancelTakeover">{{ t('claudeCancelTakeoverBtn') }}</button>
     </div>
    </div>
+   <section v-if="pendingNativeApprovals.length" class="dsh-pending-approval-bar" role="region" aria-live="polite">
+    <div class="dsh-pending-approval-head">
+     <span class="dsh-pending-approval-title-group">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      <strong>{{ t('nativeApprovalBannerTitle', { count: pendingNativeApprovals.length }) }}</strong>
+     </span>
+     <span class="dsh-pending-approval-meta">
+      <small class="dsh-pending-ttl">{{ t('nativeApprovalRemainingMin', { minutes: remainingBarMinutes(pendingNativeApprovals[0].approval) }) }}</small>
+      <button v-if="approvalNotifyPermission === 'default'" type="button" class="dsh-pending-link-btn" @click="enableApprovalAlerts">{{ t('approvalNotifyEnableShort') }}</button>
+      <button type="button" class="dsh-pending-link-btn" @click="scrollToNativeApproval(pendingNativeApprovals[0].approval.permission_id)">{{ t('nativeApprovalJumpCard') }}</button>
+     </span>
+    </div>
+    <p class="dsh-pending-approval-detail">{{ pendingNativeApprovals[0].approval.title === 'AskUserQuestion' ? t('nativeQuestionTitle') : (pendingNativeApprovals[0].approval.title || t('nativeApprovalLocal')) }}<span v-if="formatBarApprovalDetail(pendingNativeApprovals[0].approval)"> · {{ formatBarApprovalDetail(pendingNativeApprovals[0].approval) }}</span></p>
+    <p v-if="approvalErrors[pendingNativeApprovals[0].approval.permission_id]" class="dsh-pending-approval-err" role="alert">{{ t(approvalErrors[pendingNativeApprovals[0].approval.permission_id]) }}</p>
+    <div class="dsh-pending-approval-actions">
+     <template v-if="(pendingNativeApprovals[0].approval.options || []).filter(o => o.kind === 'allow_once').length <= 2">
+      <button
+       v-for="option in (pendingNativeApprovals[0].approval.options || []).filter(o => o.kind === 'allow_once')"
+       :key="'bar-opt-' + option.id"
+       type="button"
+       class="dsh-takeover-primary"
+       :disabled="!!busyPermission || approvalErrors[pendingNativeApprovals[0].approval.permission_id] === 'nativeApprovalRevoked'"
+       @click="decidePermission(pendingNativeApprovals[0].requestId, pendingNativeApprovals[0].approval.permission_id, option.id)"
+      >{{ barApprovalOptionLabel(option) }}</button>
+     </template>
+     <button
+      v-else
+      type="button"
+      class="dsh-takeover-primary"
+      @click="scrollToNativeApproval(pendingNativeApprovals[0].approval.permission_id)"
+     >{{ t('nativeApprovalViewChoices') }}</button>
+     <button
+      type="button"
+      class="dsh-takeover-secondary"
+      :disabled="!!busyPermission"
+      @click="decidePermission(pendingNativeApprovals[0].requestId, pendingNativeApprovals[0].approval.permission_id, null)"
+     >{{ t('nativeRejectOnce') }}</button>
+    </div>
+   </section>
    <section v-if="dshQuestions.length" class="dsh-question-notice" aria-live="polite">
     <div class="dsh-question-top">
      <strong>{{ t(dshQuestionBlocking ? 'dshQuestionWaiting' : 'dshQuestionOpen') }}</strong>
@@ -1078,4 +1204,17 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
 .dsh-permission-mode-select :deep(.custom-select-trigger){min-height:1.8rem;height:1.8rem;padding:0 8px;font-size:.76rem;border-radius:var(--radius-btn);background:var(--bg-primary);color:var(--text-secondary);border:1px solid var(--border-color);gap:4px}
 .dsh-permission-mode-select :deep(.custom-select-trigger:hover:not(.disabled)){color:var(--text-primary);border-color:var(--accent-primary)}
 .dsh-permission-mode-select :deep(.custom-select-chevron){width:.75rem;height:.75rem}
-.dsh-session-item{display:flex;align-items:center;gap:6px;width:100%;margin-top:5px;position:relative}.dsh-session-item .dsh-session{flex:1;min-width:0;margin-top:0}.dsh-session-archive-btn{flex-shrink:0;padding:6px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-secondary);cursor:pointer;opacity:0.6;transition:opacity .15s ease}.dsh-session-item:hover .dsh-session-archive-btn,.dsh-session-archive-btn:focus-visible{opacity:1}.dsh-session-unarchive-btn{flex-shrink:0;padding:4px 8px;font-size:.75rem;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-secondary);cursor:pointer}.dsh-test-group{margin-top:14px;border-top:1px dashed var(--border-color);padding-top:8px}.dsh-test-group summary{color:var(--text-secondary);cursor:pointer;display:inline-flex;align-items:center;gap:6px}.dsh-test-group summary svg{color:var(--accent-primary)}.dsh-archived-group{margin-top:16px;border-top:1px dashed var(--border-color);padding-top:8px}.dsh-archived-group summary{color:var(--text-secondary)}.composer-tool-btn.voice-btn.recording{color:var(--color-error);animation:pulse-mic 1.2s infinite ease-in-out}@keyframes pulse-mic{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.5;transform:scale(1.15)}}.dsh-search-snippet{display:block;margin-top:2px;font-style:italic;color:var(--accent-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dsh-search-toggle-btn{padding:4px 8px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-secondary);cursor:pointer;display:inline-flex;align-items:center}.dsh-search-toggle-btn.active{color:var(--accent-primary);border-color:var(--accent-primary)}.dsh-session-search-bar{display:flex;align-items:center;gap:8px;padding:6px 0;width:100%}.dsh-session-search-bar input{flex:1;padding:6px 10px;font-size:.85rem}.dsh-search-count{font-size:.78rem;color:var(--accent-primary);white-space:nowrap}.dsh-search-clear{background:transparent;border:0;color:var(--text-secondary);cursor:pointer;padding:4px 8px;font-size:1rem}.dsh-empty-search{padding:16px;text-align:center;color:var(--text-secondary);font-size:.85rem}.composer-attachment-chip .chip-thumb{width:22px;height:22px;object-fit:cover;border-radius:4px;flex-shrink:0}</style>
+.dsh-session-item{display:flex;align-items:center;gap:6px;width:100%;margin-top:5px;position:relative}.dsh-session-item .dsh-session{flex:1;min-width:0;margin-top:0}.dsh-session-archive-btn{flex-shrink:0;padding:6px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-secondary);cursor:pointer;opacity:0.6;transition:opacity .15s ease}.dsh-session-item:hover .dsh-session-archive-btn,.dsh-session-archive-btn:focus-visible{opacity:1}.dsh-session-unarchive-btn{flex-shrink:0;padding:4px 8px;font-size:.75rem;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-secondary);cursor:pointer}.dsh-test-group{margin-top:14px;border-top:1px dashed var(--border-color);padding-top:8px}.dsh-test-group summary{color:var(--text-secondary);cursor:pointer;display:inline-flex;align-items:center;gap:6px}.dsh-test-group summary svg{color:var(--accent-primary)}.dsh-archived-group{margin-top:16px;border-top:1px dashed var(--border-color);padding-top:8px}.dsh-archived-group summary{color:var(--text-secondary)}.composer-tool-btn.voice-btn.recording{color:var(--color-error);animation:pulse-mic 1.2s infinite ease-in-out}@keyframes pulse-mic{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.5;transform:scale(1.15)}}.dsh-search-snippet{display:block;margin-top:2px;font-style:italic;color:var(--accent-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dsh-search-toggle-btn{padding:4px 8px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-secondary);cursor:pointer;display:inline-flex;align-items:center}.dsh-search-toggle-btn.active{color:var(--accent-primary);border-color:var(--accent-primary)}.dsh-session-search-bar{display:flex;align-items:center;gap:8px;padding:6px 0;width:100%}.dsh-session-search-bar input{flex:1;padding:6px 10px;font-size:.85rem}.dsh-search-count{font-size:.78rem;color:var(--accent-primary);white-space:nowrap}.dsh-search-clear{background:transparent;border:0;color:var(--text-secondary);cursor:pointer;padding:4px 8px;font-size:1rem}.dsh-empty-search{padding:16px;text-align:center;color:var(--text-secondary);font-size:.85rem}.composer-attachment-chip .chip-thumb{width:22px;height:22px;object-fit:cover;border-radius:4px;flex-shrink:0}
+.dsh-pending-approval-bar{width:100%;box-sizing:border-box;padding:10px 12px;border-radius:var(--radius-card);border:1px solid var(--accent-primary);background:var(--bg-secondary);display:flex;flex-direction:column;gap:6px}
+.dsh-sessions.embedded .dsh-pending-approval-bar{width:min(100%, 46rem);margin:0 auto}
+.dsh-pending-approval-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.dsh-pending-approval-title-group{display:inline-flex;align-items:center;gap:6px;color:var(--text-primary);font-size:.86rem}
+.dsh-pending-approval-title-group svg{color:var(--accent-primary);flex-shrink:0}
+.dsh-pending-approval-meta{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+.dsh-pending-ttl{padding:1px 7px;border-radius:999px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-secondary);font-size:.72rem}
+.dsh-pending-link-btn{padding:1px 8px;border-radius:999px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--accent-primary);font-size:.72rem;font-weight:600;cursor:pointer}
+.dsh-pending-approval-detail{margin:0;font-size:.8rem;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-pending-approval-err{margin:0;font-size:.78rem;color:var(--color-error)}
+.dsh-pending-approval-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dsh-pending-approval-actions .dsh-takeover-primary:disabled,.dsh-pending-approval-actions .dsh-takeover-secondary:disabled{opacity:.48;cursor:not-allowed}
+</style>

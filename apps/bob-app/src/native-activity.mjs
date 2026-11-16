@@ -32,3 +32,19 @@ export function waitingNativeApproval(drafts,now=Date.now()){
  return Object.values(drafts).some(record=>record.active===true&&!record.terminal
   &&(record.activity?.approvals||[]).some(approval=>actionableApproval(approval,now)));
 }
+export function partitionNativeActivity(activity,now=Date.now()){
+ const items=Array.isArray(activity?.items)?activity.items:[];
+ const approvals=Array.isArray(activity?.approvals)?activity.approvals:[];
+ const actionableApprovals=[];
+ const historyApprovals=[];
+ for(const approval of approvals){
+  if(actionableApproval(approval,now))actionableApprovals.push(approval);
+  else historyApprovals.push(approval);
+ }
+ return {
+  actionableApprovals,
+  logItems:items,
+  historyApprovals,
+  logCount:items.length+historyApprovals.length,
+ };
+}

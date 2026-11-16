@@ -391,5 +391,7 @@ export function createKernelBridge(invoke, isAvailable) {
     },
     pushVapidPublicKey: () => call('app_push_vapid_public_key', {}),
     pushSubscribe: subscription => call('app_push_subscribe', { subscription }),
+    pushStatus: () => call('app_push_status', {}),
+    pushTest: () => call('app_push_test', {}),
   };
 }

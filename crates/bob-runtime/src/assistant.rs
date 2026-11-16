@@ -480,7 +480,8 @@ pub fn apply_personal_proposal(
             let start_at = proposal
                 .start_time
                 .as_deref()
-                .and_then(parse_datetime_utc8_ms)
+                .and_then(|s| parse_flexible_datetime_utc8_ms(s, now))
+                .map(|ms| rebase_past_year_if_needed(ms, now))
                 .unwrap_or(now);
             let notes = proposal.notes.as_deref().unwrap_or("");
             if app
@@ -507,12 +508,14 @@ pub fn apply_personal_proposal(
             let start_at = proposal
                 .start_time
                 .as_deref()
-                .and_then(parse_datetime_utc8_ms)
+                .and_then(|s| parse_flexible_datetime_utc8_ms(s, now))
+                .map(|ms| rebase_past_year_if_needed(ms, now))
                 .unwrap_or(now);
             let end_at = proposal
                 .end_time
                 .as_deref()
-                .and_then(parse_datetime_utc8_ms)
+                .and_then(|s| parse_flexible_datetime_utc8_ms(s, now))
+                .map(|ms| rebase_past_year_if_needed(ms, now))
                 .filter(|&e| e >= start_at);
             let notes = proposal.notes.as_deref().unwrap_or("");
             if app
@@ -701,6 +704,13 @@ pub fn apply_personal_proposal(
     }
 }
 
+/// Return `(year, month, day)` civil date in UTC+8 for Unix epoch milliseconds.
+pub fn utc8_civil_date(ms: i64) -> (i64, i64, i64) {
+    let total_secs = (ms / 1000) + 8 * 3600;
+    let days = total_secs.div_euclid(86400);
+    civil_from_days(days)
+}
+
 /// Format Unix epoch milliseconds into `YYYY-MM-DD HH:mm` in UTC+8.
 pub fn format_utc8_datetime(ms: i64) -> String {
     let total_secs = (ms / 1000) + 8 * 3600;
@@ -712,27 +722,11 @@ pub fn format_utc8_datetime(ms: i64) -> String {
     format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}")
 }
 
-/// Parse `YYYY-MM-DD HH:mm`, `YYYY-MM-DDTHH:mm[:ss]`, or `YYYY-MM-DD` (assumed UTC+8) into Unix epoch ms.
-pub fn parse_datetime_utc8_ms(raw: &str) -> Option<i64> {
-    let s = raw.trim();
-    if s.is_empty() {
-        return None;
-    }
-    let normalized = s.replace('T', " ");
-    let mut parts = normalized.split_whitespace();
-    let date_part = parts.next()?;
-    let time_part = parts.next().unwrap_or("09:00");
-
-    let mut d_iter = date_part.split('-');
-    let year: i64 = d_iter.next()?.parse().ok()?;
-    let month: i64 = d_iter.next()?.parse().ok()?;
-    let day: i64 = d_iter.next()?.parse().ok()?;
-    if !(1970..=2100).contains(&year) || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return None;
-    }
-
+fn parse_utc8_hour_minute(time_part: &str) -> Option<(i64, i64)> {
     let mut t_iter = time_part.split(':');
-    let hour: i64 = t_iter.next().unwrap_or("9").parse().ok()?;
+    let hour_raw = t_iter.next().unwrap_or("9");
+    let hour_digits: String = hour_raw.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let hour: i64 = if hour_digits.is_empty() { 9 } else { hour_digits.parse().ok()? };
     let minute: i64 = t_iter
         .next()
         .unwrap_or("0")
@@ -744,11 +738,123 @@ pub fn parse_datetime_utc8_ms(raw: &str) -> Option<i64> {
     if !(0..=23).contains(&hour) || !(0..=59).contains(&minute) {
         return None;
     }
+    Some((hour, minute))
+}
+
+/// Parse `YYYY-MM-DD HH:mm`, `YYYY-MM-DDTHH:mm[:ss]`, or `YYYY-MM-DD` (assumed UTC+8 unless suffixed `Z`) into Unix epoch ms.
+pub fn parse_datetime_utc8_ms(raw: &str) -> Option<i64> {
+    let mut s = raw.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let mut is_utc_z = false;
+    if let Some(stripped) = s.strip_suffix('Z').or_else(|| s.strip_suffix('z')) {
+        s = stripped.trim_end();
+        is_utc_z = true;
+    } else {
+        for suffix in ["+08:00", "+0800", "+08"] {
+            if let Some(stripped) = s.strip_suffix(suffix) {
+                s = stripped.trim_end();
+                break;
+            }
+        }
+    }
+
+    let normalized = s.replace(['T', 't'], " ");
+    let mut parts = normalized.split_whitespace();
+    let date_raw = parts.next()?;
+    let time_part = parts.next().unwrap_or("09:00");
+    if parts.next().is_some() {
+        return None;
+    }
+
+    let date_norm = date_raw.replace(['/', '.'], "-");
+    let d_parts: Vec<&str> = date_norm.split('-').collect();
+    if d_parts.len() != 3 {
+        return None;
+    }
+    let year: i64 = d_parts[0].parse().ok()?;
+    let month: i64 = d_parts[1].parse().ok()?;
+    let day: i64 = d_parts[2].parse().ok()?;
+    if !(1970..=2100).contains(&year) || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
 
     let days = days_from_civil(year, month, day);
-    let utc8_secs = days * 86400 + hour * 3600 + minute * 60;
-    let utc_secs = utc8_secs - 8 * 3600;
+    if civil_from_days(days) != (year, month, day) {
+        return None;
+    }
+
+    let (hour, minute) = parse_utc8_hour_minute(time_part)?;
+    let total_secs = days * 86400 + hour * 3600 + minute * 60;
+    let utc_secs = if is_utc_z { total_secs } else { total_secs - 8 * 3600 };
     Some(utc_secs * 1000)
+}
+
+/// Parse full ISO date/time or yearless `MM-DD` / `MM.DD` / `MM/DD` (with optional `HH:mm`, default `09:00`) anchored to `now_ms`.
+pub fn parse_flexible_datetime_utc8_ms(raw: &str, now_ms: i64) -> Option<i64> {
+    if let Some(ms) = parse_datetime_utc8_ms(raw) {
+        return Some(ms);
+    }
+    let mut s = raw.trim();
+    if s.is_empty() {
+        return None;
+    }
+    for suffix in ["+08:00", "+0800", "+08"] {
+        if let Some(stripped) = s.strip_suffix(suffix) {
+            s = stripped.trim_end();
+            break;
+        }
+    }
+    let normalized = s.replace(['T', 't'], " ");
+    let mut parts = normalized.split_whitespace();
+    let date_raw = parts.next()?;
+    let time_part = parts.next().unwrap_or("09:00");
+    if parts.next().is_some() {
+        return None;
+    }
+
+    let date_norm = date_raw.replace(['/', '.'], "-");
+    let d_parts: Vec<&str> = date_norm.split('-').collect();
+    if d_parts.len() != 2 {
+        return None;
+    }
+    let month: i64 = d_parts[0].parse().ok()?;
+    let day: i64 = d_parts[1].parse().ok()?;
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+
+    let (cur_year, cur_month, _) = utc8_civil_date(now_ms);
+    let year = if cur_month == 12 && month == 1 { cur_year + 1 } else { cur_year };
+    let days = days_from_civil(year, month, day);
+    if civil_from_days(days) != (year, month, day) {
+        return None;
+    }
+
+    let (hour, minute) = parse_utc8_hour_minute(time_part)?;
+    let utc8_secs = days * 86400 + hour * 3600 + minute * 60;
+    Some((utc8_secs - 8 * 3600) * 1000)
+}
+
+fn rebase_past_year_if_needed(ms: i64, now_ms: i64) -> i64 {
+    if ms <= 0 || now_ms <= 0 {
+        return ms;
+    }
+    let (year, month, day) = utc8_civil_date(ms);
+    let (cur_year, _, _) = utc8_civil_date(now_ms);
+    if year >= cur_year || cur_year <= 1970 {
+        return ms;
+    }
+    let utc8_secs = (ms / 1000) + 8 * 3600;
+    let secs_of_day = utc8_secs.rem_euclid(86400);
+    let rebased_day = if civil_from_days(days_from_civil(cur_year, month, day)) == (cur_year, month, day) {
+        day
+    } else {
+        day.min(28)
+    };
+    let days = days_from_civil(cur_year, month, rebased_day);
+    (days * 86400 + secs_of_day - 8 * 3600) * 1000
 }
 
 fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
@@ -840,5 +946,32 @@ mod tests {
     fn datetime_roundtrip_utc8() {
         let ms = parse_datetime_utc8_ms("2026-11-02 15:30").unwrap();
         assert_eq!(format_utc8_datetime(ms), "2026-11-02 15:30");
+
+        let ms_iso = parse_datetime_utc8_ms("2026-11-17T09:00:00+08:00").unwrap();
+        assert_eq!(format_utc8_datetime(ms_iso), "2026-11-17 09:00");
+
+        let ms_utc_z = parse_datetime_utc8_ms("2026-11-17T01:00:00Z").unwrap();
+        assert_eq!(format_utc8_datetime(ms_utc_z), "2026-11-17 09:00");
+
+        let ms_dot = parse_datetime_utc8_ms("2026.11.17").unwrap();
+        assert_eq!(format_utc8_datetime(ms_dot), "2026-11-17 09:00");
+
+        // Invalid calendar dates must be rejected
+        assert!(parse_datetime_utc8_ms("2026-02-30 09:00").is_none());
+        assert!(parse_datetime_utc8_ms("2026-11-31").is_none());
+
+        // Yearless shorthand resolves relative to now_ms (and Dec -> Jan rollover)
+        let nov_now = parse_datetime_utc8_ms("2026-11-16 16:00").unwrap();
+        let ms_short = parse_flexible_datetime_utc8_ms("11.17", nov_now).unwrap();
+        assert_eq!(format_utc8_datetime(ms_short), "2026-11-17 09:00");
+
+        let dec_now = parse_datetime_utc8_ms("2026-12-28 10:00").unwrap();
+        let ms_next_jan = parse_flexible_datetime_utc8_ms("01-03 14:30", dec_now).unwrap();
+        assert_eq!(format_utc8_datetime(ms_next_jan), "2027-01-03 14:30");
+
+        // Rebase past year protects legacy proposals
+        let old_ms = parse_datetime_utc8_ms("2023-11-18 08:00").unwrap();
+        let rebased = rebase_past_year_if_needed(old_ms, nov_now);
+        assert_eq!(format_utc8_datetime(rebased), "2026-11-18 08:00");
     }
 }
