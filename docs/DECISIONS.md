@@ -278,3 +278,18 @@
      - **Feature Plugin 层（`.bobpkg` 可视化小组件与微应用）**：前端无凭据 `<FeatureWidgetFrame />` + 后端将声明式路由升级为内嵌纯 Rust **`rquickjs`（`QuickJS`）隔离沙箱**（16MB 内存上限、500ms 单次执行超时、无文件系统/子进程/内网套接字权限，仅开放经 `net_guard` 过滤的 HTTP 请求与 8KB 键值存储），严格继承 **3 分钟试用 + 5 版本自动回退**；
      - **Skill / Routine 模板与渠道适配层**：声明式 Markdown/YAML 技能库（受 `SYSTEM_PROMPT_SKILLS_BUDGET_CHARS` 预算约束）与标准化 `RoutinePlaybook` / `ChannelAdapter`。
 - **实施路由**：安全与隔离边界入 `docs/ARCHITECTURE.md`，长期阶段与 Exit Gate 入 `docs/DEVELOPMENT_ROUTE.md`，模块落点索引入 `docs/COMPONENT_MAP.md` 与 `docs/LLM_WIKI.md`，具体施工任务卡唯一维护于 `docs/CURRENT_STAGE.md §5`。
+
+---
+
+## BOB-D-017 — 去开发本机（X1C）单点依赖与无状态多参谋长（Chief of Staff）可插拔总线契约
+
+- 日期：2026-11-15（落地登记：2026-11-16）；状态：**accepted（已确立为远程优先与多参谋长平权协作架构标准，按 `WP-C1` 落地核心闭环）**。来源：用户要求后续工作可在非 `X1C` 设备（手机、`X1T`、`VPS`、外部对话入口）独立闭环，并支持 `bob-online` 主对话、`grok_bot`、`meta_muse` 平权下达指令与回收成果，且日后停订外部服务时可零损耗移除。
+- **背景**：
+  1. 过去部分工作流（Codex 本地库、Google Drive 同步任务等）隐含依赖 `X1C` 开机中转；离开电脑后跨端推演与派单体验受限。
+  2. 随着 `VPS2` 常驻 `bob-online` 与 `X1T`/`VPS3` 各节点就位，统一将全集群收敛到 `~/work` 标准结构与 Syncthing `~/work/common/`；与此同时，外部助理（`grok_bot`、`meta_muse`）目前仅接通项目关联与待办读写（`/api/bot/v1/mcp`），尚缺统一的标准派单与回执检索协议。
+- **决定**：
+  1. **去 `X1C` 单点依赖（Peer-Terminal Model）**：`X1C` 定位为对等可选终端；各常驻节点（`VPS2` / `VPS3` / `X1T`）持有独立的 `~/work/code/*` Git 克隆与边缘凭据（不跨节点复制个人凭据），通过 `~/work/common/chief_briefing.py` 7×24 本地聚合脱敏项目战报至 `~/work/common/interchange/chief_briefing.{yaml,json,md}`。
+  2. **无状态多参谋长可插拔总线（Pluggable Chief-of-Staff Bus）**：
+     - `bob-online` 主对话、`grok_bot`、`meta_muse` 作为**无状态轮值参谋长（Planner / Chief Seats）**平权接入同一契约：`bob_briefing`（读取获准项目态势、开源待办、跨席位最近指令与回执）→ `bob_order_submit`（提交带幂等 `request_id` 与目标约束的标准指令单）→ **`bob-online` 唯一主权账本与手机审批门禁（`pending_approval` → `ApprovalRequest`）** → 执行完成后写入 `ChiefOrderReceipt` → 任一参谋长通过 `bob_orders` 回收成果。
+  3. **零锁定退订保证（Zero-Lock-In Unsubscribe）**：外部参谋长不持有项目记忆库或节点执行权，所有状态、决策与回执均沉淀在 `bob-online`（`chief_orders.json` / `kernel.sqlite`）与 Git 仓库 `docs/`。在 `bot-grants.json` 将某一席位标记为 `revoked: true` 即刻吊销其访问并下线，保留该席位历史订单与成果记录供其余席位无缝接力，对主系统零损耗。
+- **实施路由**：安全与权限边界入 `docs/ARCHITECTURE.md`，`WP-C1` 交付回执入 `docs/CURRENT_STAGE.md` 与 `progress.yaml`。

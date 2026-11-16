@@ -26,6 +26,12 @@ pub struct Grant {
     pub todos_unassigned: bool,
     #[serde(default)]
     pub todos_update: bool,
+    #[serde(default)]
+    pub briefing_read: bool,
+    #[serde(default)]
+    pub orders_submit: bool,
+    #[serde(default)]
+    pub orders_read: bool,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -68,12 +74,15 @@ pub fn handle(ctx: &mut NodeContext, header: Option<&str>, body: &Value, now: i6
             if g.todos_read {tools.push(json!({"name":"bob_todos","description":"List authorized todos: omit project_id for all, null for independent todos, or an ID for a project. At most 100 items; paginate with offset.","inputSchema":{"type":"object","properties":{"project_id":{"type":["string","null"]},"offset":{"type":"integer","minimum":0}},"additionalProperties":false}}));}
             if g.todos_create {tools.push(json!({"name":"bob_todo_create","description":"Create a todo. Project, start and deadline are optional; infer dates from user intent; date-only uses timing.start_date/due_date, precise times use start_at/due_at; preserve original wording and interpretation. Retry with the same request_id and identical payload. Times are Unix milliseconds.","inputSchema":{"type":"object","properties":{"project_id":{"type":["string","null"]},"request_id":{"type":"string","maxLength":128},"title":{"type":"string","maxLength":256},"start_at":{"type":["integer","null"],"minimum":1},"due_at":{"type":["integer","null"],"minimum":1},"notes":{"type":"string","maxLength":16384},"timing":timing_schema()},"required":["request_id","title"],"additionalProperties":false}}));}
             if g.todos_update {tools.push(json!({"name":"bob_todo_update","description":"Patch an existing authorized todo, never create another. Read latest id/version first. Omitted fields are preserved, null timestamps clear; timing replaces date precision/provenance. Retry identical request_id/payload; stale versions are refused. No deletion or node execution.","inputSchema":{"type":"object","properties":{"id":{"type":"string"},"request_id":{"type":"string","maxLength":128},"expected_version":{"type":"integer","minimum":1},"project_id":{"type":["string","null"]},"title":{"type":"string","maxLength":256},"start_at":{"type":["integer","null"],"minimum":1},"due_at":{"type":["integer","null"],"minimum":1},"notes":{"type":"string","maxLength":16384},"timing":timing_schema()},"required":["id","request_id","expected_version"],"additionalProperties":false}}));}
+            if g.briefing_read {tools.push(json!({"name":"bob_briefing","description":"Read desensitized global project briefing, open project todos, and recent dispatch orders within explicitly granted project scope.","inputSchema":{"type":"object","properties":{"project_id":{"type":["string","null"]},"include_todos":{"type":"boolean"}},"additionalProperties":false}}));}
+            if g.orders_submit {tools.push(json!({"name":"bob_order_submit","description":"Submit a human-gated chief-of-staff dispatch order for an authorized project. Always enters pending_approval until approved by the owner. Idempotent on per-actor request_id.","inputSchema":{"type":"object","properties":{"request_id":{"type":"string","maxLength":128},"project_id":{"type":"string","maxLength":128},"title":{"type":"string","maxLength":256},"instruction":{"type":"string","maxLength":16384},"target_node":{"type":"string","enum":["auto","x1t","x1c","vps1","vps2","vps3"]},"priority":{"type":"string","enum":["low","normal","high","urgent"]},"deliverables":{"type":"array","items":{"type":"string","maxLength":256},"maxItems":16}},"required":["request_id","project_id","title","instruction"],"additionalProperties":false}}));}
+            if g.orders_read {tools.push(json!({"name":"bob_orders","description":"List dispatch orders and worker receipts across all chief seats within explicitly granted project scope.","inputSchema":{"type":"object","properties":{"project_id":{"type":["string","null"]},"order_id":{"type":["string","null"]},"status":{"type":"string","enum":["pending_approval","approved","rejected","running","completed","failed"]},"offset":{"type":"integer","minimum":0}},"additionalProperties":false}}));}
             Ok(json!({"tools":tools}))
         }
         "tools/call" => {
             let name=body["params"]["name"].as_str().unwrap_or("");
             // Log only fixed tool identifiers, never attacker text or request payloads.
-            let logged=if matches!(name,"bob_projects"|"bob_project_sessions"|"bob_associate_session"|"bob_todos"|"bob_todo_create"|"bob_todo_update"){name}else{"denied_tool"};
+            let logged=if matches!(name,"bob_projects"|"bob_project_sessions"|"bob_associate_session"|"bob_todos"|"bob_todo_create"|"bob_todo_update"|"bob_briefing"|"bob_order_submit"|"bob_orders"){name}else{"denied_tool"};
             if audit(&ctx.runtime.data_dir,&g.username,logged,"attempt",now).is_err(){return (503,json!({"error":"BOT_AUDIT_UNAVAILABLE"}));}
             let access=crate::project_service::ProjectAccess {
                 projects:g.projects.clone(),
@@ -84,6 +93,8 @@ pub fn handle(ctx: &mut NodeContext, header: Option<&str>, body: &Value, now: i6
             let args=body["params"].get("arguments").unwrap_or(&empty);
             let out=if matches!(name,"bob_todos"|"bob_todo_create"|"bob_todo_update") {
                 crate::todo_service::execute(ctx,&g.username,&g.projects,g.todos_read,g.todos_create,g.todos_update,g.todos_unassigned,name,args,now)
+            } else if matches!(name,"bob_briefing"|"bob_order_submit"|"bob_orders") {
+                crate::chief_service::execute(ctx,&g.username,&g.projects,g.all_projects,g.briefing_read,g.orders_submit,g.orders_read,name,args,now)
             } else {crate::project_service::execute(ctx,&access,name,args,now)};
             let outcome=if out.is_ok(){"success"}else{"denied_or_conflict"};
             if audit(&ctx.runtime.data_dir,&g.username,logged,outcome,now).is_err(){return (503,json!({"error":"BOT_RECEIPT_UNKNOWN_CHECK_VERSION"}));}
@@ -112,7 +123,7 @@ mod tests {
     fn save(p:&Path,organize:bool,revoked:bool,expires:i64) {
         let grant=Grant{username:"grok_bot".into(),token_hash:hash_token(TOKEN),expires_at:expires,revoked,no_expiry:false,all_projects:false,
             projects:vec!["allowed".into(),"other-allowed".into()],
-            sessions:vec![Session{connection_id:"test-node".into(),harness:"dsh".into(),session_id:"session-a".into()}],organize,todos_read:false,todos_create:false,todos_unassigned:false,todos_update:false};
+            sessions:vec![Session{connection_id:"test-node".into(),harness:"dsh".into(),session_id:"session-a".into()}],organize,todos_read:false,todos_create:false,todos_unassigned:false,todos_update:false,briefing_read:false,orders_submit:false,orders_read:false};
         fs::write(p.join("bot-grants.json"),serde_json::to_vec(&vec![grant]).unwrap()).unwrap();
     }
     fn rpc(ctx:&mut NodeContext,name:&str,args:Value)->Value {

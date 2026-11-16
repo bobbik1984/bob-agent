@@ -1626,7 +1626,16 @@ pub fn approve(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
             Err(_) => Err("RESUME_AFTER_APPROVAL_FAILED"),
         }
     } else {
-        // Standalone approval card or unattended routine draft
+        // Standalone approval card, chief-of-staff order, or unattended routine draft
+        if approval_id.starts_with("chief-order-") {
+            let mut guard = state.lock().map_err(|_| "NODE_LOCK_POISONED")?;
+            return crate::chief_service::approve_order_by_approval_id(
+                &data_dir,
+                approval_id,
+                Some(&mut guard.app),
+                now_millis(),
+            );
+        }
         if approval_id.starts_with("draft-") {
             let mut guard = state.lock().map_err(|_| "NODE_LOCK_POISONED")?;
             let mut bus = BobToolBus::with_approval_store(&data_dir).unwrap_or_else(|_| BobToolBus::new());
@@ -1752,6 +1761,14 @@ pub fn approve_with_ctx(ctx: &mut NodeContext, args: &Value) -> Result<Value, &'
             Err(_) => Err("RESUME_AFTER_APPROVAL_FAILED"),
         }
     } else {
+        if approval_id.starts_with("chief-order-") {
+            return crate::chief_service::approve_order_by_approval_id(
+                &data_dir,
+                approval_id,
+                Some(&mut ctx.app),
+                now_millis(),
+            );
+        }
         if approval_id.starts_with("draft-") {
             let mut bus = BobToolBus::with_approval_store(&data_dir).unwrap_or_else(|_| BobToolBus::new());
             crate::browser_ws::register_browser_tools(&mut bus, &data_dir);
@@ -1850,7 +1867,17 @@ pub fn approve_direct(data_dir: &Path, args: &Value) -> Result<Value, &'static s
             Err(_) => Err("RESUME_AFTER_APPROVAL_FAILED"),
         }
     } else {
-        // Standalone approval card or unattended routine draft
+        // Standalone approval card, chief-of-staff order, or unattended routine draft
+        if approval_id.starts_with("chief-order-") {
+            let db_path = data_dir.join("kernel.sqlite");
+            let mut app = LocalApp::open(&db_path).ok();
+            return crate::chief_service::approve_order_by_approval_id(
+                data_dir,
+                approval_id,
+                app.as_mut(),
+                now_millis(),
+            );
+        }
         if approval_id.starts_with("draft-") {
             let db_path = data_dir.join("kernel.sqlite");
             let mut app = LocalApp::open(&db_path).map_err(|_| "KERNEL_OPEN_FAILED")?;
@@ -1993,6 +2020,13 @@ pub fn reject(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &'
             Err(_) => Err("RESUME_AFTER_APPROVAL_FAILED"),
         }
     } else {
+        if approval_id.starts_with("chief-order-") {
+            return crate::chief_service::reject_order_by_approval_id(
+                &data_dir,
+                approval_id,
+                now_millis(),
+            );
+        }
         if approval_id.starts_with("draft-") {
             let mut draft_store = bob_runtime::routines::UnattendedDraftStore::open(&data_dir)
                 .map_err(|_| "DRAFT_STORE_OPEN_FAILED")?;
@@ -2083,6 +2117,13 @@ pub fn reject_with_ctx(ctx: &mut NodeContext, args: &Value) -> Result<Value, &'s
             Err(_) => Err("RESUME_AFTER_APPROVAL_FAILED"),
         }
     } else {
+        if approval_id.starts_with("chief-order-") {
+            return crate::chief_service::reject_order_by_approval_id(
+                &data_dir,
+                approval_id,
+                now_millis(),
+            );
+        }
         if approval_id.starts_with("draft-") {
             let mut draft_store = bob_runtime::routines::UnattendedDraftStore::open(&data_dir)
                 .map_err(|_| "DRAFT_STORE_OPEN_FAILED")?;
@@ -2149,6 +2190,13 @@ pub fn reject_direct(data_dir: &Path, args: &Value) -> Result<Value, &'static st
             Err(_) => Err("RESUME_AFTER_APPROVAL_FAILED"),
         }
     } else {
+        if approval_id.starts_with("chief-order-") {
+            return crate::chief_service::reject_order_by_approval_id(
+                data_dir,
+                approval_id,
+                now_millis(),
+            );
+        }
         if approval_id.starts_with("draft-") {
             let mut draft_store = bob_runtime::routines::UnattendedDraftStore::open(data_dir)
                 .map_err(|_| "DRAFT_STORE_OPEN_FAILED")?;
@@ -2219,6 +2267,10 @@ pub fn approvals_list(data_dir: &Path, _args: &Value) -> Result<Value, &'static 
                 "expires_at": d.expires_at,
             }));
         }
+    }
+
+    if let Ok(cards) = crate::chief_service::list_pending_approval_cards(data_dir) {
+        list.extend(cards);
     }
 
     Ok(json!(list))

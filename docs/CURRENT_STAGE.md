@@ -972,3 +972,14 @@ PrimaryChatPane 按历史区 ResizeObserver 实测高度缩放水滴，空态容
 2026-11-15 工具策略候选：设置开关、全局默认/设备覆盖、持久化节点回执、后台重试、创建/续聊/审批后端拒绝、历史只读提示与图标弱化已接线。137 项原生流测试、策略测试、16 项 Bot 权限测试通过。候选验证 VPS2/VPS3/X1T 停用→重启→重新启用→恢复停用均通过，真实 Claude 历史可读。三节点及网页已发布；生产全局停用回执全部 synced，历史数为 1/8/9，逐台正文读取和续聊拒绝通过。节点二进制 SHA256：257ec89df31f8405c175b98a2e46551ff638e39c528b9eb279bd5e6022de3e49；VPS2 备份 quota-device-20261115-033431-e4200576。未调用 Claude 模型、不卸载、不删除历史；未打包 APK。公开登录浏览器视觉与手机验收未执行。
 
 TP4 扩展矩阵仍保留：真实审批等待中停用、已有长任务取消确认、设备断网再恢复和移动端设置入口。当前三节点重启持久化/重新启用及历史保留已实测，不将这些扩展项冒充完成。
+
+---
+
+### 5.3 `BOB-D-017` / `WP-C1`：去 `X1C` 远程底座与可插拔多参谋长 MCP 派单/回执闭环（2026-11-16）
+
+- **目标与定位**：配合全集群 `~/work` 标准化，将工作流从依赖 `X1C` 本机迁移为“手机 / `X1T` / `VPS2` / `VPS3` 7×24 远程优先”，并在 `bob-node` 已有 `/api/bot/v1/mcp` 之上落地可插拔无状态多参谋长派单与回执闭环（支持 `bob-online`、`grok_bot`、`meta_muse` 平权下令、经机主审批后流转并回收成果，随时零损耗退订任一外部席位）。
+- **核心交付范围**：
+  - `~/work/common/AGENTS.md`：固化去 `X1C` 单点依赖准则。
+  - `~/work/common/chief_briefing.py` + `~/work/common/test_chief_briefing.py`：跨节点可移植的脱敏战报聚合脚本（产出 `interchange/chief_briefing.{yaml,json,md}`）。
+  - `crates/bob-node/src/chief_service.rs`（新增）及 `bot_access.rs`、`jarvis.rs`、`lib.rs`：扩展 `Grant` 权限（`briefing_read`、`orders_submit`、`orders_read`），新增 `bob_briefing` / `bob_order_submit` / `bob_orders` MCP 工具，将待批指令接入 Jarvis 统一审批卡队列（`chief-order-*`），新增机主专用 `app_chief_orders_list` / `app_chief_order_complete` 回执接口。
+- **验收状态**：已完成。`~/work/common/test_chief_briefing.py` 在 `X1C` 与 `VPS2`（`srv1471410`）双端单测 `2/2` 通过，`VPS2` 经 Syncthing 自动收敛并独立生成 `interchange/chief_briefing.{json,yaml,md}`（零 `X1C` 在线依赖）；`X1T` 完成首批 6 个核心 Git 仓库克隆落位 `/home/bobbik/work/code/` 并注册至 DSH `workspace.json`（共 13 个工作区），`VPS2`/`VPS3` GitHub SSH 环境就绪；`cargo test --offline -p bob-node --lib -- --test-threads=1` 全量 `55/55` 通过（含新增 `chief_service` 3 项多参谋长平权流转+人工审批回执、零损耗退订吊销、幂等冲突与 `403 BOT_SCOPE_DENIED` 隔离测试，以及 `bot_access` 16 项、`jarvis` 6 项模块并发单测通过；注：Windows 多线程并发跑全套测试时既有 `bob-runtime::worker_ledger` 存在 NTFS `rename` 偶发文件锁争用，串行 `--test-threads=1` 全绿）。

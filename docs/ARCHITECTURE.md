@@ -130,6 +130,13 @@ Windows原生vault仅接受可信app-data目录，使用当前用户DPAPI固定�
 
 实现状态：现有直达链路部分验证；默认助理关联、受控派发及结果回流尚在实施，不能因本节获确认宣称已完成。
 
+### 可插拔多参谋长（Chief of Staff）与去单机依赖边界（BOB-D-017）
+
+- **去 `X1C` 单点与对等节点模型**：各常驻节点（`VPS2`、`VPS3`、`X1T`）拥有独立的 `~/work/code/*` Git 克隆与边缘授权，`~/work/common/interchange/chief_briefing.{yaml,json,md}` 由 `chief_briefing.py` 按节点本地读取 Syncthing 底座实时生成脱敏态势，不依赖 `X1C` 本机路径。
+- **无状态多参谋长平权总线**：外部席位（`grok_bot`、`meta_muse` 等）经 `/api/bot/v1/mcp` 与 `bob-online` 主助理共享统一指令-回执模型；`Grant` 显式增加独立开关 `briefing_read`、`orders_submit`、`orders_read`（均默认 `false`，逐席位独立颁发与撤销），不暴露节点密钥、Shell 或通用管理员 RPC。
+- **主权审批硬门禁（Human Gate）**：`bob_order_submit` 仅在获准 `g.projects` 内登记幂等 `ChiefOrder`（持久化于 `chief_orders.json`），状态强制锁定为 `pending_approval`，并投影为标准审批卡（`id: "chief-order-..."`）进入 Jarvis `approvals_list` 供机主在手机或网页点击 `approve` / `reject` 放行；Bot Token 本身永不获得 `app_jarvis_approve`、`app_chief_order_complete` 或任意节点执行权限。
+- **无损退订与跨席位接力**：同一份授权项目内的 `ChiefOrder` 及其 `ChiefOrderReceipt`（摘要、`commit_sha`、验证标志）保留 `issued_by` 来源且可被任一具备 `briefing_read`/`orders_read` 的席位读取；任一席位设 `revoked: true` 后即刻返回 `401 BOT_AUTH_REQUIRED`，历史决策与回执零丢失。
+
 ### 设备统一入口与跨设备项目组织
 
 用户于2026-11-02确认，细化BOB-D-010/011/012：连接以设备为入口，工作以Project为中心，Harness是设备能力。每个实例仍可独立运行；不以VPS或全局唯一Home作为前置。
