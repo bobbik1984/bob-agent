@@ -145,3 +145,52 @@ test('useInbox triage draft lifecycle: draft, apply suggestion, apply all', asyn
   assert.equal(calls[calls.length - 1].cmd, 'triage_close');
   assert.equal(calls[calls.length - 1].args.status, 'applied');
 });
+
+test('useInbox createAndAssignProject creates new project, updates catalog, and assigns spark', async () => {
+  const calls = [];
+  const catalogRef = {
+    value: {
+      projects: [{ id: 'bob_agent', title: 'bob-agent', status: 'active' }],
+      imported_project_ids: [],
+    },
+  };
+  const fakeBridge = {
+    createProject: async (projectId, title) => {
+      calls.push({ cmd: 'createProject', projectId, title });
+      return {
+        projects: [
+          ...catalogRef.value.projects,
+          { id: projectId, title, status: 'active' },
+        ],
+        imported_project_ids: [],
+      };
+    },
+    inboxTriageSet: async args => {
+      calls.push({ cmd: 'inboxTriageSet', args });
+      return { ok: true };
+    },
+    inboxList: async () => [
+      { id: 'spark-custom', content: 'Custom idea', triage_status: 'sorted', destination_kind: 'project_todo' },
+    ],
+  };
+
+  const inbox = useInbox({
+    available: true,
+    kernelBridge: fakeBridge,
+    catalog: catalogRef,
+    t: k => k,
+  });
+
+  const created = await inbox.createAndAssignProject('spark-custom', '  New Manual Project  ');
+  assert.equal(created.title, 'New Manual Project');
+  assert.equal(calls[0].cmd, 'createProject');
+  assert.equal(calls[0].title, 'New Manual Project');
+  assert.equal(catalogRef.value.projects.length, 2);
+  assert.equal(calls[1].cmd, 'inboxTriageSet');
+  assert.equal(calls[1].args.captureId, 'spark-custom');
+  assert.deepEqual(calls[1].args.destination, {
+    kind: 'project_todo',
+    refId: created.id,
+    label: 'New Manual Project',
+  });
+});

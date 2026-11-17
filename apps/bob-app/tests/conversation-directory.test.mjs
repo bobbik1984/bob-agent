@@ -129,8 +129,9 @@ test('groupIconKind selects project, archive, computer, phone, and cloud icons b
 
 test('inferred project clustering merges unlinked workspace/canonical siblings into existing projects and isolates /tmp verification runs', () => {
   const catalogProjects = [
+    { id: 'bob_agent', title: 'bob-agent' },
     { id: 'proj-92d40dc5', title: 'Bob-bot 助手' },
-    { id: 'proj-9099969361', title: 'Quant Lab 量化交易' },
+    { id: 'quant_lab', title: 'Quant Lab' },
   ];
   const rows = [
     {
@@ -191,13 +192,17 @@ test('inferred project clustering merges unlinked workspace/canonical siblings i
 
   for (const mode of ['project', 'smart']) {
     const groups = directoryGroups(rows, mode, null, { projects: catalogProjects, ownerInstance: 'hostinger' });
+    const bobAgentGroup = groups.find(g => g.name === 'bob-agent');
+    assert.ok(bobAgentGroup, `expected bob-agent group in ${mode} mode`);
+    assert.deepEqual(bobAgentGroup.items.map(i => i.uid), ['x1t:unlinked-wp']);
+
     const bobGroup = groups.find(g => g.name === 'Bob-bot 助手');
     assert.ok(bobGroup, `expected Bob-bot 助手 group in ${mode} mode`);
-    assert.equal(bobGroup.items.length, 4);
+    assert.equal(bobGroup.items.length, 3);
     assert.equal(groups.some(g => g.name.includes('X1T / bob-bot')), false);
 
-    const quantGroup = groups.find(g => g.name === 'Quant Lab 量化交易');
-    assert.ok(quantGroup, `expected Quant Lab 量化交易 group in ${mode} mode`);
+    const quantGroup = groups.find(g => g.name === 'Quant Lab');
+    assert.ok(quantGroup, `expected Quant Lab group in ${mode} mode`);
     assert.equal(quantGroup.items.length, 1);
 
     const testGroup = groups.find(g => g.isTestGroup);

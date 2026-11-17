@@ -280,6 +280,11 @@ fn main() {
     bob_runtime::tool_inventory::start_monitor(data_dir.clone());
     bob_node::start_tool_policy_sync(data_dir.clone());
     let server = spawn_node_server(config).expect("failed to start bob-node server");
+    if !bob_node::node_access::enabled(&data_dir) {
+        if let Some(reg_path) = bob_runtime::project_registry::discover_registry_path() {
+            let _ = server.sync_project_registry(&reg_path);
+        }
+    }
     println!(
         "bob-node listening on http://{} (data_dir: {:?}, static_dir: {:?}, legacy_db: {:?})",
         server.local_addr, data_dir, static_dir, legacy_db_path

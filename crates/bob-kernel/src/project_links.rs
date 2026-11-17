@@ -157,7 +157,7 @@ impl LocalApp {
         let mut proj_stmt = self.store.db.prepare(
             "SELECT id, title, status, version, created_at, updated_at
              FROM projects
-             WHERE id NOT LIKE 'local-project:%' AND id NOT LIKE 'direct-project:%' AND status != 'archived'
+             WHERE id NOT LIKE 'local-project:%' AND id NOT LIKE 'direct-project:%'
              ORDER BY updated_at DESC, id ASC",
         )?;
         let projects = proj_stmt

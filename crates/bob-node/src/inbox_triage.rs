@@ -37,7 +37,7 @@ pub fn draft(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &'s
             .map(|snap| {
                 snap.projects
                     .into_iter()
-                    .filter(|p| p.status == "active")
+                    .filter(|p| p.status == "active" && p.id != "proj-default")
                     .take(80)
                     .map(|p| ProjectInput { id: p.id, title: p.title })
                     .collect()

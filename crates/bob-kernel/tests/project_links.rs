@@ -46,3 +46,27 @@ fn scoped_kernel_entry_denies_without_transport_checks() {
     assert!(app.set_project_session_link_authorized(scope(),"n","dsh","s",Some("p"),i64::MAX,2).is_err());
     assert_eq!(app.project_session_links().unwrap()["links"].as_array().unwrap().len(),0);
 }
+
+#[test]
+fn archived_project_tombstone_syncs_and_suppresses_stale_active_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut hub = LocalApp::open(&dir.path().join("hub.sqlite")).unwrap();
+    let mut phone = LocalApp::open(&dir.path().join("phone.sqlite")).unwrap();
+
+    hub.create_project("junk", "Junk", 10).unwrap();
+    phone.create_project("junk", "Junk", 10).unwrap();
+
+    hub.upsert_formal_project("junk", "Junk", "archived", 10, 20)
+        .unwrap();
+    assert!(hub.catalog_snapshot().unwrap().projects.is_empty());
+
+    // Phone pushing its older active copy (version 1) must not resurrect the archived row on Hub.
+    let phone_payload = phone.export_projects_and_links().unwrap();
+    hub.merge_projects_and_links(&phone_payload, 30).unwrap();
+    assert!(hub.catalog_snapshot().unwrap().projects.is_empty());
+
+    // Hub exporting archived tombstone (version 2) archives the stale active copy on Phone.
+    let hub_payload = hub.export_projects_and_links().unwrap();
+    phone.merge_projects_and_links(&hub_payload, 30).unwrap();
+    assert!(phone.catalog_snapshot().unwrap().projects.is_empty());
+}

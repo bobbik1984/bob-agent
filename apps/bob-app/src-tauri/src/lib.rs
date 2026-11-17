@@ -84,10 +84,15 @@ async fn app_bootstrap<R: tauri::Runtime>(
                 .app_data_dir()
                 .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
             std::fs::create_dir_all(&dir).map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
-            *guard = Some(
-                LocalApp::open(&dir.join("kernel.sqlite"))
-                    .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?,
-            );
+            #[allow(unused_mut)]
+            let mut local_app =
+                LocalApp::open(&dir.join("kernel.sqlite")).map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
+            #[cfg(not(test))]
+            if let Some(reg_path) = bob_runtime::project_registry::discover_registry_path() {
+                let ts = now().unwrap_or(0);
+                let _ = bob_runtime::project_registry::sync_registry_file(&mut local_app, &reg_path, ts);
+            }
+            *guard = Some(local_app);
         }
         let local = guard.as_mut().ok_or("LOCAL_STORE_UNAVAILABLE")?;
         for execution in local

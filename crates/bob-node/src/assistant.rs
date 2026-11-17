@@ -8,7 +8,7 @@ pub fn execute(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
         .as_str()
         .filter(|s| !s.is_empty() && s.len() <= 200)
         .ok_or("REQUEST_ID_REQUIRED")?;
-    let (prepared, profile, dir, schedules, local_candidates) = {
+    let (prepared, profile, dir, schedules, proj_catalog, local_candidates) = {
         let mut ctx = state.lock().map_err(|_| "NODE_LOCK_POISONED")?;
         let assistant = ctx
             .app
@@ -44,6 +44,7 @@ pub fn execute(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
             .map_err(|_| "PROVIDER_READ_FAILED")?
             .ok_or("PROVIDER_UNCONFIGURED")?;
         let sched_catalog = bob_runtime::assistant::schedule_catalog_for_prompt(&ctx.app);
+        let proj_catalog = bob_runtime::assistant::project_catalog_for_prompt(&ctx.app);
         let local_convs: Vec<Value> = ctx
             .app
             .catalog_snapshot()
@@ -75,6 +76,7 @@ pub fn execute(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
             profile,
             ctx.runtime.data_dir.clone(),
             sched_catalog,
+            proj_catalog,
             local_convs,
         )
     };
@@ -163,11 +165,12 @@ pub fn execute(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
             .ok_or("ASSISTANT_REQUEST_MISMATCH")?
             .content
             .as_str();
-        let prompt = bob_runtime::assistant::routing_prompt_with_context(
+        let prompt = bob_runtime::assistant::routing_prompt_with_projects(
             user,
             &candidates,
             complete,
             &schedules,
+            &proj_catalog,
             now_millis(),
         );
         let flash_profile = runtime

@@ -236,6 +236,65 @@ export function useInbox(ctx = {}) {
     }
   }
 
+  async function createAndAssignProject(sparkId, rawTitle, suggestionIndex = -1) {
+    const trimmed = String(rawTitle || '').trim();
+    if (!trimmed || !available) return null;
+
+    const existingProjects = ctx.catalog?.value?.projects || [];
+    const importedIds = new Set(ctx.catalog?.value?.imported_project_ids || []);
+    let targetProject = existingProjects.find(
+      p =>
+        p?.id &&
+        p.status !== 'archived' &&
+        p.source_kind !== 'legacy_import' &&
+        !importedIds.has(p.id) &&
+        String(p.title || '').trim().toLowerCase() === trimmed.toLowerCase(),
+    );
+
+    if (!targetProject) {
+      if (!kernelBridge.createProject) return null;
+      const pid =
+        typeof crypto !== 'undefined' && crypto.randomUUID
+          ? `proj-${crypto.randomUUID().slice(0, 8)}`
+          : `proj-${Date.now().toString(36)}`;
+      const snap = await kernelBridge.createProject(pid, trimmed);
+      if (snap) {
+        if (ctx.applyCatalogPreferences) {
+          ctx.applyCatalogPreferences(snap);
+        } else if (ctx.catalog) {
+          ctx.catalog.value = snap;
+        }
+      }
+      targetProject = snap?.projects?.find(p => p.id === pid) || { id: pid, title: trimmed };
+    }
+
+    const finalId = targetProject.id;
+    const finalTitle = targetProject.title || trimmed;
+
+    if (suggestionIndex >= 0 && triageDraft.value?.batch?.suggestions?.[suggestionIndex]) {
+      const sugg = triageDraft.value.batch.suggestions[suggestionIndex];
+      sugg.destination = 'project_todo';
+      sugg.project_id = finalId;
+      sugg.project_title = finalTitle;
+      await applyTriageSuggestion(suggestionIndex, {
+        kind: 'project_todo',
+        refId: finalId,
+        label: finalTitle,
+      });
+    } else if (sparkId) {
+      await manuallySetItemDestination(sparkId, {
+        kind: 'project_todo',
+        refId: finalId,
+        label: finalTitle,
+      });
+    }
+
+    if (kernelBridge.syncHome) {
+      void Promise.resolve(kernelBridge.syncHome()).catch(() => {});
+    }
+    return { id: finalId, title: finalTitle };
+  }
+
   return {
     inboxItems,
     inboxBusy,
@@ -258,5 +317,6 @@ export function useInbox(ctx = {}) {
     applyAllTriageSuggestions,
     submitZeroDecisionCapture,
     manuallySetItemDestination,
+    createAndAssignProject,
   };
 }

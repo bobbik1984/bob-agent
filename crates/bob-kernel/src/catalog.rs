@@ -265,6 +265,59 @@ impl LocalApp {
             .ok_or(Error::InvalidTransition)
     }
 
+    /// Idempotently upsert a formal project entry or tombstone (`status = "archived"`).
+    /// Bumps `version` only when `title` or `status` changes so sync order stays stable.
+    pub fn upsert_formal_project(
+        &mut self,
+        project_id: &str,
+        title: &str,
+        status: &str,
+        seed_updated_at: i64,
+        now: i64,
+    ) -> Result<()> {
+        let title = title.trim();
+        if !valid_id(project_id)
+            || project_id.starts_with("local-project:")
+            || project_id.starts_with("direct-project:")
+            || title.is_empty()
+            || title.len() > 256
+            || !matches!(status, "active" | "completed" | "archived")
+        {
+            return Err(Error::InvalidTransition);
+        }
+        let tx = self
+            .store
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let existing: Option<(String, String, i64)> = tx
+            .query_row(
+                "SELECT title, status, version FROM projects WHERE id=?1",
+                [project_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        match existing {
+            Some((old_title, old_status, cur_ver)) => {
+                if old_title != title || old_status != status {
+                    tx.execute(
+                        "UPDATE projects SET title=?2, acceptance='local', status=?3, version=?4, updated_at=?5 WHERE id=?1",
+                        params![project_id, title, status, cur_ver.max(1) + 1, now],
+                    )?;
+                }
+            }
+            None if status != "archived" => {
+                tx.execute(
+                    "INSERT INTO projects(id,title,acceptance,status,version,created_at,updated_at)
+                     VALUES(?1,?2,'local',?3,1,?4,?5)",
+                    params![project_id, title, status, now, seed_updated_at],
+                )?;
+            }
+            None => {}
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// One persistent assistant entry per independent instance. It is not a
     /// replica of a remote Harness conversation and does not change ownership.
     pub fn assistant_conversation(&mut self, now: i64) -> Result<String> {

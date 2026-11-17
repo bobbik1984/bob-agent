@@ -155,6 +155,16 @@ impl NodeContext {
         self.save_online();
     }
 
+    pub fn sync_project_registry(&mut self, path: &Path) -> Result<usize, &'static str> {
+        let synced = bob_runtime::project_registry::sync_registry_file(
+            &mut self.app,
+            path,
+            now_millis(),
+        )?;
+        self.sync_catalog_into_online_store();
+        Ok(synced)
+    }
+
     /// `XP-10`: Idempotent read-only import from legacy `nexus_control_plane.db`.
     pub fn import_legacy_nexus_db(&mut self, db_path: &Path) -> Result<usize, &'static str> {
         let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
@@ -162,9 +172,24 @@ impl NodeContext {
         let mut imported_count = 0usize;
         let stamp = now_millis();
 
-        if let Ok(mut stmt) = conn.prepare(
-            "SELECT id, COALESCE(name, id), COALESCE(updated_at, ?1) FROM projects ORDER BY id LIMIT 500",
-        ) {
+        let has_status_col = conn
+            .prepare("PRAGMA table_info(projects)")
+            .and_then(|mut s| {
+                let names: Vec<String> = s
+                    .query_map([], |r| r.get::<_, String>(1))?
+                    .flatten()
+                    .collect();
+                Ok(names.iter().any(|n| n == "status"))
+            })
+            .unwrap_or(false);
+
+        let proj_sql = if has_status_col {
+            "SELECT id, COALESCE(name, id), COALESCE(updated_at, ?1) FROM projects WHERE COALESCE(status, 'active') = 'active' ORDER BY id LIMIT 500"
+        } else {
+            "SELECT id, COALESCE(name, id), COALESCE(updated_at, ?1) FROM projects ORDER BY id LIMIT 500"
+        };
+
+        if let Ok(mut stmt) = conn.prepare(proj_sql) {
             let rows = stmt
                 .query_map([stamp], |row| {
                     Ok((
@@ -177,6 +202,18 @@ impl NodeContext {
             if let Some(iter) = rows {
                 for item in iter.flatten() {
                     let (pid, name, updated_at) = item;
+                    let is_legacy_noise = has_status_col
+                        && (pid == "cloud-agent-dogfood"
+                            || pid == "proj_636c6f75642d6167"
+                            || name == "cloud-agent-dogfood"
+                            || pid == "proj_daily_assistant"
+                            || pid.starts_with("proj_e2e_")
+                            || pid.starts_with("proj_ux")
+                            || pid.starts_with("proj_four_harness_")
+                            || pid.starts_with("proj_mobile_loop_"));
+                    if is_legacy_noise {
+                        continue;
+                    }
                     if !self.online.imported_project_ids.contains(&pid) {
                         self.online.imported_project_ids.push(pid.clone());
                     }
@@ -411,6 +448,25 @@ fn discover_local_cli_harnesses(data_dir: &std::path::Path) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn catalog_snapshot_json(ctx: &NodeContext) -> Result<Value, &'static str> {
+    let snap = ctx
+        .app
+        .catalog_snapshot()
+        .map_err(|_| "CATALOG_READ_FAILED")?;
+    let mut value = serde_json::to_value(snap).map_err(|_| "CATALOG_READ_FAILED")?;
+    if let Some(projects) = value["projects"].as_array_mut() {
+        for project in projects {
+            let imported = project["id"]
+                .as_str()
+                .map(|id| ctx.online.imported_project_ids.iter().any(|p| p == id))
+                .unwrap_or(false);
+            project["source_kind"] = json!(if imported { "legacy_import" } else { "bob_native" });
+        }
+    }
+    value["imported_project_ids"] = json!(ctx.online.imported_project_ids);
+    Ok(value)
 }
 
 pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) -> Result<Value, &'static str> {
@@ -668,21 +724,7 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
             let id = ctx.app.assistant_conversation(at).map_err(|_| "ASSISTANT_OPEN_FAILED")?;
             Ok(json!({"conversation_id": id}))
         }
-        "app_catalog" => {
-            let snap = ctx
-                .app
-                .catalog_snapshot()
-                .map_err(|_| "CATALOG_READ_FAILED")?;
-            let mut value = serde_json::to_value(snap).map_err(|_| "CATALOG_READ_FAILED")?;
-            if let Some(projects) = value["projects"].as_array_mut() {
-                for project in projects {
-                    let imported = project["id"].as_str().map(|id| ctx.online.imported_project_ids.iter().any(|p| p == id)).unwrap_or(false);
-                    project["source_kind"] = json!(if imported { "legacy_import" } else { "bob_native" });
-                }
-            }
-            value["imported_project_ids"] = json!(ctx.online.imported_project_ids);
-            Ok(value)
-        }
+        "app_catalog" => catalog_snapshot_json(ctx),
         "app_history" => {
             let session_id = args
                 .get("sessionId")
@@ -747,11 +789,7 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 .create_project(project_id, title, at)
                 .map_err(|_| "PROJECT_CREATE_FAILED")?;
             ctx.sync_catalog_into_online_store();
-            let snap = ctx
-                .app
-                .catalog_snapshot()
-                .map_err(|_| "CATALOG_READ_FAILED")?;
-            serde_json::to_value(snap).map_err(|_| "CATALOG_READ_FAILED")
+            catalog_snapshot_json(ctx)
         }
         "app_conversation_create" => {
             let conversation_id = args
@@ -4366,6 +4404,11 @@ impl RunningNodeServer {
     pub fn shutdown(&self) {
         self.stop.store(true, Ordering::SeqCst);
         let _ = TcpStream::connect_timeout(&self.local_addr, Duration::from_millis(100));
+    }
+
+    pub fn sync_project_registry(&self, path: &Path) -> Result<usize, &'static str> {
+        let mut ctx = self.state.lock().map_err(|_| "NODE_LOCK_POISONED")?;
+        ctx.sync_project_registry(path)
     }
 
     pub fn bootstrap_pairing_code(&self) -> Option<String> {

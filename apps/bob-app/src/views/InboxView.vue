@@ -17,7 +17,18 @@ const triageStatusNotice = computed(() => inbox?.triageStatusNotice?.value || ''
 
 const activeProjects = computed(() => {
   const projects = shell.catalog?.value?.projects || shell.projectList?.value || [];
-  return projects.filter(p => p.id && !p.id.startsWith('assistant:') && p.source_kind !== 'legacy_import');
+  const imported = new Set(shell.catalog?.value?.imported_project_ids || []);
+  return projects.filter(
+    p =>
+      p?.id &&
+      p.status !== 'archived' &&
+      p.id !== 'proj-default' &&
+      !p.id.startsWith('assistant:') &&
+      !p.id.startsWith('local-project:') &&
+      !p.id.startsWith('direct-project:') &&
+      p.source_kind !== 'legacy_import' &&
+      !imported.has(p.id),
+  );
 });
 
 const pendingSuggestions = computed(() => {
@@ -38,6 +49,10 @@ const inboxFilter = computed({
 
 const editingIndex = ref(-1);
 const customDestDraft = ref({ kind: 'note', label: '' });
+const creatingProjectForItemId = ref(null);
+const creatingProjectSuggIndex = ref(-1);
+const newProjectTitleInput = ref('');
+const creatingProjectBusy = ref(false);
 
 function getSparkText(item) {
   return item.content || item.content_ref || item.contentRef || '';
@@ -147,8 +162,15 @@ function getSuggestionSelectValue(sugg) {
   return sugg.destination;
 }
 
-function handleSuggestionSelectChange(sugg, event) {
+function handleSuggestionSelectChange(item, suggEntry, event) {
   const val = event.target.value;
+  const sugg = suggEntry?.suggestion;
+  if (!sugg) return;
+  if (val === '__new_project__') {
+    event.target.value = getSuggestionSelectValue(sugg);
+    startNewProjectForItem(item.id, suggEntry.index);
+    return;
+  }
   if (val.startsWith('project:')) {
     const projId = val.slice(8);
     const proj = activeProjects.value.find(p => p.id === projId);
@@ -206,9 +228,41 @@ function applyAll() {
   }
 }
 
+function startNewProjectForItem(itemId, suggIndex = -1) {
+  editingIndex.value = -1;
+  creatingProjectForItemId.value = itemId;
+  creatingProjectSuggIndex.value = suggIndex;
+  newProjectTitleInput.value = '';
+}
+
+function cancelNewProjectForItem() {
+  creatingProjectForItemId.value = null;
+  creatingProjectSuggIndex.value = -1;
+  newProjectTitleInput.value = '';
+}
+
+async function confirmNewProjectForItem(item) {
+  const title = newProjectTitleInput.value.trim();
+  if (!title || creatingProjectBusy.value || !inbox?.createAndAssignProject) return;
+  creatingProjectBusy.value = true;
+  try {
+    await inbox.createAndAssignProject(item.id, title, creatingProjectSuggIndex.value);
+    cancelNewProjectForItem();
+  } catch (err) {
+    console.error('Failed to create and assign new project:', err);
+  } finally {
+    creatingProjectBusy.value = false;
+  }
+}
+
 function handleManualAssign(item, event) {
   const rawVal = event.target.value;
   if (!rawVal) return;
+  if (rawVal === '__new_project__') {
+    event.target.value = '';
+    startNewProjectForItem(item.id, -1);
+    return;
+  }
   try {
     const dest = JSON.parse(rawVal);
     if (inbox?.manuallySetItemDestination) {
@@ -431,10 +485,39 @@ onMounted(() => {
             </button>
           </div>
 
+          <!-- Inline Manual New-Project Form -->
+          <div v-if="creatingProjectForItemId === item.id" class="sugg-edit-row">
+            <input
+              v-model="newProjectTitleInput"
+              class="filter-pill"
+              style="border-radius: var(--radius-sm); flex: 1; min-width: 120px;"
+              :placeholder="t('inboxNewProjectPlaceholder')"
+              :disabled="creatingProjectBusy"
+              @keydown.enter.prevent="confirmNewProjectForItem(item)"
+              @keydown.esc.prevent="cancelNewProjectForItem"
+            />
+            <button
+              type="button"
+              class="btn primary tiny"
+              :disabled="!newProjectTitleInput.trim() || creatingProjectBusy"
+              @click="confirmNewProjectForItem(item)"
+            >
+              {{ t('inboxNewProjectCreateBtn') }}
+            </button>
+            <button
+              type="button"
+              class="btn ghost tiny"
+              :disabled="creatingProjectBusy"
+              @click="cancelNewProjectForItem"
+            >
+              {{ t('cancel') }}
+            </button>
+          </div>
+
           <!-- Bottom Footer Row -->
           <!-- State A: Active Suggestion -->
           <div
-            v-if="getSuggestionForItem(item.id) && !getSuggestionForItem(item.id).suggestion._applied && item.triage_status !== 'sorted' && editingIndex !== getSuggestionForItem(item.id)?.index"
+            v-if="getSuggestionForItem(item.id) && !getSuggestionForItem(item.id).suggestion._applied && item.triage_status !== 'sorted' && editingIndex !== getSuggestionForItem(item.id)?.index && creatingProjectForItemId !== item.id"
             class="spark-card-footer sugg-bottom-toolbar"
           >
             <div class="sugg-picker-group">
@@ -442,7 +525,7 @@ onMounted(() => {
               <select
                 class="sugg-dest-select"
                 :value="getSuggestionSelectValue(getSuggestionForItem(item.id).suggestion)"
-                @change="handleSuggestionSelectChange(getSuggestionForItem(item.id).suggestion, $event)"
+                @change="handleSuggestionSelectChange(item, getSuggestionForItem(item.id), $event)"
               >
                 <optgroup :label="t('modeProjectShort')">
                   <option
@@ -452,6 +535,7 @@ onMounted(() => {
                   >
                     {{ p.title }}
                   </option>
+                  <option value="__new_project__">{{ t('inboxNewProjectOption') }}</option>
                 </optgroup>
                 <optgroup :label="t('inboxOtherDest')">
                   <option value="note">{{ t('destNote') }}</option>
@@ -501,7 +585,7 @@ onMounted(() => {
           </div>
 
           <!-- State C: Unsorted without suggestion (Manual Project/Destination Assignment) -->
-          <div v-else class="spark-card-footer spark-card-meta-row">
+          <div v-else-if="creatingProjectForItemId !== item.id" class="spark-card-footer spark-card-meta-row">
             <div class="spark-meta-left">
               <span>{{ formatTimestamp(item.created_at) }}</span>
               <span v-if="item.media_id" class="chip gray" style="font-size: 10px;">
@@ -524,6 +608,7 @@ onMounted(() => {
                     >
                       {{ p.title }}
                     </option>
+                    <option value="__new_project__">{{ t('inboxNewProjectOption') }}</option>
                   </optgroup>
                   <optgroup :label="t('inboxOtherDest')">
                     <option :value="JSON.stringify({ kind: 'note', label: getSparkTitle(item) })">

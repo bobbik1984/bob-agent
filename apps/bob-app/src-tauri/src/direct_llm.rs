@@ -2508,11 +2508,13 @@ pub(crate) async fn execute_direct<R: Runtime>(
             let mut msgs = prepared.messages.clone();
             if let Some(last_user) = msgs.iter_mut().rev().find(|m| m.role == "user") {
                 let sched_catalog = bob_runtime::assistant::schedule_catalog_for_prompt(app);
-                last_user.content = bob_runtime::assistant::routing_prompt_with_context(
+                let proj_catalog = bob_runtime::assistant::project_catalog_for_prompt(app);
+                last_user.content = bob_runtime::assistant::routing_prompt_with_projects(
                     &last_user.content,
                     &[],
                     false,
                     &sched_catalog,
+                    &proj_catalog,
                     now().unwrap_or(1),
                 );
             }

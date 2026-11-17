@@ -30,6 +30,7 @@ pub mod assistant_context;
 pub mod net_guard;
 pub mod node_pairing;
 pub mod project_context;
+pub mod project_registry;
 pub mod routines;
 pub mod runtime_rpc;
 pub mod subagent_pool;

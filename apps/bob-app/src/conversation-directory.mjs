@@ -78,9 +78,16 @@ export function inferSmartTopic(row) {
     return { key: 'smart:unnamed-uuid', name: '未命名节点会话 (UUID)' };
   }
   if (
-    /(bob[\s_-]*bot|bobbot|bob[\s_-]*agent)/i.test(title) ||
-    /(bob[\s_-]*bot|bobbot|bob[\s_-]*agent)/i.test(wsLower) ||
-    /(^|\/)(bob[\s_-]*bot|bobbot|bob[\s_-]*agent)(\/|$)/i.test(normWs)
+    /(bob[\s_-]*agent|bob[\s_-]*online)/i.test(title) ||
+    /(bob[\s_-]*agent|bob[\s_-]*online)/i.test(wsLower) ||
+    /(^|\/)(bob[\s_-]*agent|bob[\s_-]*online)(\/|$)/i.test(normWs)
+  ) {
+    return { key: 'smart:topic:bob-agent', name: 'bob-agent' };
+  }
+  if (
+    /(bob[\s_-]*bot|bobbot)/i.test(title) ||
+    /(bob[\s_-]*bot|bobbot)/i.test(wsLower) ||
+    /(^|\/)(bob[\s_-]*bot|bobbot)(\/|$)/i.test(normWs)
   ) {
     return { key: 'smart:topic:bob-bot', name: 'Bob-bot 助手' };
   }
@@ -294,19 +301,21 @@ export function filterAndSortRows(rows, pinnedSet = null, options = null) {
 
 
 export const CANONICAL_PROJECTS = [
-  { id: 'bob-bot', name: 'Bob-bot 助手', pattern: /(bob[\s_-]*bot|bobbot|bob[\s_-]*agent)/i },
+  { id: 'bob_agent', name: 'bob-agent', pattern: /(bob[\s_-]*agent|bob[\s_-]*online)/i },
+  { id: 'bob-bot', name: 'Bob-bot 助手', pattern: /(bob[\s_-]*bot|bobbot)/i },
   { id: 'sea2', name: '海路纪元 · Sea2', pattern: /(sea2|海路纪元|海路|地球渲染|航海)/i },
-  { id: 'quant_lab', name: 'Quant Lab 量化实验室', pattern: /(quant_lab|quant|量化)/i },
-  { id: 'winter-shelter', name: 'Winter Shelter 避难所', pattern: /(winter[\s_-]*shelter|winter|雪洞)/i },
-  { id: 'history_map', name: '4D 历史地图', pattern: /(history_map|history-map|历史地图)/i },
-  { id: 'courtyard-garden', name: '庭院布局与塔防', pattern: /(庭院|花园守线|garden)/i },
-  { id: 'village', name: 'Village 集群系统', pattern: /(village|cluster-os|集控|运维控制台)/i },
-  { id: 'bedtime_story', name: 'AI 睡前故事', pattern: /(bedtime_story|睡前故事|绘本)/i },
-  { id: 'code_runner', name: 'CodeRunner 并发引擎', pattern: /(code_runner|coderunner)/i },
-  { id: 'iknow', name: 'iKnow 知识图谱', pattern: /(iknow|生态图谱|知识图谱)/i },
-  { id: '3d-render', name: '3D 渲染与美术管线', pattern: /(空间站|月表|molence|gpcr|blender|render|渲染|建模|3d|sketchup|model[\s_-]*builder|平面模型)/i },
-  { id: 'reverse-eng', name: '逆向工程与源码还原', pattern: /(dos|exe|逆向|还原源代码|反编译)/i },
-  { id: 'four-harness', name: '多工具联合验收', pattern: /(four[\s_-]*harness)/i },
+  { id: 'quant_lab', name: 'Quant Lab', pattern: /(quant_lab|quant|量化)/i },
+  { id: 'quant_bot', name: 'Quant Bot', pattern: /(quant_bot|bot\s*arena|模拟操盘)/i },
+  { id: 'wild', name: 'Winter Shelter', pattern: /(winter[\s_-]*shelter|winter|雪洞)/i },
+  { id: 'history_map', name: '时空华夏', pattern: /(history_map|history-map|历史地图|时空华夏)/i },
+  { id: 'village', name: 'Village Dashboard', pattern: /(village|cluster-os|集控|运维控制台)/i },
+  { id: 'bedtime_story', name: 'Bedtime Story', pattern: /(bedtime_story|睡前故事|绘本)/i },
+  { id: 'code_runner', name: 'CodeRunner', pattern: /(code_runner|coderunner)/i },
+  { id: 'iknow', name: 'I Know', pattern: /(iknow|i[\s_-]*know|生态图谱|知识图谱)/i },
+  { id: 'brick_compiler', name: 'Brick Compiler', pattern: /(brick[\s_-]*compiler)/i },
+  { id: 'indoormap', name: 'IndoorMap', pattern: /(indoormap|indoor|mallos|室内地图)/i },
+  { id: 'mall_coordination', name: 'Mall_coordination', pattern: /(mall_coordination|mall[\s_-]*coord|招商协同)/i },
+  { id: 'timeline', name: 'Timeline', pattern: /(timeline|甘特图)/i },
 ];
 
 function normWorkspacePath(path) {
