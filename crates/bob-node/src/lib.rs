@@ -1957,7 +1957,7 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
             let client = match ctx.runtime.dsh_client(connection) {
                 Ok(c) => c,
                 Err("DSH_CONNECTION_NOT_FOUND" | "DSH_CONNECTION_REQUIRED" | "SECRET_NOT_CONFIGURED")
-                    if connection != "local" && matches!(command, "app_dsh_answer" | "app_dsh_permission_set") =>
+                    if connection != "local" && matches!(command, "app_dsh_answer" | "app_dsh_permission_set" | "app_dsh_page" | "app_dsh_live" | "app_dsh_history" | "app_dsh_preview" | "app_dsh_prompt") =>
                 {
                     return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
                         &ctx.runtime,
@@ -1969,14 +1969,30 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 Err(e) => return Err(e),
             };
             match command {
-                "app_dsh_create" => client.create_session_in_authorized_workspace(&ctx.runtime.data_dir,
-                    bob_runtime::dsh_session::SessionAddress {
-                        connection_id: connection.into(),
-                        session_id: args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into(),
-                    },
-                    args["workspace"].as_str().ok_or("DSH_WORKSPACE_NOT_AVAILABLE")?,
-                    args["title"].as_str().ok_or("DSH_CREATE_INVALID")?,
-                ),
+                "app_dsh_create" => {
+                    let session_id = args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+                    let res = client.create_session_in_authorized_workspace(&ctx.runtime.data_dir,
+                        bob_runtime::dsh_session::SessionAddress {
+                            connection_id: connection.into(),
+                            session_id: session_id.into(),
+                        },
+                        args["workspace"].as_str().ok_or("DSH_WORKSPACE_NOT_AVAILABLE")?,
+                        args["title"].as_str().ok_or("DSH_CREATE_INVALID")?,
+                    )?;
+                    let init_mode = args
+                        .get("approvalMode")
+                        .or_else(|| args.get("approval_mode"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("full_auto");
+                    let _ = client.ensure_permission_preset(
+                        bob_runtime::dsh_session::SessionAddress {
+                            connection_id: connection.into(),
+                            session_id: session_id.into(),
+                        },
+                        init_mode,
+                    );
+                    Ok(res)
+                },
                 "app_dsh_cancel" => client.cancel_session(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into()}),
                 "app_dsh_answer" => {
                     let session = args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
@@ -2025,6 +2041,18 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                     let session=args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
                     let text=args["text"].as_str().filter(|s|!s.trim().is_empty() && s.len()<=32000).ok_or("DSH_TEXT_REQUIRED")?;
                     let request=args["requestId"].as_str().filter(|s|s.len()<=200 && !s.is_empty()).ok_or("DSH_REQUEST_REQUIRED")?;
+                    let dsh_mode = args
+                        .get("approvalMode")
+                        .or_else(|| args.get("approval_mode"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("full_auto");
+                    let _ = client.ensure_permission_preset(
+                        bob_runtime::dsh_session::SessionAddress {
+                            connection_id: connection.into(),
+                            session_id: session.into(),
+                        },
+                        dsh_mode,
+                    );
                     let wire = context_capsule::before_dispatch(&ctx.runtime.data_dir,connection,session,request,text)?;
                     let ws_hint = client.resolve_session_workspace(session);
                     let staged_wire = bob_runtime::dsh_transport::stage_attachments_for_prompt(&ctx.runtime.data_dir, connection, session, ws_hint.as_deref(), &wire, args.get("attachments"));

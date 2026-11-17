@@ -13,6 +13,28 @@ pub fn normalize_dsh_permission_mode(raw: &str) -> Option<(&'static str, &'stati
   _ => None,
  }
 }
+fn synced_dsh_permissions() -> &'static std::sync::Mutex<std::collections::HashMap<(String, String), String>> {
+ static CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<(String, String), String>>> =
+  std::sync::OnceLock::new();
+ CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+fn remember_synced_dsh_permission(scope: &str, session: &str, bob_mode: &str) {
+ if let Ok(mut guard) = synced_dsh_permissions().lock() {
+  if guard.len() >= 256 && !guard.contains_key(&(scope.to_owned(), session.to_owned())) {
+   if let Some(first_key) = guard.keys().next().cloned() {
+    guard.remove(&first_key);
+   }
+  }
+  guard.insert((scope.to_owned(), session.to_owned()), bob_mode.to_owned());
+ }
+}
+fn is_synced_dsh_permission(scope: &str, session: &str, bob_mode: &str) -> bool {
+ synced_dsh_permissions()
+  .lock()
+  .ok()
+  .and_then(|guard| guard.get(&(scope.to_owned(), session.to_owned())).cloned())
+  .is_some_and(|cur| cur == bob_mode)
+}
 const LIMIT: u64 = 4 * 1024 * 1024;
 // History snapshots include tool records as well as visible messages. Keep a separate,
 // bounded budget; a size rejection must not masquerade as an offline node.
@@ -371,6 +393,7 @@ impl DshClient {
       output["permission_preset"] = json!(raw_preset);
       if let Some((bob_mode, _)) = normalize_dsh_permission_mode(raw_preset) {
        output["approval_mode"] = json!(bob_mode);
+       remember_synced_dsh_permission(&self.scope, &address.session_id, bob_mode);
       }
      }
     }
@@ -557,6 +580,7 @@ impl DshClient {
   if result_obj.get("kind").and_then(Value::as_str) != Some("success") {
    return Err("DSH_PERMISSION_UPDATE_FAILED");
   }
+  remember_synced_dsh_permission(&self.scope, session, bob_mode);
   Ok(json!({
    "address": address,
    "approval_mode": bob_mode,
@@ -564,6 +588,19 @@ impl DshClient {
    "command_id": res.get("commandId").cloned().unwrap_or(Value::Null),
    "text": result_obj.get("text").cloned().unwrap_or(Value::Null),
   }))
+ }
+
+ /// Synchronize a DSH native session's permission preset only when the cached preset differs.
+ pub fn ensure_permission_preset(&self, address: SessionAddress, mode: &str) -> Result<(), &'static str> {
+  let session = address.session_id.as_str();
+  if !session.starts_with("session-") || crate::agy_directory::owns_readable_session(session) {
+   return Ok(());
+  }
+  let (bob_mode, _) = normalize_dsh_permission_mode(mode).ok_or("DSH_PERMISSION_MODE_INVALID")?;
+  if is_synced_dsh_permission(&self.scope, session, bob_mode) {
+   return Ok(());
+  }
+  self.set_permission_preset(address, bob_mode).map(|_| ())
  }
 
  /// Submit structured answers for a pending DSH `ask_user_question` call.
@@ -1008,6 +1045,36 @@ mod auth_recovery_tests {
  #[test] fn loopback_http_only_remote_tls_and_no_embedded_secrets() {
   for raw in ["http://127.0.0.1:3080", "http://[::1]:3080", "https://node.example"] {assert!(trusted_endpoint(&reqwest::Url::parse(raw).unwrap()));}
   for raw in ["http://localhost:3080", "http://node.example", "http://192.168.1.2", "https://u:p@node.example", "https://node.example/?token=a", "https://node.example/path"] {assert!(!trusted_endpoint(&reqwest::Url::parse(raw).unwrap()));}
+ }
+
+ #[test] fn normalize_and_cache_short_circuits_permission_preset_sync() {
+  assert_eq!(normalize_dsh_permission_mode("full_auto"), Some(("full_auto", "danger-full-access")));
+  assert_eq!(normalize_dsh_permission_mode("danger-full-access"), Some(("full_auto", "danger-full-access")));
+  assert_eq!(normalize_dsh_permission_mode("workspace_auto"), Some(("workspace_auto", "workspace-write")));
+  assert_eq!(normalize_dsh_permission_mode("workspace-write"), Some(("workspace_auto", "workspace-write")));
+  assert_eq!(normalize_dsh_permission_mode("read_only"), Some(("read_only", "read-only")));
+  assert_eq!(normalize_dsh_permission_mode("invalid-mode"), None);
+
+  let client = DshClient {
+   base: reqwest::Url::parse("https://example.invalid/").unwrap(),
+   cookie: String::new(),
+   http: reqwest::blocking::Client::new(),
+   scope: format!("test-perm-cache-{}", crate::now_millis()),
+  };
+  let addr = SessionAddress {
+   connection_id: "node".into(),
+   session_id: "session-00000000-0000-4000-8000-000000000099".into(),
+  };
+  remember_synced_dsh_permission(&client.scope, &addr.session_id, "full_auto");
+  assert_eq!(client.ensure_permission_preset(addr.clone(), "full_auto"), Ok(()));
+  assert_eq!(
+   client.ensure_permission_preset(
+    SessionAddress { connection_id: "node".into(), session_id: "codex:12345678".into() },
+    "invalid",
+   ),
+   Ok(())
+  );
+  assert_eq!(client.ensure_permission_preset(addr, "unknown"), Err("DSH_PERMISSION_MODE_INVALID"));
  }
 }
 

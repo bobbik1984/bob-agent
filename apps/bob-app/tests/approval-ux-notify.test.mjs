@@ -148,7 +148,7 @@ test('approval-notifications deduplicates permission alerts, handles SW push sub
   assert.match(swSrc, /bob:approval-notification-click/);
 });
 
-test('DshSessions defaults to workspace_auto, deduplicates settled logs, and requires confirmation before full_auto elevation on native and DSH sessions', async () => {
+test('DshSessions defaults to full_auto, deduplicates settled logs, and requires confirmation when re-elevating from workspace_auto', async () => {
   const vue = fs.readFileSync(path.join(appRoot, 'src', 'components', 'DshSessions.vue'), 'utf8');
   const script = vue.split('<script setup>')[1].split('</script>')[0].replace(/^\s*import .*;\r?\n/gm, '');
   const store = new Map();
@@ -193,8 +193,8 @@ test('DshSessions defaults to workspace_auto, deduplicates settled logs, and req
     Error, Map, Set, Array, Object, String, Boolean, Number, Math, JSON, Promise, RegExp,
   };
   vm.runInContext(`${script}\nglobalThis.__dsh = { open, connection, selected, approvalMode, effectiveApprovalMode, supportsApprovalMode, permissionModeOptions, pendingPermissionElevation, onSelectApprovalMode, confirmPermissionElevation, cancelPermissionElevation, nativeDrafts, nativeActivities, pendingNativeApprovals, reader, scrollToNativeApproval };`, vm.createContext(ctx));
-  assert.equal(ctx.__dsh.approvalMode.value, 'workspace_auto');
-  assert.ok(ctx.__dsh.permissionModeOptions.value.some(o => o.value === 'workspace_auto'));
+  assert.equal(ctx.__dsh.approvalMode.value, 'full_auto');
+  assert.equal(ctx.__dsh.permissionModeOptions.value[0].value, 'full_auto');
   ctx.__dsh.nativeDrafts.value = {
     'req-old-1': { timestamp: 100, active: false, terminal: true, activity: { items: [{ id: 'o1', label: 'ls', status: 'completed' }], approvals: [] } },
     'external-codex-old': { timestamp: 150, active: false, terminal: true, activity: { items: [{ id: 'o2', label: 'pwd', status: 'completed' }], approvals: [] } },
@@ -214,19 +214,30 @@ test('DshSessions defaults to workspace_auto, deduplicates settled logs, and req
   assert.equal(ctx.__dsh.pendingNativeApprovals.value.length, 1);
   assert.equal(ctx.__dsh.pendingNativeApprovals.value[0].approval.permission_id, 'perm-sticky-1');
 
-  // Open a DSH native session and test interactive elevation confirmation flow
+  // Open a DSH native session: defaults to full_auto even if DSH still reports workspace_auto,
+  // supports downgrading to workspace_auto, and requires confirmation when re-elevating to full_auto
   ctx.__dsh.connection.value = 'node-x1t';
   await ctx.__dsh.open({ id: 'session-ca836c2d-28e0-4fae-b6d5-2383a4215154', title: 'bob-bot' });
   assert.equal(ctx.__dsh.supportsApprovalMode.value, true);
+  assert.equal(ctx.__dsh.effectiveApprovalMode.value, 'full_auto');
+
+  ctx.__dsh.onSelectApprovalMode('workspace_auto');
+  await new Promise(r => setImmediate(r));
   assert.equal(ctx.__dsh.effectiveApprovalMode.value, 'workspace_auto');
+  assert.equal(ctx.__dsh.approvalMode.value, 'workspace_auto');
+  assert.deepEqual(dshPermCalls, [{ c: 'node-x1t', s: 'session-ca836c2d-28e0-4fae-b6d5-2383a4215154', mode: 'workspace_auto' }]);
 
   ctx.__dsh.onSelectApprovalMode('full_auto');
   assert.equal(ctx.__dsh.effectiveApprovalMode.value, 'workspace_auto');
   assert.equal(ctx.__dsh.pendingPermissionElevation.value.sessionId, 'session-ca836c2d-28e0-4fae-b6d5-2383a4215154');
-  assert.equal(dshPermCalls.length, 0);
+  assert.equal(dshPermCalls.length, 1);
 
   await ctx.__dsh.confirmPermissionElevation();
   assert.equal(ctx.__dsh.pendingPermissionElevation.value, null);
   assert.equal(ctx.__dsh.effectiveApprovalMode.value, 'full_auto');
-  assert.deepEqual(dshPermCalls, [{ c: 'node-x1t', s: 'session-ca836c2d-28e0-4fae-b6d5-2383a4215154', mode: 'full_auto' }]);
+  assert.equal(ctx.__dsh.approvalMode.value, 'full_auto');
+  assert.deepEqual(dshPermCalls, [
+    { c: 'node-x1t', s: 'session-ca836c2d-28e0-4fae-b6d5-2383a4215154', mode: 'workspace_auto' },
+    { c: 'node-x1t', s: 'session-ca836c2d-28e0-4fae-b6d5-2383a4215154', mode: 'full_auto' },
+  ]);
 });

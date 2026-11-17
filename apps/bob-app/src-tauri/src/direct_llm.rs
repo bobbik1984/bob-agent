@@ -4328,6 +4328,23 @@ async fn native_dsh<R: Runtime>(
                 )?)
                 .map_err(|_| "DSH_PROTOCOL"),
                 _ => {
+                    let approval_mode = attachments
+                        .as_ref()
+                        .and_then(|v| v.get("__bob_approval_mode"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("full_auto");
+                    let clean_attachments = match attachments.as_ref() {
+                        Some(v) if v.is_array() => Some(v.clone()),
+                        Some(v) => v.get("items").cloned(),
+                        None => None,
+                    };
+                    let _ = client.ensure_permission_preset(
+                        bob_runtime::dsh_session::SessionAddress {
+                            connection_id: cid.clone(),
+                            session_id: sid.clone(),
+                        },
+                        approval_mode,
+                    );
                     let ws_hint = client.resolve_session_workspace(&sid);
                     let staged = bob_runtime::dsh_transport::stage_attachments_for_prompt(
                         &dir,
@@ -4335,7 +4352,7 @@ async fn native_dsh<R: Runtime>(
                         &sid,
                         ws_hint.as_deref(),
                         &text,
-                        attachments.as_ref(),
+                        clean_attachments.as_ref(),
                     );
                     bob_runtime::dsh_transport::dispatch_once(
                         &dir,

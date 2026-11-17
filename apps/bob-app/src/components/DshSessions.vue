@@ -22,21 +22,21 @@ const awayFromLatest=ref(false),chatContent=ref(null);
 const chatScroll=createChatScroll(value=>{awayFromLatest.value=value;});
 watch([reader,chatContent],()=>chatScroll.bind(reader.value),{flush:'post'});
 const pullUpDistance=ref(0),attachments=ref([]),fileInput=ref(null);let touchStartY=null,wheelOverscroll=0,wheelResetTimer;
-const PERSISTED_APPROVAL_MODES = ['workspace_auto', 'interactive', 'read_only', 'deny'];
+const PERSISTED_APPROVAL_MODES = ['full_auto', 'workspace_auto', 'interactive', 'read_only', 'deny'];
 const APPROVAL_MODES = ['workspace_auto', 'interactive', 'full_auto', 'read_only', 'deny'];
 function readSavedApprovalMode() {
   try {
     const store = typeof localStorage !== 'undefined' ? localStorage : globalThis.localStorage;
-    const saved = store?.getItem?.('bob.dsh.approvalMode');
+    const saved = store?.getItem?.('bob.dsh.approvalMode.v2');
     if (saved && PERSISTED_APPROVAL_MODES.includes(saved)) return saved;
   } catch {}
-  return 'workspace_auto';
+  return 'full_auto';
 }
 const approvalMode=ref(readSavedApprovalMode()),sessionApprovalOverrides=ref({}),pendingPermissionElevation=ref(null),switchingPermissionMode=ref(false),takeoverPrompt=ref(null),terminalHolderOverride=ref(null),bobHolderOverride=ref(null),handoffCardOpen=ref(false),releasingHolder=ref(false),copiedCliCmd=ref(false);
 watch(approvalMode, val => {
   try {
     const store = typeof localStorage !== 'undefined' ? localStorage : globalThis.localStorage;
-    if (PERSISTED_APPROVAL_MODES.includes(val)) store?.setItem?.('bob.dsh.approvalMode', val);
+    if (PERSISTED_APPROVAL_MODES.includes(val)) store?.setItem?.('bob.dsh.approvalMode.v2', val);
   } catch {}
 });
 const composerInput = ref(null);
@@ -96,7 +96,9 @@ function currentSessionKey(){return `${connection.value||''}:${selected.value?.i
 const effectiveApprovalMode=computed(()=>{
   const ov=sessionApprovalOverrides.value[currentSessionKey()];
   if(ov&&APPROVAL_MODES.includes(ov))return ov;
-  if(isDshNativeSession.value)return 'workspace_auto';
+  if(isDshNativeSession.value){
+    return ['full_auto','workspace_auto','read_only'].includes(approvalMode.value)?approvalMode.value:'full_auto';
+  }
   return approvalMode.value;
 });
 const supportsTerminalHandoff=computed(()=>/^(claude-jsonl|codex|agy):/.test(selected.value?.id||''));
@@ -158,15 +160,15 @@ function confirmTakeoverSend(){
 const permissionModeOptions=computed(()=>{
   if(isDshNativeSession.value){
     return [
-      { value: 'workspace_auto', label: t('permissionModeWorkspaceAuto') },
       { value: 'full_auto', label: t('permissionModeFullAuto') },
+      { value: 'workspace_auto', label: t('permissionModeWorkspaceAuto') },
       { value: 'read_only', label: t('permissionModeReadOnly') },
     ];
   }
   return [
+    { value: 'full_auto', label: t('permissionModeFullAuto') },
     { value: 'workspace_auto', label: t('permissionModeWorkspaceAuto') },
     { value: 'interactive', label: t('permissionModeInteractive') },
-    { value: 'full_auto', label: t('permissionModeFullAuto') },
     { value: 'read_only', label: t('permissionModeReadOnly') },
     { value: 'deny', label: t('permissionModePlan') },
   ];
@@ -181,6 +183,7 @@ async function applyDshPermissionMode(nextMode, isElevatedConfirm=false){
     }
     if(g!==generation||disposed)return;
     sessionApprovalOverrides.value={...sessionApprovalOverrides.value,[key]:nextMode};
+    approvalMode.value=nextMode;
     pendingPermissionElevation.value=null;
     notice.value=t(isElevatedConfirm?'permissionElevateAppliedDsh':'permissionModeSwitchedNotice');
   }catch{
@@ -199,8 +202,8 @@ function onSelectApprovalMode(nextMode){
   pendingPermissionElevation.value=null;
   const key=currentSessionKey();
   sessionApprovalOverrides.value={...sessionApprovalOverrides.value,[key]:nextMode};
+  approvalMode.value=nextMode;
   if(!isDshNativeSession.value){
-    approvalMode.value=nextMode;
     notice.value=t('permissionModeSwitchedNotice');
     return;
   }
@@ -214,6 +217,7 @@ async function confirmPermissionElevation(){
   }
   const key=currentSessionKey();
   sessionApprovalOverrides.value={...sessionApprovalOverrides.value,[key]:'full_auto'};
+  approvalMode.value='full_auto';
   pendingPermissionElevation.value=null;
   notice.value=t('permissionElevateAppliedNative');
 }
@@ -853,9 +857,11 @@ async function refresh(){if(!canReadOrResume(selected.value)){error.value=t(sele
   if(g!==generation||disposed||preview.value)return;
   if(!native){
    observeDshQuestions(h);checkedDshQuestions=true;
-   if(typeof h.approval_mode==='string'&&APPROVAL_MODES.includes(h.approval_mode)){
-    const key=`${connection.value||''}:${id}`;
-    sessionApprovalOverrides.value={...sessionApprovalOverrides.value,[key]:h.approval_mode};
+   const key=`${connection.value||''}:${id}`;
+   if(typeof h.approval_mode==='string'&&APPROVAL_MODES.includes(h.approval_mode)&&!sessionApprovalOverrides.value[key]){
+    if(h.approval_mode==='full_auto'||h.approval_mode==='read_only'||approvalMode.value!=='full_auto'){
+     sessionApprovalOverrides.value={...sessionApprovalOverrides.value,[key]:h.approval_mode};
+    }
    }
   }
   await refreshActivity(g,id);if(g!==generation||disposed)return;

@@ -693,7 +693,7 @@ fn resolve_approval_mode(session_id: &str, approval_mode_override: Option<&str>,
         Some("full_auto") if supported => "full_auto",
         Some("interactive") if supported => "interactive",
         Some("workspace_auto") if supported => "workspace_auto",
-        None if supported => "workspace_auto",
+        None if supported => "full_auto",
         _ => "deny",
     }
 }
@@ -951,21 +951,21 @@ mod native_grant_tests {
     }
 
     #[test]
-    fn resolve_approval_mode_defaults_to_workspace_auto_and_supports_full_auto() {
+    fn resolve_approval_mode_defaults_to_full_auto_across_supported_harnesses() {
         let tools = vec!["Bash".to_string()];
-        assert_eq!(resolve_approval_mode("codex:12345678", None, &[]), "workspace_auto");
+        assert_eq!(resolve_approval_mode("codex:12345678", None, &[]), "full_auto");
         assert_eq!(resolve_approval_mode("codex:12345678", Some("read_only"), &[]), "deny");
         assert_eq!(resolve_approval_mode("codex:12345678", Some("deny"), &[]), "deny");
         assert_eq!(resolve_approval_mode("codex:12345678", Some("interactive"), &[]), "interactive");
         assert_eq!(resolve_approval_mode("codex:12345678", Some("workspace_auto"), &[]), "workspace_auto");
         assert_eq!(resolve_approval_mode("codex:12345678", Some("full_auto"), &[]), "full_auto");
-        assert_eq!(resolve_approval_mode("agy:12345678", None, &[]), "workspace_auto");
+        assert_eq!(resolve_approval_mode("agy:12345678", None, &[]), "full_auto");
         assert_eq!(resolve_approval_mode("agy:12345678", Some("interactive"), &[]), "interactive");
         assert_eq!(resolve_approval_mode("agy:12345678", Some("workspace_auto"), &[]), "workspace_auto");
         assert_eq!(resolve_approval_mode("agy:12345678", Some("full_auto"), &[]), "full_auto");
         assert_eq!(resolve_approval_mode("agy:12345678", Some("deny"), &[]), "deny");
         assert_eq!(resolve_approval_mode("claude-jsonl:12345678", None, &[]), "deny");
-        assert_eq!(resolve_approval_mode("claude-jsonl:12345678", None, &tools), "workspace_auto");
+        assert_eq!(resolve_approval_mode("claude-jsonl:12345678", None, &tools), "full_auto");
         assert_eq!(resolve_approval_mode("claude-jsonl:12345678", Some("workspace_auto"), &tools), "workspace_auto");
         assert_eq!(resolve_approval_mode("claude-jsonl:12345678", Some("full_auto"), &tools), "full_auto");
         assert_eq!(resolve_approval_mode("claude-jsonl:12345678", Some("read_only"), &tools), "read_only");

@@ -13,6 +13,27 @@ def _uri_to_path(uri):
         p = p[1:]
     return p
 
+
+def _augment_user_path(env=None):
+    target = env if env is not None else os.environ.copy()
+    home = Path.home()
+    prefixes = [
+        str(home / '.local/bin'),
+        str(home / '.npm-global/bin'),
+        str(home / '.cargo/bin'),
+    ]
+    nvm_versions = home / '.nvm/versions/node'
+    try:
+        if nvm_versions.is_dir():
+            for bin_dir in sorted(nvm_versions.glob('*/bin'), reverse=True):
+                if bin_dir.is_dir():
+                    prefixes.append(str(bin_dir))
+    except OSError:
+        pass
+    existing = target.get('PATH', '')
+    target['PATH'] = os.pathsep.join(prefixes) + (os.pathsep + existing if existing else '')
+    return target
+
 def _readonly_receipts_conn():
     dbp = Path.home() / '.local/share/bob-native/receipts.sqlite'
     if dbp.is_symlink() or not dbp.is_file():
@@ -1621,8 +1642,7 @@ def reconcile_codex_turn(record):
     raw=record['session_id'].split(':',1)[1]
     turn_id=record.get('native_turn_id')
     if not turn_id or record.get('native_session_id')!=raw: return record
-    env=os.environ.copy()
-    env['PATH']=os.pathsep.join(str(Path.home()/p) for p in ['.local/bin','.npm-global/bin','.cargo/bin'])+os.pathsep+env.get('PATH','')
+    env=_augment_user_path()
     exe=shutil.which('codex',path=env['PATH'])
     if not exe: return record
     pipe=None
@@ -1801,8 +1821,7 @@ def _release_claude_terminal_holder(exe, raw, env):
 def _safe_claude_holder(sid):
     if not isinstance(sid,str) or not sid.startswith('claude-jsonl:'):return None
     raw=sid.split(':',1)[1]
-    env=os.environ.copy()
-    env['PATH']=os.pathsep.join(str(Path.home()/p) for p in ['.local/bin','.npm-global/bin','.cargo/bin'])+os.pathsep+env.get('PATH','')
+    env=_augment_user_path()
     exe=shutil.which('claude',path=env['PATH'])
     if not exe:return None
     try:
@@ -2269,6 +2288,8 @@ _HIGH_RISK_CMD_RE = re.compile(
 )
 _CATASTROPHIC_CMD_RE = re.compile(
     r'(?:^|[;\s&|`(])(?:mkfs(?:\.[a-z0-9]+)?\b|dd\s+if=|shutdown\b|reboot\b|poweroff\b|'
+    r'git\s+push\b[^\n]*(?:--force(?!-with-lease)\b|-f\b)|'
+    r'drop\s+(?:table|database)\b|truncate\s+table\b|'
     r'rm\s+(?:-[^\n]+\s+)*-[^\n]*r[^\n]*\s+/(?:\*|(?=$|[;\s&|])))',
     re.IGNORECASE,
 )
@@ -2586,24 +2607,29 @@ class AgyAcpSession:
                     continue
                 if len(json.dumps(frame, ensure_ascii=False).encode('utf-8')) > 262144:
                     raise ValueError('HARNESS_OUTPUT_LIMIT')
-                _capture_agy_event(cfg, frame, wanted)
                 mode = cfg.get('approval_mode')
-                if frame['method'] == 'session/request_permission' and mode in ('interactive', 'workspace_auto', 'full_auto'):
-                    tool_call = params.get('toolCall') or {}
-                    auto_allow = (
-                        (mode == 'workspace_auto' and not _is_high_risk_tool_call('agy', tool_call, cfg.get('work_cwd')))
-                        or (mode == 'full_auto' and not _is_catastrophic_host_call('agy', tool_call))
-                    )
-                    if auto_allow:
-                        allow_id = next((o.get('optionId') for o in (params.get('options') or []) if isinstance(o, dict) and o.get('kind') in ('allow_once', 'allow_always') and o.get('optionId')), None)
-                        if allow_id:
-                            self.pipe.send({'jsonrpc': '2.0', 'id': frame['id'], 'result': {'outcome': {'outcome': 'selected', 'optionId': allow_id}}})
-                            _capture_agy_event(cfg, frame, wanted, decision='approved')
-                            continue
-                    if _open_native_permission(cfg, frame, wanted): continue
+                if frame['method'] == 'session/request_permission':
+                    if mode in ('interactive', 'workspace_auto', 'full_auto'):
+                        tool_call = params.get('toolCall') or {}
+                        auto_allow = (
+                            (mode == 'workspace_auto' and not _is_high_risk_tool_call('agy', tool_call, cfg.get('work_cwd')))
+                            or (mode == 'full_auto' and not _is_catastrophic_host_call('agy', tool_call))
+                        )
+                        if auto_allow:
+                            allow_id = next((o.get('optionId') for o in (params.get('options') or []) if isinstance(o, dict) and o.get('kind') in ('allow_once', 'allow_always') and o.get('optionId')), None)
+                            if allow_id:
+                                self.pipe.send({'jsonrpc': '2.0', 'id': frame['id'], 'result': {'outcome': {'outcome': 'selected', 'optionId': allow_id}}})
+                                _capture_agy_event(cfg, frame, wanted, decision='approved')
+                                continue
+                        _capture_agy_event(cfg, frame, wanted)
+                        if _open_native_permission(cfg, frame, wanted): continue
+                    else:
+                        _capture_agy_event(cfg, frame, wanted)
+                    self.deny_request(frame)
+                    _capture_agy_event(cfg, frame, wanted, decision='denied')
+                    continue
+                _capture_agy_event(cfg, frame, wanted)
                 if self.deny_request(frame):
-                    if frame['method'] == 'session/request_permission':
-                        _capture_agy_event(cfg, frame, wanted, decision='denied')
                     continue
                 update = params.get('update') or {}
                 if frame['method'] == 'session/update' and update.get('sessionUpdate') == 'agent_message_chunk':
@@ -2653,7 +2679,7 @@ def _codex_turn_policies(mode, creating=False, userns_restricted=None):
     if creating or mode in ('deny', 'read_only', None, ''):
         return False, 'never', 'read-only', {'type': 'readOnly'}
     if mode == 'full_auto':
-        return True, 'never', 'danger-full-access', {'type': 'dangerFullAccess'}
+        return True, 'on-request', 'danger-full-access', {'type': 'dangerFullAccess'}
     if mode == 'workspace_auto':
         return True, 'on-request', 'danger-full-access', {'type': 'dangerFullAccess'}
     if userns_restricted:
@@ -2673,8 +2699,7 @@ def _native_worker(cfg):
     tool, raw = sid.split(':', 1)
     creating = cfg.get('new_harness')
     tool = creating or ('claude' if tool == 'claude-jsonl' else tool)
-    env = os.environ.copy()
-    env['PATH'] = os.pathsep.join(str(Path.home()/p) for p in ['.local/bin','.npm-global/bin','.cargo/bin'])+os.pathsep+env.get('PATH','')
+    env = _augment_user_path()
     exe = shutil.which(tool, path=env['PATH']); pipe = None
     reply = ''; terminal = False; identity = False; cancel_sent = False; cancelled = False
     claude_cancel_ack=False;claude_cancel_terminal=False;claude_cancel_deadline=None
@@ -2780,19 +2805,21 @@ def _native_worker(cfg):
                 # Server requests have their own ID namespace. Never treat an
                 # approval request numbered 2/3 as our resume/start response.
                 if frame.get('method') and 'id' in frame:
+                    mode = cfg.get('approval_mode')
+                    codex_interactive = (not creating and mode in ('interactive', 'workspace_auto', 'full_auto'))
+                    is_approval_req = str(frame.get('method')).endswith('/requestApproval')
+                    if not already_answered and codex_interactive and identity and codex_stream.turn_id and is_approval_req:
+                        fp = frame.get('params') if isinstance(frame.get('params'), dict) else {}
+                        if (mode == 'full_auto' and not _is_catastrophic_host_call(str(frame.get('method')), fp)) or (
+                            mode == 'workspace_auto' and not _is_high_risk_tool_call(str(frame.get('method')), fp, cfg.get('work_cwd'))
+                        ):
+                            pipe.send({'id': frame['id'], 'result': {'decision': 'accept'}})
+                            continue
                     if codex_stream.turn_id:
                         _capture_codex_event(sid,raw,frame,'worker:'+rid,rid,codex_stream.turn_id)
                     if not already_answered:
-                        mode = cfg.get('approval_mode')
-                        codex_interactive = (not creating and mode in ('interactive', 'workspace_auto', 'full_auto'))
-                        if codex_interactive and identity and codex_stream.turn_id and str(frame.get('method')).endswith('/requestApproval'):
+                        if codex_interactive and identity and codex_stream.turn_id and is_approval_req:
                             fp = frame.get('params') if isinstance(frame.get('params'), dict) else {}
-                            if mode == 'full_auto' and not _is_catastrophic_host_call(str(frame.get('method')), fp):
-                                pipe.send({'id': frame['id'], 'result': {'decision': 'accept'}})
-                                continue
-                            if mode == 'workspace_auto' and not _is_high_risk_tool_call(str(frame.get('method')), fp, cfg.get('work_cwd')):
-                                pipe.send({'id': frame['id'], 'result': {'decision': 'accept'}})
-                                continue
                             cmd = fp.get('command')
                             fpath = fp.get('filePath') or fp.get('path') or fp.get('reason')
                             title = str(cmd or fpath or frame.get('method') or 'Codex approval')[:512]
@@ -3050,8 +3077,7 @@ def _agy_supervise(command):
             if session and cwd != active['work_cwd']:
                 raise ValueError('HARNESS_WORKSPACE_MISMATCH')
             if session is None:
-                env = os.environ.copy()
-                env['PATH'] = os.pathsep.join(str(Path.home()/p) for p in ['.local/bin','.npm-global/bin','.cargo/bin'])+os.pathsep+env.get('PATH','')
+                env = _augment_user_path()
                 exe = shutil.which('agy', path=env['PATH'])
                 if not exe: raise ValueError('HARNESS_EXECUTABLE_MISSING')
                 cwd = active['work_cwd']
@@ -3292,7 +3318,7 @@ def prompt_session(cfg):
     if raw_mode in ('interactive', 'workspace_auto', 'full_auto', 'read_only', 'deny'):
         approval_mode = raw_mode
     elif raw_mode in (None, ''):
-        approval_mode = 'workspace_auto'
+        approval_mode = 'full_auto'
     else:
         approval_mode = 'deny'
     claude_tools=cfg.get('claudeTools',[]) if sid.startswith('claude-jsonl:') else []
@@ -3300,8 +3326,7 @@ def prompt_session(cfg):
     _claude_tool_arguments({'approval_mode':approval_mode,'claude_tools':claude_tools})
     if sid.startswith('claude-jsonl:'):
         raw=sid.split(':',1)[1]
-        env=os.environ.copy()
-        env['PATH']=os.pathsep.join(str(Path.home()/p) for p in ['.local/bin','.npm-global/bin','.cargo/bin'])+os.pathsep+env.get('PATH','')
+        env=_augment_user_path()
         exe=shutil.which('claude',path=env['PATH'])
         if exe:
             try:
@@ -3624,7 +3649,7 @@ def _project_agy_activity(previous, frame, decision=None):
         if old and old['status'] == 'denied' and decision is None: return None
         tool_call = params.get('toolCall') if isinstance(params.get('toolCall'), dict) else {}
         item = {'id': key, 'item_id': str(tool_call.get('toolCallId') or '')[:128],
-            'status': 'denied' if decision == 'denied' else 'pending', 'method': 'session/request_permission'}
+            'status': 'approved' if decision == 'approved' else ('denied' if decision == 'denied' else 'pending'), 'method': 'session/request_permission'}
         entries[:] = [x for x in entries if x['id'] != key]
         entries.append(item)
         if len(entries) > 32:

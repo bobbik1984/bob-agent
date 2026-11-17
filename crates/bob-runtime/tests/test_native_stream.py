@@ -1569,7 +1569,7 @@ class NativeTests(unittest.TestCase):
  def test_full_auto_codex_policy_ignores_thread_cwd_false_positive_and_declines_cleanly(self):
   ws=Path(self.tmp.name)/'work'/'project';ws.mkdir(parents=True)
   self.assertFalse(p._is_high_risk_tool_call('item/commandExecution/requestApproval',{'command':'cargo check','cwd':'/home/bobbik'},str(ws)))
-  self.assertEqual(p._codex_turn_policies('full_auto',False,True),(True,'never','danger-full-access',{'type':'dangerFullAccess'}))
+  self.assertEqual(p._codex_turn_policies('full_auto',False,True),(True,'on-request','danger-full-access',{'type':'dangerFullAccess'}))
   self.assertEqual(p._codex_turn_policies('workspace_auto',False,True),(True,'on-request','danger-full-access',{'type':'dangerFullAccess'}))
   self.assertEqual(p._codex_turn_policies('interactive',False,True),(True,'untrusted','danger-full-access',{'type':'dangerFullAccess'}))
   self.assertEqual(p._codex_turn_policies('interactive',False,False),(True,'on-request','workspace-write',{'type':'workspaceWrite'}))
@@ -1606,7 +1606,47 @@ class NativeTests(unittest.TestCase):
    ok=p._open_native_permission(cfg,{'id':500+i,'protocol':'codex','codex_method':'item/commandExecution/requestApproval','params':{'sessionId':raw,'toolCall':{'title':'cmd'},'options':[{'optionId':'allow_once','kind':'allow_once'}]}},1)
    self.assertTrue(ok)
   self.assertTrue(p._is_catastrophic_host_call('Bash',{'command':'rm -rf /'}))
-  self.assertFalse(p._is_catastrophic_host_call('Bash',{'command':'ssh ry hostname'}))
+  self.assertTrue(p._is_catastrophic_host_call('Bash',{'command':'git push --force origin main'}))
+  self.assertTrue(p._is_catastrophic_host_call('Bash',{'command':'git push -f'}))
+  self.assertTrue(p._is_catastrophic_host_call('Bash',{'command':'DROP TABLE users'}))
+  self.assertTrue(p._is_catastrophic_host_call('Bash',{'command':'shutdown -h now'}))
+  self.assertFalse(p._is_catastrophic_host_call('Bash',{'command':'ssh ry "sudo systemctl restart openclaw"'}))
+  self.assertFalse(p._is_catastrophic_host_call('Bash',{'command':'git push origin main'}))
+
+ def test_full_auto_codex_skips_stale_approval_capture_and_discovers_nvm_path(self):
+  ws=Path(self.tmp.name)/'proj-auto';ws.mkdir(parents=True)
+  raw='12345678-1234-4234-8234-123456789abd';sid='codex:'+raw
+  cfg=dict(self.cfg(),session_id=sid,request_id='req-auto',work_cwd=str(ws),approval_mode='full_auto')
+  with patch.object(p.subprocess,'Popen') as spawn:
+   spawn.return_value.pid=123;p._native_start(cfg,'# worker')
+  frames=[
+   {'id':1,'result':{}},{'id':2,'result':{'thread':{'id':raw}}},{'id':3,'result':{'turn':{'id':'t-auto'}}},
+   {'id':101,'method':'item/commandExecution/requestApproval','params':{'threadId':raw,'turnId':'t-auto','command':'ssh ry "sudo systemctl restart openclaw"'}},
+   self.codex_item('deployed',id='t-auto'),self.codex_end(id='t-auto'),
+  ]
+  with patch.object(p,'NativePipe') as pipe,patch.object(p.shutil,'which',return_value='codex'):
+   pipe.return_value.receive.side_effect=frames
+   p._native_worker(cfg)
+   sent=[c.args[0] for c in pipe.return_value.send.call_args_list]
+  self.assertIn({'id':101,'result':{'decision':'accept'}},sent)
+  with p.closing(p._stream_db()) as db:
+   snap_row=db.execute('SELECT body FROM event_snapshots WHERE request=?',('req-auto',)).fetchone()
+   snap=json.loads(snap_row[0]) if snap_row else {}
+   self.assertEqual((snap.get('activity') or {}).get('approvals') or [],[])
+
+  xdir=Path(self.tmp.name)/'codex-default';sdir=xdir/'sessions';sdir.mkdir(parents=True)
+  rollout=sdir/f'rollout-{raw}.jsonl'
+  rollout.write_text(json.dumps({'type':'session_meta','payload':{'id':raw,'cwd':str(ws)}})+'\n',encoding='utf-8')
+  with patch.object(p,'_inspect_codex_session_holder',return_value={'busy':False}),patch.object(p,'_native_start',return_value={'status':'accepted'}) as start_mock:
+   p.prompt_session({'sessionId':sid,'requestId':'req-def','text':'Deploy', 'codexDataDir':str(xdir)})
+   self.assertEqual(start_mock.call_args.args[0]['approval_mode'],'full_auto')
+
+  fake_home=Path(self.tmp.name)/'fakehome'
+  nvm_bin=fake_home/'.nvm/versions/node/v24.14.0/bin'
+  nvm_bin.mkdir(parents=True)
+  with patch.object(p.Path,'home',return_value=fake_home):
+   env=p._augment_user_path({'PATH':'/usr/bin'})
+   self.assertIn(str(nvm_bin),env['PATH'].split(p.os.pathsep))
 
  def test_resolve_codex_work_cwd_prefers_latest_turn_context(self):
   xdir=Path(self.tmp.name)/'codex';sdir=xdir/'sessions';sdir.mkdir(parents=True)
