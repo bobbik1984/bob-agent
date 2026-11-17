@@ -120,17 +120,42 @@ const pairedCreationOwner = computed(() => pairedCreationOwners.value.length ===
 const remoteCreationEnabled = computed(() => browserClient || Boolean(pairedCreationOwner.value));
 function dshSetupBridge(owner) {
   if (!owner) return kernelBridge;
-  const call = (command,args) => kernelBridge.pairedSessionSetup(owner.id,command,args);
+  const mapTarget = (connectionId) => (connectionId === owner.id ? 'local' : connectionId);
+  const call = (command, args) => kernelBridge.pairedSessionSetup(owner.id, command, args);
   return {
     catalog: () => call('app_catalog'),
     projectLinks: () => call('app_project_links'),
-    createProject: (projectId,title) => call('app_project_create',{projectId,title}),
-    dshInventory: (connectionId,refresh=false) => call('app_dsh_inventory',{connectionId,refresh}),
-    dshWorkspaceGrant: (connectionId,path) => call('app_dsh_workspace_grant',{connectionId,path}),
-    dshList: connectionId => call('app_dsh_list',{connectionId}),
-    dshCreate: (connectionId,sessionId,workspace,title) => call('app_dsh_create',{connectionId,sessionId,workspace,title}),
-    nativeSetup: args => call('app_native_setup',args),
-    projectLinkSet: args => call('app_project_link_set',args),
+    createProject: (projectId, title) => call('app_project_create', { projectId, title }),
+    dshInventory: (connectionId, refresh = false) =>
+      call('app_dsh_inventory', { connectionId: mapTarget(connectionId), refresh }),
+    dshWorkspaceGrant: (connectionId, path) =>
+      call('app_dsh_workspace_grant', { connectionId: mapTarget(connectionId), path }),
+    dshList: (connectionId) => call('app_dsh_list', { connectionId: mapTarget(connectionId) }),
+    dshCreate: async (connectionId, sessionId, workspace, title) => {
+      const res = await call('app_dsh_create', {
+        connectionId: mapTarget(connectionId),
+        sessionId,
+        workspace,
+        title,
+      });
+      if (connectionId === owner.id && res?.address?.connection_id === 'local') {
+        return { ...res, address: { ...res.address, connection_id: connectionId } };
+      }
+      return res;
+    },
+    nativeSetup: async (args) => {
+      const targetId = mapTarget(args?.connectionId);
+      const res = await call('app_native_setup', { ...args, connectionId: targetId });
+      if (args?.connectionId === owner.id && res?.address?.connection_id === 'local') {
+        return { ...res, address: { ...res.address, connection_id: args.connectionId } };
+      }
+      return res;
+    },
+    projectLinkSet: (args) =>
+      call('app_project_link_set', {
+        ...args,
+        ...(args?.connectionId ? { connectionId: mapTarget(args.connectionId) } : {}),
+      }),
   };
 }
 const creationNode = computed(() => creationNodes.value.find(node => node.id === creationConnectionId.value));

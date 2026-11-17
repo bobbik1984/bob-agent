@@ -44,9 +44,12 @@ function formatNodeMeta(node) {
   if (rawUrl) {
     try {
       const host = new URL(rawUrl).host;
-      if (host && !host.startsWith('127.0.0.1') && !host.startsWith('localhost')) return host;
+      if (host && !host.startsWith('127.0.0.1') && !host.startsWith('localhost')) {
+        return remark === 'web_host' ? `${host} · ${t('createHostNodeTag')}` : host;
+      }
     } catch {}
   }
+  if (remark === 'web_host') return t('createHostNodeTag');
   return t('createRemoteNodeTag');
 }
 

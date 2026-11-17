@@ -1254,7 +1254,7 @@
   "nativeStreamDisconnected": "The remote reply stream disconnected and this turn failed. Existing output is retained; no instruction was resent.",
   "createReloadTools": "Reload tools and workspaces",
   "createToolReady": "Signed in",
-  "createToolAuthUnknown": "Sign-in unconfirmed",
+  "createToolAuthUnknown": "Ready · unverified",
   "createToolUnavailable": "Not ready",
   "createWorkspacePath": "Absolute path to an existing directory on this node",
   "createWorkspaceAuthorization": "Creating authorizes this directory for tasks on the node. No previous conversation is required.",

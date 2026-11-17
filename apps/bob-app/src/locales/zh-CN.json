@@ -1254,7 +1254,7 @@
   "nativeStreamDisconnected": "远端回复流已断开，本轮执行失败；已生成的内容已保留，未自动重发。",
   "createReloadTools": "重新读取工具与工作区",
   "createToolReady": "已登录",
-  "createToolAuthUnknown": "登录待确认",
+  "createToolAuthUnknown": "已安装 · 可创建",
   "createToolUnavailable": "未就绪",
   "createWorkspacePath": "输入节点上的现有目录绝对路径",
   "createWorkspaceAuthorization": "创建时授权所填目录供该节点执行任务；无需已有历史会话。",
