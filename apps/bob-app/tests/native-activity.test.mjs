@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {unconfirmActivity,settleNativeActivity,orderedNativeActivities,actionableApproval,waitingNativeApproval,partitionNativeActivity} from '../src/native-activity.mjs';
+import {unconfirmActivity,settleNativeActivity,orderedNativeActivities,visibleNativeActivities,actionableApproval,waitingNativeApproval,partitionNativeActivity} from '../src/native-activity.mjs';
 test('disconnect preserves confirmed results but invalidates active tools and approvals without mutating cache',()=>{
  const original={partial:true,items:[{id:'a',status:'running'},{id:'b',status:'completed'},{id:'c',status:'error'}],approvals:[{id:'p',status:'pending'}]};
  const result=unconfirmActivity(original);
@@ -43,4 +43,25 @@ test('approval requires live ownership, identity and expiry, not an old cached p
  assert.equal(waitingNativeApproval({live:settleNativeActivity(live,'completed')},100),false);
  assert.equal(waitingNativeApproval({live},201),false);
  assert.equal(approval.status,'pending');
+});
+
+test('visibleNativeActivities collapses stacked settled turns and drops settled external-codex duplicates',()=>{
+ const item={items:[{id:'cmd',status:'completed'}],approvals:[]};
+ const settledDrafts={
+  'req-1':{timestamp:100,active:false,terminal:true,activity:item},
+  'external-codex-1-t1':{timestamp:150,active:false,terminal:true,activity:item},
+  'req-2':{timestamp:200,active:false,terminal:true,activity:item},
+  'external-codex-1-t2':{timestamp:250,active:false,terminal:true,activity:item},
+ };
+ assert.deepEqual(visibleNativeActivities(settledDrafts,500).map(x=>x.id),['req-2']);
+ const activeDrafts={
+  ...settledDrafts,
+  'req-3':{timestamp:300,active:true,terminal:false,activity:item},
+ };
+ assert.deepEqual(visibleNativeActivities(activeDrafts,500).map(x=>x.id),['req-3']);
+ const actionableDrafts={
+  ...settledDrafts,
+  'req-wait':{timestamp:180,active:true,terminal:false,activity:{items:[],approvals:[{status:'pending',actionable:true,permission_id:'p1',expires_at:1000}]}},
+ };
+ assert.deepEqual(visibleNativeActivities(actionableDrafts,500).map(x=>x.id),['req-wait']);
 });

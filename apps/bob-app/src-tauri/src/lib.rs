@@ -1156,6 +1156,7 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             direct_llm::app_dsh_live,
             direct_llm::app_dsh_cancel,
             direct_llm::app_dsh_answer,
+            direct_llm::app_dsh_permission_set,
             direct_llm::app_paired_session_setup,
             direct_llm::app_dsh_page,
             direct_llm::app_dsh_preview,

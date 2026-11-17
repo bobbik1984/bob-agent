@@ -678,32 +678,23 @@ pub fn prompt_session_with_details(
 }
 
 fn resolve_approval_mode(session_id: &str, approval_mode_override: Option<&str>, claude_tools: &[String]) -> &'static str {
-    if approval_mode_override == Some("deny") {
-        "deny"
-    } else if approval_mode_override == Some("workspace_auto") {
-        if session_id.starts_with("codex:") || session_id.starts_with("agy:") {
-            "workspace_auto"
-        } else if session_id.starts_with("claude-jsonl:") && !claude_tools.is_empty() {
-            "workspace_auto"
-        } else {
-            "deny"
+    let supported = session_id.starts_with("codex:")
+        || session_id.starts_with("agy:")
+        || (session_id.starts_with("claude-jsonl:") && !claude_tools.is_empty());
+    match approval_mode_override {
+        Some("deny") => "deny",
+        Some("read_only") => {
+            if session_id.starts_with("claude-jsonl:") && !claude_tools.is_empty() {
+                "read_only"
+            } else {
+                "deny"
+            }
         }
-    } else if approval_mode_override == Some("read_only") {
-        if session_id.starts_with("claude-jsonl:") && !claude_tools.is_empty() {
-            "read_only"
-        } else {
-            "deny"
-        }
-    } else if session_id.starts_with("codex:") {
-        if approval_mode_override == Some("interactive") {
-            "interactive"
-        } else {
-            "deny"
-        }
-    } else if session_id.starts_with("agy:") || (session_id.starts_with("claude-jsonl:") && !claude_tools.is_empty()) {
-        "interactive"
-    } else {
-        "deny"
+        Some("full_auto") if supported => "full_auto",
+        Some("interactive") if supported => "interactive",
+        Some("workspace_auto") if supported => "workspace_auto",
+        None if supported => "workspace_auto",
+        _ => "deny",
     }
 }
 
@@ -960,22 +951,29 @@ mod native_grant_tests {
     }
 
     #[test]
-    fn resolve_approval_mode_codex_requires_explicit_interactive_override() {
+    fn resolve_approval_mode_defaults_to_workspace_auto_and_supports_full_auto() {
         let tools = vec!["Bash".to_string()];
-        assert_eq!(resolve_approval_mode("codex:12345678", None, &[]), "deny");
+        assert_eq!(resolve_approval_mode("codex:12345678", None, &[]), "workspace_auto");
         assert_eq!(resolve_approval_mode("codex:12345678", Some("read_only"), &[]), "deny");
         assert_eq!(resolve_approval_mode("codex:12345678", Some("deny"), &[]), "deny");
         assert_eq!(resolve_approval_mode("codex:12345678", Some("interactive"), &[]), "interactive");
         assert_eq!(resolve_approval_mode("codex:12345678", Some("workspace_auto"), &[]), "workspace_auto");
+        assert_eq!(resolve_approval_mode("codex:12345678", Some("full_auto"), &[]), "full_auto");
+        assert_eq!(resolve_approval_mode("agy:12345678", None, &[]), "workspace_auto");
         assert_eq!(resolve_approval_mode("agy:12345678", Some("interactive"), &[]), "interactive");
         assert_eq!(resolve_approval_mode("agy:12345678", Some("workspace_auto"), &[]), "workspace_auto");
+        assert_eq!(resolve_approval_mode("agy:12345678", Some("full_auto"), &[]), "full_auto");
         assert_eq!(resolve_approval_mode("agy:12345678", Some("deny"), &[]), "deny");
         assert_eq!(resolve_approval_mode("claude-jsonl:12345678", None, &[]), "deny");
-        assert_eq!(resolve_approval_mode("claude-jsonl:12345678", None, &tools), "interactive");
+        assert_eq!(resolve_approval_mode("claude-jsonl:12345678", None, &tools), "workspace_auto");
         assert_eq!(resolve_approval_mode("claude-jsonl:12345678", Some("workspace_auto"), &tools), "workspace_auto");
+        assert_eq!(resolve_approval_mode("claude-jsonl:12345678", Some("full_auto"), &tools), "full_auto");
         assert_eq!(resolve_approval_mode("claude-jsonl:12345678", Some("read_only"), &tools), "read_only");
         assert_eq!(resolve_approval_mode("claude-jsonl:12345678", Some("workspace_auto"), &[]), "deny");
+        assert_eq!(resolve_approval_mode("claude-jsonl:12345678", Some("full_auto"), &[]), "deny");
         assert_eq!(resolve_approval_mode("claude-jsonl:12345678", Some("deny"), &tools), "deny");
+        assert_eq!(resolve_approval_mode("pi:12345678", None, &tools), "deny");
+        assert_eq!(resolve_approval_mode("pi:12345678", Some("full_auto"), &tools), "deny");
     }
 
     #[test]

@@ -22,6 +22,21 @@ export function orderedNativeActivities(drafts){
   .map(([id,v])=>({id,activity:v.activity}));
 }
 
+// Collapse settled historical turns so execution boxes never pile up below the latest message.
+export function visibleNativeActivities(drafts,now=Date.now()){
+ const ordered=orderedNativeActivities(drafts);
+ if(!ordered.length)return ordered;
+ const liveOrWaiting=ordered.filter(({id,activity})=>{
+  const rec=drafts[id];
+  const isActive=rec?.active===true&&!rec?.terminal;
+  const hasActionable=(activity?.approvals||[]).some(a=>actionableApproval(a,now));
+  return isActive||hasActionable;
+ });
+ if(liveOrWaiting.length)return liveOrWaiting;
+ const owned=ordered.filter(({id})=>!String(id||'').startsWith('external-codex-'));
+ return (owned.length?owned:ordered).slice(-1);
+}
+
 // Only a live, identity-bound and unexpired source request is actionable.
 export function actionableApproval(approval,now=Date.now()){
  return approval?.actionable===true&&approval.status==='pending'

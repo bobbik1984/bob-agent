@@ -3,6 +3,16 @@ use serde_json::{json, Value};
 use std::{io::{Read, Write}, time::{Duration, Instant}, net::{TcpStream, ToSocketAddrs}};
 use tungstenite::{client::IntoClientRequest, Message, stream::MaybeTlsStream};
 use crate::dsh_session::{History, SessionAddress, project_history};
+pub fn normalize_dsh_permission_mode(raw: &str) -> Option<(&'static str, &'static str)> {
+ match raw.trim() {
+  "read_only" | "read-only" => Some(("read_only", "read-only")),
+  "workspace_auto" | "interactive" | "workspace-write" | "auto" | "custom" => {
+   Some(("workspace_auto", "workspace-write"))
+  }
+  "full_auto" | "danger-full-access" => Some(("full_auto", "danger-full-access")),
+  _ => None,
+ }
+}
 const LIMIT: u64 = 4 * 1024 * 1024;
 // History snapshots include tool records as well as visible messages. Keep a separate,
 // bounded budget; a size rejection must not masquerade as an offline node.
@@ -354,6 +364,15 @@ impl DshClient {
     if before.is_none() {
      output["pending_questions"]=json!(crate::dsh_session::pending_questions(&snapshot));
      output["question_source"]=json!(self.question_source());
+     if let Some(raw_preset) = snapshot["projections"]["values"]["permissions"]["currentValue"]
+      .as_str()
+      .or_else(|| snapshot["projections"]["values"]["sandboxMode"].as_str())
+     {
+      output["permission_preset"] = json!(raw_preset);
+      if let Some((bob_mode, _)) = normalize_dsh_permission_mode(raw_preset) {
+       output["approval_mode"] = json!(bob_mode);
+      }
+     }
     }
     output["cursor"]=json!(cursor);
     output["before"]=json!(if skip>0 {h.messages[skip].sequence} else {first});
@@ -511,6 +530,40 @@ impl DshClient {
  pub fn prompt(&self,session:&str,text:&str,id:&str)->Result<Value,&'static str>{
   let result=self.rpc("session/prompt",json!({"request":{"requestId":id,"sessionId":session,"mode":"queue","content":[{"type":"text","text":text}]}}))?;
   if result["accepted"]!=true{return Err("DSH_RECEIPT_UNKNOWN");} Ok(json!({"status":"accepted","session_id":session,"request_id":id}))
+ }
+
+ /// Switch a DSH native session's permission preset via `commands/execute` (`/permission <preset>`).
+ pub fn set_permission_preset(&self, address: SessionAddress, mode: &str) -> Result<Value, &'static str> {
+  let session = address.session_id.as_str();
+  if session.trim().is_empty()
+   || session.len() > 256
+   || session.chars().any(char::is_control)
+   || !session.starts_with("session-")
+   || crate::agy_directory::owns_readable_session(session)
+  {
+   return Err("DSH_SESSION_REQUIRED");
+  }
+  let (bob_mode, dsh_preset) =
+   normalize_dsh_permission_mode(mode).ok_or("DSH_PERMISSION_MODE_INVALID")?;
+  let res = self.rpc(
+   "commands/execute",
+   json!({
+    "agentId": session,
+    "line": format!("/permission {dsh_preset}"),
+    "submittedAttachments": [],
+   }),
+  )?;
+  let result_obj = res.get("result").filter(|v| v.is_object()).unwrap_or(&res);
+  if result_obj.get("kind").and_then(Value::as_str) != Some("success") {
+   return Err("DSH_PERMISSION_UPDATE_FAILED");
+  }
+  Ok(json!({
+   "address": address,
+   "approval_mode": bob_mode,
+   "permission_preset": dsh_preset,
+   "command_id": res.get("commandId").cloned().unwrap_or(Value::Null),
+   "text": result_obj.get("text").cloned().unwrap_or(Value::Null),
+  }))
  }
 
  /// Submit structured answers for a pending DSH `ask_user_question` call.
@@ -1360,5 +1413,63 @@ mod question_answer_tests {
   handle.join().unwrap();
   let recorded = seen.lock().unwrap();
   assert_eq!(recorded.len(), 3);
+ }
+
+ #[test]
+ fn permission_preset_mapping_and_commands_execute_wire_contract() {
+  assert_eq!(normalize_dsh_permission_mode("read_only"), Some(("read_only", "read-only")));
+  assert_eq!(normalize_dsh_permission_mode("workspace-write"), Some(("workspace_auto", "workspace-write")));
+  assert_eq!(normalize_dsh_permission_mode("full_auto"), Some(("full_auto", "danger-full-access")));
+  assert_eq!(normalize_dsh_permission_mode("danger-full-access"), Some(("full_auto", "danger-full-access")));
+  assert_eq!(normalize_dsh_permission_mode("unknown"), None);
+
+  let bad_client = DshClient::from_cookie("http://127.0.0.1:1/", "dsh-auth-1=test").unwrap();
+  assert_eq!(
+   bad_client.set_permission_preset(
+    SessionAddress { connection_id: "c1".into(), session_id: "codex:abc".into() },
+    "full_auto",
+   ),
+   Err("DSH_SESSION_REQUIRED")
+  );
+  assert_eq!(
+   bad_client.set_permission_preset(
+    SessionAddress { connection_id: "c1".into(), session_id: "session-1".into() },
+    "invalid",
+   ),
+   Err("DSH_PERMISSION_MODE_INVALID")
+  );
+
+  let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+  let addr = listener.local_addr().unwrap();
+  let handle = std::thread::spawn(move || {
+   let stream = listener.incoming().next().unwrap().unwrap();
+   let (path, body, mut s) = read_http_post(stream);
+   assert_eq!(path, "/api/commands/execute");
+   assert_eq!(body["payload"]["args"]["agentId"], "session-1");
+   assert_eq!(body["payload"]["args"]["line"], "/permission danger-full-access");
+   assert_eq!(body["payload"]["args"]["submittedAttachments"], json!([]));
+   let rpc_id = body["rpcId"].as_str().unwrap_or("");
+   write_http_json(&mut s, &json!({
+    "type": "server-response",
+    "rpcId": rpc_id,
+    "result": {
+     "ok": true,
+     "value": {
+      "commandId": "cmd-1",
+      "result": { "kind": "success", "text": "preset danger-full-access" }
+     }
+    }
+   }));
+  });
+
+  let client = DshClient::from_cookie(&format!("http://127.0.0.1:{}/", addr.port()), "dsh-auth-1=test").unwrap();
+  let updated = client.set_permission_preset(
+   SessionAddress { connection_id: "c1".into(), session_id: "session-1".into() },
+   "full_auto",
+  ).unwrap();
+  handle.join().unwrap();
+  assert_eq!(updated["approval_mode"], "full_auto");
+  assert_eq!(updated["permission_preset"], "danger-full-access");
+  assert_eq!(updated["command_id"], "cmd-1");
  }
 }

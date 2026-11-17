@@ -1,6 +1,10 @@
 # Bob — Current Stage（1.0.1 施工与交接合同）
 
 > **最新交接入口（2026-11-14）**：`WP-J1`～`WP-J6` 核心底座与生产端升级已合入主干（当前代码基线 `431b63d`）；后续任何 Agent 接手系统性进化任务，请直接跳转本文件末尾 **「5. 后 WP-J6 系统性进化施工合同（BOB-D-016：WP-E1 → WP-E4）」** 按序领取工作包。
+> - **默认工作区自动读写、跨目录远程部署确认与执行记录去重（2026-11-17）**：
+>   - **权限预设与交互确认（`agy_directory.rs` / `agy_index_probe.py` / `dsh_transport.rs` / `DshSessions.vue`）**：将原生 CLI（`codex:` / `claude-jsonl:` / `agy:`）与 DSH 会话（`session-*`）默认权限统一切换为「工作区自动读写（`workspace_auto`）」，并新增会话级「跨目录与远程部署（`full_auto`）」模式；选中 `full_auto` 时在输入框上方弹出内联二次确认卡片，通过 `app_dsh_permission_set` 调用 DSH `commands/execute`（`/permission <preset>`）或设置当前原生会话，同时在 `history_page()` 读回 `permission_preset` / `approval_mode`。
+>   - **Codex Ubuntu 24.04 userns 沙箱与高额审批流修复（`agy_index_probe.py`）**：针对受限 unprivileged userns 环境取消会触发二次失败重弹的 `workspace-write` 气泡沙箱并用 `Bob` 自有高危门禁（移除 `'cwd'` 路径误判、区分 catastrophic 主机命令）统一守门；解析 Codex tail `turn_context.cwd` 作为最新工作区；单次请求审批容量从 `32` 提至 `256`，超限或拒绝时回传标准 `{ "decision": "decline" }` 避免 `-32000`（`approval request failed`）。
+>   - **堆叠执行记录去重（`native-activity.mjs` / `DshSessions.vue`）**：新增 `visibleNativeActivities` 与前端可见性过滤，仅展示运行中轮次、含待确认项轮次或闲置时最新 1 条非外部镜像执行记录，消除页面底部多轮历史 `执行记录` 堆叠。
 > - **侧栏项目智能归类合并与新建设备选择隔离（2026-11-14）**：
 >   - **侧栏项目/智能分组归并（`conversation-directory.mjs` / `ConversationDirectory.vue` / `NavigationDrawer.vue` / `useChatSession.mjs`）**：新增 `attachInferredProjects`，结合同工作区已关联会话、`CANONICAL_PROJECTS`（补充 `Bob-bot 助手` 与 `sketchup|model_builder|平面模型`）及 `catalog.projects` 规范标题自动将未关联会话归入既有项目组（避免 `X1T / bob-bot` 与 `Bob-bot 助手` 割裂），同时将 `/tmp/` 与 `Bob Connection Verification` 等临时验证会话隔离到「实验与临时测试」；在智能模式侧栏渲染一键整理按钮并修复网页端直接路由至 `kernelBridge.assistantExecute` 执行 `organize_projects` 与目录即时刷新。
 >   - **新建设备卡片 `node:local` 隔离与选中对比度强化（`SidebarCreateForm.vue` / `useChatSession.mjs`）**：通过 `nodeCreationKey` / `parseNodeConnectionId` 将内置对话（`local`）与本机托管节点（如 `VPS2` 对应的 `node:local`）彻底隔离，点击 `VPS2` 时正确保留节点连接并拉取 `dsh` / `claude` / `codex` / `agy` / `pi` 工具与工作区；为所有设备卡片补充高对比度边框、右侧单选指示点与清晰节点用途副标题。

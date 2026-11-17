@@ -4092,7 +4092,7 @@ async fn native_dsh<R: Runtime>(
         } else {
             Some(token.as_str())
         };
-        let can_relay = matches!(operation, "list" | "history" | "page" | "preview" | "live" | "events");
+        let can_relay = matches!(operation, "list" | "history" | "page" | "preview" | "live" | "events" | "dsh_permission_set");
         // A Web host is already identified by pairing. Direct discovery failures
         // on other nodes must not abort an eligible read through the Web host.
         let discovery = if is_web_host { Ok(false) } else {
@@ -4184,6 +4184,14 @@ async fn native_dsh<R: Runtime>(
                         "sessionId": session_id,
                         "callId": request_id,
                         "answers": attachments.clone().unwrap_or(Value::Null),
+                    }),
+                ),
+                "dsh_permission_set" => (
+                    "app_dsh_permission_set",
+                    json!({
+                        "connectionId": "local",
+                        "sessionId": session_id,
+                        "approvalMode": text,
                     }),
                 ),
                 "live" => ("app_dsh_live",json!({"connectionId":"local","sessionId":session_id})),
@@ -4279,6 +4287,13 @@ async fn native_dsh<R: Runtime>(
                         ans,
                     )
                 }
+                "dsh_permission_set" => client.set_permission_preset(
+                    bob_runtime::dsh_session::SessionAddress {
+                        connection_id: cid,
+                        session_id: sid,
+                    },
+                    &text,
+                ),
                 "live" => client.live(bob_runtime::dsh_session::SessionAddress{connection_id:cid,session_id:sid}),
                 "page" => {
                     let v: Value = serde_json::from_str(&text).map_err(|_| "DSH_PROTOCOL")?;
@@ -4336,7 +4351,7 @@ async fn native_dsh<R: Runtime>(
 
         match direct_dsh {
             Ok(val) => Ok(val),
-            Err(err) if matches!(operation, "dsh_cancel" | "dsh_answer") => Err(err),
+            Err(err) if matches!(operation, "dsh_cancel" | "dsh_answer" | "dsh_permission_set") => Err(err),
             Err(err) => {
                 let (cmd, args) = build_rpc_call();
                 forward_with_relay_fallback(cmd, &args).or(Err(err))
@@ -4566,6 +4581,11 @@ pub(crate) async fn app_dsh_cancel<R: Runtime>(host: AppHandle<R>, connection_id
 pub(crate) async fn app_dsh_answer<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, call_id: String, answers: Value) -> Result<Value, &'static str> {
  if call_id.is_empty() || call_id.len() > 256 { return Err("BAD_ANSWER"); }
  native_dsh(host,connection_id,"dsh_answer",session_id,String::new(),call_id,Some(answers)).await
+}
+#[tauri::command]
+pub(crate) async fn app_dsh_permission_set<R: Runtime>(host: AppHandle<R>, connection_id: String, session_id: String, approval_mode: String) -> Result<Value, &'static str> {
+ if approval_mode.trim().is_empty() || approval_mode.len() > 64 { return Err("DSH_PERMISSION_MODE_INVALID"); }
+ native_dsh(host,connection_id,"dsh_permission_set",session_id,approval_mode,String::new(),None).await
 }
 
 #[tauri::command]

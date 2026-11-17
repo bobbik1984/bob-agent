@@ -22,20 +22,21 @@ const awayFromLatest=ref(false),chatContent=ref(null);
 const chatScroll=createChatScroll(value=>{awayFromLatest.value=value;});
 watch([reader,chatContent],()=>chatScroll.bind(reader.value),{flush:'post'});
 const pullUpDistance=ref(0),attachments=ref([]),fileInput=ref(null);let touchStartY=null,wheelOverscroll=0,wheelResetTimer;
-const APPROVAL_MODES = ['interactive', 'workspace_auto', 'read_only', 'deny'];
+const PERSISTED_APPROVAL_MODES = ['workspace_auto', 'interactive', 'read_only', 'deny'];
+const APPROVAL_MODES = ['workspace_auto', 'interactive', 'full_auto', 'read_only', 'deny'];
 function readSavedApprovalMode() {
   try {
     const store = typeof localStorage !== 'undefined' ? localStorage : globalThis.localStorage;
     const saved = store?.getItem?.('bob.dsh.approvalMode');
-    if (saved && APPROVAL_MODES.includes(saved)) return saved;
+    if (saved && PERSISTED_APPROVAL_MODES.includes(saved)) return saved;
   } catch {}
-  return 'interactive';
+  return 'workspace_auto';
 }
-const approvalMode=ref(readSavedApprovalMode()),takeoverPrompt=ref(null),terminalHolderOverride=ref(null),bobHolderOverride=ref(null),handoffCardOpen=ref(false),releasingHolder=ref(false),copiedCliCmd=ref(false);
+const approvalMode=ref(readSavedApprovalMode()),sessionApprovalOverrides=ref({}),pendingPermissionElevation=ref(null),switchingPermissionMode=ref(false),takeoverPrompt=ref(null),terminalHolderOverride=ref(null),bobHolderOverride=ref(null),handoffCardOpen=ref(false),releasingHolder=ref(false),copiedCliCmd=ref(false);
 watch(approvalMode, val => {
   try {
     const store = typeof localStorage !== 'undefined' ? localStorage : globalThis.localStorage;
-    if (APPROVAL_MODES.includes(val)) store?.setItem?.('bob.dsh.approvalMode', val);
+    if (PERSISTED_APPROVAL_MODES.includes(val)) store?.setItem?.('bob.dsh.approvalMode', val);
   } catch {}
 });
 const composerInput = ref(null);
@@ -89,7 +90,15 @@ const activeTakeoverKeys=computed(()=>{
 });
 function canReadOrResume(s){return Boolean(s&&(s.historyReadable!==false||s.resumable===true));}
 const isInterruptedCliSession=computed(()=>Boolean(selected.value?.harness==='agy'&&(selected.value?.cliInterrupted===true||history.value?.cli_interrupted===true||(selected.value?.historyReadable===false&&selected.value?.resumable===true))));
-const supportsApprovalMode=computed(()=>/^(claude-jsonl|agy|codex):/.test(selected.value?.id||''));
+const isDshNativeSession=computed(()=>Boolean(selected.value?.id&&String(selected.value.id).startsWith('session-')));
+const supportsApprovalMode=computed(()=>/^(claude-jsonl|agy|codex):|^session-/.test(selected.value?.id||''));
+function currentSessionKey(){return `${connection.value||''}:${selected.value?.id||''}`;}
+const effectiveApprovalMode=computed(()=>{
+  const ov=sessionApprovalOverrides.value[currentSessionKey()];
+  if(ov&&APPROVAL_MODES.includes(ov))return ov;
+  if(isDshNativeSession.value)return 'workspace_auto';
+  return approvalMode.value;
+});
 const supportsTerminalHandoff=computed(()=>/^(claude-jsonl|codex|agy):/.test(selected.value?.id||''));
 function shellQuoteArg(v){
   const s=String(v||'').trim();
@@ -146,12 +155,71 @@ function confirmTakeoverSend(){
   if(!draft.value.trim()&&!attachments.value.length)draft.value=t('agyResumeDefaultPrompt');
   void send({takeover:true});
 }
-const permissionModeOptions=computed(()=>[
-  { value: 'interactive', label: t('permissionModeInteractive') },
-  { value: 'workspace_auto', label: t('permissionModeWorkspaceAuto') },
-  { value: 'read_only', label: t('permissionModeReadOnly') },
-  { value: 'deny', label: t('permissionModePlan') },
-]);
+const permissionModeOptions=computed(()=>{
+  if(isDshNativeSession.value){
+    return [
+      { value: 'workspace_auto', label: t('permissionModeWorkspaceAuto') },
+      { value: 'full_auto', label: t('permissionModeFullAuto') },
+      { value: 'read_only', label: t('permissionModeReadOnly') },
+    ];
+  }
+  return [
+    { value: 'workspace_auto', label: t('permissionModeWorkspaceAuto') },
+    { value: 'interactive', label: t('permissionModeInteractive') },
+    { value: 'full_auto', label: t('permissionModeFullAuto') },
+    { value: 'read_only', label: t('permissionModeReadOnly') },
+    { value: 'deny', label: t('permissionModePlan') },
+  ];
+});
+async function applyDshPermissionMode(nextMode, isElevatedConfirm=false){
+  if(!selected.value||switchingPermissionMode.value)return;
+  const g=generation,sid=selected.value.id,cid=connection.value,key=`${cid||''}:${sid||''}`;
+  switchingPermissionMode.value=true;error.value='';
+  try{
+    if(typeof kernelBridge.dshPermissionSet==='function'){
+      await kernelBridge.dshPermissionSet(cid,sid,nextMode);
+    }
+    if(g!==generation||disposed)return;
+    sessionApprovalOverrides.value={...sessionApprovalOverrides.value,[key]:nextMode};
+    pendingPermissionElevation.value=null;
+    notice.value=t(isElevatedConfirm?'permissionElevateAppliedDsh':'permissionModeSwitchedNotice');
+  }catch{
+    if(g===generation)error.value=t('permissionElevateFailed');
+  }finally{
+    if(g===generation)switchingPermissionMode.value=false;
+  }
+}
+function onSelectApprovalMode(nextMode){
+  if(!APPROVAL_MODES.includes(nextMode)||!selected.value||switchingPermissionMode.value)return;
+  if(nextMode==='full_auto'){
+    if(effectiveApprovalMode.value==='full_auto')return;
+    pendingPermissionElevation.value={connectionId:connection.value,sessionId:selected.value.id};
+    return;
+  }
+  pendingPermissionElevation.value=null;
+  const key=currentSessionKey();
+  sessionApprovalOverrides.value={...sessionApprovalOverrides.value,[key]:nextMode};
+  if(!isDshNativeSession.value){
+    approvalMode.value=nextMode;
+    notice.value=t('permissionModeSwitchedNotice');
+    return;
+  }
+  void applyDshPermissionMode(nextMode,false);
+}
+async function confirmPermissionElevation(){
+  if(!selected.value||switchingPermissionMode.value)return;
+  if(isDshNativeSession.value){
+    await applyDshPermissionMode('full_auto',true);
+    return;
+  }
+  const key=currentSessionKey();
+  sessionApprovalOverrides.value={...sessionApprovalOverrides.value,[key]:'full_auto'};
+  pendingPermissionElevation.value=null;
+  notice.value=t('permissionElevateAppliedNative');
+}
+function cancelPermissionElevation(){
+  pendingPermissionElevation.value=null;
+}
 const nodeActivity=ref(null),awaitingReply=ref(null),replying=ref(false);let activityChecked=0;
 const syncStatus=ref(''),hasNewMessages=ref(false),copiedSeq=ref(null),streamSeq=ref(null),rodIndex=ref(0);let syncTimer,copyTimer,rodTimer;
 const rodFrames=['|','/','-','\\'],stripDots=s=>String(s??'').replace(/\s*(?:…|\.{2,})\s*$/,'');
@@ -445,7 +513,20 @@ function nativeTextInHistory(text){
  if(run.length)runs.push(run.join(' '));
  return runs.some(body=>{let offset=0;for(const chunk of chunks){const at=body.indexOf(chunk,offset);if(at<0)return false;offset=at+chunk.length;}return true;});
 }
-const nativeActivities=computed(()=>orderedNativeActivities(nativeDrafts.value));
+const nativeActivities=computed(()=>{
+ const ordered=orderedNativeActivities(nativeDrafts.value);
+ if(!ordered.length)return ordered;
+ const now=Date.now();
+ const liveOrWaiting=ordered.filter(({id,activity})=>{
+  const rec=nativeDrafts.value[id];
+  const isActive=rec?.active===true&&!rec?.terminal;
+  const hasActionable=(activity?.approvals||[]).some(a=>isActionableNativeApproval(a,now));
+  return isActive||hasActionable;
+ });
+ if(liveOrWaiting.length)return liveOrWaiting;
+ const owned=ordered.filter(({id})=>!String(id||'').startsWith('external-codex-'));
+ return (owned.length?owned:ordered).slice(-1);
+});
 function isActionableNativeApproval(approval,now=Date.now()){
  return Boolean(
   approval?.actionable===true&&
@@ -770,7 +851,13 @@ async function refresh(){if(!canReadOrResume(selected.value)){error.value=t(sele
   const native=isNativeId(id);
   const h=await kernelBridge.dshPage(connection.value,id,null,null,(native||checkedDshQuestions)?history.value?.cursor??null:null);validatePage(h,id);
   if(g!==generation||disposed||preview.value)return;
-  if(!native){observeDshQuestions(h);checkedDshQuestions=true;}
+  if(!native){
+   observeDshQuestions(h);checkedDshQuestions=true;
+   if(typeof h.approval_mode==='string'&&APPROVAL_MODES.includes(h.approval_mode)){
+    const key=`${connection.value||''}:${id}`;
+    sessionApprovalOverrides.value={...sessionApprovalOverrides.value,[key]:h.approval_mode};
+   }
+  }
   await refreshActivity(g,id);if(g!==generation||disposed)return;
   if(h.request_results?.some(r=>r.request_id===awaitingReply.value&&['completed','error','blocked','cancelled'].includes(r.status))){awaitingReply.value=null;replying.value=false;}
   if(h.terminal_holder!==undefined){terminalHolderOverride.value=null;if(history.value)history.value={...history.value,terminal_holder:h.terminal_holder};}
@@ -865,8 +952,8 @@ function removeAttachment(id){attachments.value=attachments.value.filter(a=>a.id
 function formatAttachmentBlock(list){if(!list?.length)return '';return list.map(a=>a.content?`[Attachment: ${a.name}]\n\`\`\`\n${String(a.content).slice(0,16384)}\n\`\`\``:`[Attachment: ${a.name} (${a.size||0} bytes)]`).join('\n\n');}
 function onComposeKeydown(e){if(e?.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();void send();}}
 globalThis.__bobForceRefreshDsh=forceRefresh;
-async function open(s){resetDshStop();checkedDshQuestions=false;dshQuestionView.value=null;answeredDshCallIds.value={};dshQuestionDrafts.value={};dshQuestionBusy.value={};dshQuestionErrors.value={};inSessionSearchOpen.value=false;inSessionSearchQuery.value='';approvalErrors.value={};pendingDecision.value=null;cancelRequest.value=null;cancelBusy.value=false;takeoverPrompt.value=null;terminalHolderOverride.value=null;bobHolderOverride.value=null;handoffCardOpen.value=false;releasingHolder.value=false;copiedCliCmd.value=false;chatScroll.reset();clearTimeout(dshLiveTimer);dshLiveState.value=null;dshReadCursor=-1;clearTimeout(nativeTimer);nativeCursor=0;nativeEpoch='';nativeDrafts.value={};nodeActivity.value=null;awaitingReply.value=null;replying.value=false;hasNewMessages.value=false;streamSeq.value=null;syncStatus.value='';pullUpDistance.value=0;attachments.value=[];clearTimeout(syncTimer);activityChecked=0;olderRequested=false;artifactQueue=[];artifactCount=0;persist();++generation;clearTimeout(timer);busy.value=false;loadingOlder.value=false;lastTop=0;selected.value=s;history.value=null;notice.value='';const saved=readState();restoring=true;draft.value=saved.draft||'';pending.value=saved.pending||null;restoring=false;if(pending.value)notice.value=t('dshUncertain');const g=generation;const cached=await readingCache.get(historyKey());if(g!==generation||disposed)return;if(cached){try{validatePage(cached,s.id);history.value=cached;syncStatus.value='checking';await nextTick();if(reader.value)reader.value.scrollTop=reader.value.scrollHeight;lastTop=reader.value?.scrollTop||0;}catch{}}if(!canReadOrResume(s)){error.value=t(s.historyReason==='AGY_HISTORY_NOT_LOCAL'?'agyHistoryNotLocal':'agyHistoryPending');return;}await refresh();void refreshNativeEvents();void refreshDshLive()}
-function back(){resetDshStop();dshQuestionView.value=null;answeredDshCallIds.value={};dshQuestionDrafts.value={};dshQuestionBusy.value={};dshQuestionErrors.value={};inSessionSearchOpen.value=false;inSessionSearchQuery.value='';takeoverPrompt.value=null;terminalHolderOverride.value=null;bobHolderOverride.value=null;handoffCardOpen.value=false;releasingHolder.value=false;copiedCliCmd.value=false;clearTimeout(dshLiveTimer);dshLiveState.value=null;clearTimeout(nativeTimer);persist();++generation;clearTimeout(timer);clearTimeout(syncTimer);busy.value=false;selected.value=null;history.value=null;syncStatus.value='';hasNewMessages.value=false;notice.value='';load()}
+async function open(s){resetDshStop();checkedDshQuestions=false;dshQuestionView.value=null;answeredDshCallIds.value={};dshQuestionDrafts.value={};dshQuestionBusy.value={};dshQuestionErrors.value={};inSessionSearchOpen.value=false;inSessionSearchQuery.value='';approvalErrors.value={};pendingDecision.value=null;pendingPermissionElevation.value=null;switchingPermissionMode.value=false;cancelRequest.value=null;cancelBusy.value=false;takeoverPrompt.value=null;terminalHolderOverride.value=null;bobHolderOverride.value=null;handoffCardOpen.value=false;releasingHolder.value=false;copiedCliCmd.value=false;chatScroll.reset();clearTimeout(dshLiveTimer);dshLiveState.value=null;dshReadCursor=-1;clearTimeout(nativeTimer);nativeCursor=0;nativeEpoch='';nativeDrafts.value={};nodeActivity.value=null;awaitingReply.value=null;replying.value=false;hasNewMessages.value=false;streamSeq.value=null;syncStatus.value='';pullUpDistance.value=0;attachments.value=[];clearTimeout(syncTimer);activityChecked=0;olderRequested=false;artifactQueue=[];artifactCount=0;persist();++generation;clearTimeout(timer);busy.value=false;loadingOlder.value=false;lastTop=0;selected.value=s;history.value=null;notice.value='';const saved=readState();restoring=true;draft.value=saved.draft||'';pending.value=saved.pending||null;restoring=false;if(pending.value)notice.value=t('dshUncertain');const g=generation;const cached=await readingCache.get(historyKey());if(g!==generation||disposed)return;if(cached){try{validatePage(cached,s.id);history.value=cached;syncStatus.value='checking';await nextTick();if(reader.value)reader.value.scrollTop=reader.value.scrollHeight;lastTop=reader.value?.scrollTop||0;}catch{}}if(!canReadOrResume(s)){error.value=t(s.historyReason==='AGY_HISTORY_NOT_LOCAL'?'agyHistoryNotLocal':'agyHistoryPending');return;}await refresh();void refreshNativeEvents();void refreshDshLive()}
+function back(){resetDshStop();dshQuestionView.value=null;answeredDshCallIds.value={};dshQuestionDrafts.value={};dshQuestionBusy.value={};dshQuestionErrors.value={};inSessionSearchOpen.value=false;inSessionSearchQuery.value='';pendingPermissionElevation.value=null;switchingPermissionMode.value=false;takeoverPrompt.value=null;terminalHolderOverride.value=null;bobHolderOverride.value=null;handoffCardOpen.value=false;releasingHolder.value=false;copiedCliCmd.value=false;clearTimeout(dshLiveTimer);dshLiveState.value=null;clearTimeout(nativeTimer);persist();++generation;clearTimeout(timer);clearTimeout(syncTimer);busy.value=false;selected.value=null;history.value=null;syncStatus.value='';hasNewMessages.value=false;notice.value='';load()}
 async function checkReceipt(){
  if(!pending.value || sending.value)return;
  const g=generation,p= pending.value; sending.value=true;
@@ -899,7 +986,7 @@ async function send(opts={}){
   sending.value=true;error.value='';
   try{
     const requestId=pending.value.id;
-    const receipt=await kernelBridge.dshPrompt(address.connection,address.session,text,requestId,attPayload,{takeover,approvalMode:supportsApprovalMode.value?approvalMode.value:null,workspace:selected.value?.workspace||history.value?.workspace||null});
+    const receipt=await kernelBridge.dshPrompt(address.connection,address.session,text,requestId,attPayload,{takeover,approvalMode:supportsApprovalMode.value?effectiveApprovalMode.value:null,workspace:selected.value?.workspace||history.value?.workspace||null});
     if(isNotAcceptedReceipt(receipt,address.session,requestId)){
       if(g===generation){
         pending.value=null;persist();
@@ -1031,6 +1118,16 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
      <button type="button" class="dsh-takeover-secondary" :disabled="sending" @click="cancelTakeover">{{ t('claudeCancelTakeoverBtn') }}</button>
     </div>
    </div>
+   <div v-if="pendingPermissionElevation && pendingPermissionElevation.sessionId === selected?.id" class="dsh-takeover-card" @keydown.esc.stop.prevent="cancelPermissionElevation" role="alertdialog" :aria-label="t('permissionElevateConfirmTitle')">
+    <div class="dsh-takeover-body">
+     <strong>{{ t('permissionElevateConfirmTitle') }}</strong>
+     <p>{{ t('permissionElevateConfirmDesc') }}</p>
+    </div>
+    <div class="dsh-takeover-actions">
+     <button type="button" class="dsh-takeover-primary" :disabled="switchingPermissionMode" @click="confirmPermissionElevation">{{ t('permissionElevateConfirmBtn') }}</button>
+     <button type="button" class="dsh-takeover-secondary" :disabled="switchingPermissionMode" @click="cancelPermissionElevation">{{ t('permissionElevateCancelBtn') }}</button>
+    </div>
+   </div>
    <section v-if="pendingNativeApprovals.length" class="dsh-pending-approval-bar" role="region" aria-live="polite">
     <div class="dsh-pending-approval-head">
      <span class="dsh-pending-approval-title-group">
@@ -1122,12 +1219,13 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
       <button type="button" class="composer-tool-btn voice-btn" :class="{recording:isListening}" :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl" :title="t(isListening ? 'voiceInputListening' : 'voiceInputBtn')" :aria-label="t(isListening ? 'voiceInputListening' : 'voiceInputBtn')" @click="toggleVoiceInput"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg></button>
       <CustomSelect
         v-if="supportsApprovalMode"
-        v-model="approvalMode"
+        :model-value="effectiveApprovalMode"
         class="dsh-permission-mode-select"
         :options="permissionModeOptions"
-        :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl"
+        :disabled="sending || switchingPermissionMode || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl"
         :aria-label="t('permissionModeLabel')"
         :title="t('permissionModeLabel')"
+        @update:model-value="onSelectApprovalMode"
       />
       <span v-if="syncStatus==='offline_cached' && syncStatusLabel" class="dsh-sync-pill" :class="{active:syncStatus==='checking'||syncStatus==='syncing'}"><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ syncStatusLabel }}</span><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span>
      </div>

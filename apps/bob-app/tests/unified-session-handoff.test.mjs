@@ -204,7 +204,7 @@ test('codex app_server holder opens hot-interrupt confirmation and sends takeove
   assert.equal(promptCalls.length, 1);
   assert.equal(promptCalls[0][3], 'Please inspect tests');
   assert.equal(promptCalls[0][5].takeover, true);
-  assert.equal(promptCalls[0][5].approvalMode, 'interactive');
+  assert.equal(promptCalls[0][5].approvalMode, 'workspace_auto');
 });
 
 test('agy CLI holder supports empty-draft pill takeover and AGY IDE enforces read-only protection', async () => {

@@ -148,16 +148,22 @@ test('approval-notifications deduplicates permission alerts, handles SW push sub
   assert.match(swSrc, /bob:approval-notification-click/);
 });
 
-test('DshSessions supports workspace_auto mode, persists selection to localStorage, and surfaces pendingNativeApprovals', async () => {
+test('DshSessions defaults to workspace_auto, deduplicates settled logs, and requires confirmation before full_auto elevation on native and DSH sessions', async () => {
   const vue = fs.readFileSync(path.join(appRoot, 'src', 'components', 'DshSessions.vue'), 'utf8');
   const script = vue.split('<script setup>')[1].split('</script>')[0].replace(/^\s*import .*;\r?\n/gm, '');
-  const store = new Map([['bob.dsh.approvalMode', 'workspace_auto']]);
+  const store = new Map();
+  const dshPermCalls = [];
   let now = 5_000_000;
   const ctx = {
     kernelBridge: {
-      dshPage: async (c, s) => ({ address: { connection_id: c, session_id: s }, messages: [], cursor: 1, before: 0, has_more: false }),
+      dshPage: async (c, s) => ({ address: { connection_id: c, session_id: s }, messages: [], cursor: 1, before: 0, has_more: false, approval_mode: 'workspace_auto' }),
       nativeEvents: async () => ({ events: [], snapshots: [], cursor: 0, epoch: '' }),
       dshLive: async () => ({ active: false }),
+      dshList: async () => [],
+      dshPermissionSet: async (c, s, mode) => {
+        dshPermCalls.push({ c, s, mode });
+        return { approval_mode: mode, permission_preset: mode === 'full_auto' ? 'danger-full-access' : 'workspace-write' };
+      },
     },
     ref: v => ({ value: v }),
     computed: f => ({ get value() { return f(); } }),
@@ -186,18 +192,41 @@ test('DshSessions supports workspace_auto mode, persists selection to localStora
     createPersistentPreviewCache: () => ({ get: () => null, set: () => {}, clear: () => {} }),
     Error, Map, Set, Array, Object, String, Boolean, Number, Math, JSON, Promise, RegExp,
   };
-  vm.runInContext(`${script}\nglobalThis.__dsh = { approvalMode, permissionModeOptions, nativeDrafts, pendingNativeApprovals, reader, scrollToNativeApproval };`, vm.createContext(ctx));
+  vm.runInContext(`${script}\nglobalThis.__dsh = { open, connection, selected, approvalMode, effectiveApprovalMode, supportsApprovalMode, permissionModeOptions, pendingPermissionElevation, onSelectApprovalMode, confirmPermissionElevation, cancelPermissionElevation, nativeDrafts, nativeActivities, pendingNativeApprovals, reader, scrollToNativeApproval };`, vm.createContext(ctx));
   assert.equal(ctx.__dsh.approvalMode.value, 'workspace_auto');
   assert.ok(ctx.__dsh.permissionModeOptions.value.some(o => o.value === 'workspace_auto'));
   ctx.__dsh.nativeDrafts.value = {
+    'req-old-1': { timestamp: 100, active: false, terminal: true, activity: { items: [{ id: 'o1', label: 'ls', status: 'completed' }], approvals: [] } },
+    'external-codex-old': { timestamp: 150, active: false, terminal: true, activity: { items: [{ id: 'o2', label: 'pwd', status: 'completed' }], approvals: [] } },
+    'req-old-2': { timestamp: 200, active: false, terminal: true, activity: { items: [{ id: 'o3', label: 'cat', status: 'completed' }], approvals: [] } },
     'req-a': {
       timestamp: now,
+      active: true,
+      terminal: false,
       activity: {
         items: [{ id: 'i1', label: 'git status', status: 'completed' }],
         approvals: [{ id: 'a1', status: 'pending', actionable: true, permission_id: 'perm-sticky-1', expires_at: now + 120_000, title: 'Bash' }],
       },
     },
   };
+  assert.equal(ctx.__dsh.nativeActivities.value.length, 1);
+  assert.equal(ctx.__dsh.nativeActivities.value[0].id, 'req-a');
   assert.equal(ctx.__dsh.pendingNativeApprovals.value.length, 1);
   assert.equal(ctx.__dsh.pendingNativeApprovals.value[0].approval.permission_id, 'perm-sticky-1');
+
+  // Open a DSH native session and test interactive elevation confirmation flow
+  ctx.__dsh.connection.value = 'node-x1t';
+  await ctx.__dsh.open({ id: 'session-ca836c2d-28e0-4fae-b6d5-2383a4215154', title: 'bob-bot' });
+  assert.equal(ctx.__dsh.supportsApprovalMode.value, true);
+  assert.equal(ctx.__dsh.effectiveApprovalMode.value, 'workspace_auto');
+
+  ctx.__dsh.onSelectApprovalMode('full_auto');
+  assert.equal(ctx.__dsh.effectiveApprovalMode.value, 'workspace_auto');
+  assert.equal(ctx.__dsh.pendingPermissionElevation.value.sessionId, 'session-ca836c2d-28e0-4fae-b6d5-2383a4215154');
+  assert.equal(dshPermCalls.length, 0);
+
+  await ctx.__dsh.confirmPermissionElevation();
+  assert.equal(ctx.__dsh.pendingPermissionElevation.value, null);
+  assert.equal(ctx.__dsh.effectiveApprovalMode.value, 'full_auto');
+  assert.deepEqual(dshPermCalls, [{ c: 'node-x1t', s: 'session-ca836c2d-28e0-4fae-b6d5-2383a4215154', mode: 'full_auto' }]);
 });

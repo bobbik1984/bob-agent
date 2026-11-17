@@ -1566,4 +1566,61 @@ class NativeTests(unittest.TestCase):
   p._flush_native_permissions(cfg,pipe_risk)
   self.assertEqual(pipe_risk.send.call_args.args[0]['response']['response']['behavior'],'allow')
 
+ def test_full_auto_codex_policy_ignores_thread_cwd_false_positive_and_declines_cleanly(self):
+  ws=Path(self.tmp.name)/'work'/'project';ws.mkdir(parents=True)
+  self.assertFalse(p._is_high_risk_tool_call('item/commandExecution/requestApproval',{'command':'cargo check','cwd':'/home/bobbik'},str(ws)))
+  self.assertEqual(p._codex_turn_policies('full_auto',False,True),(True,'never','danger-full-access',{'type':'dangerFullAccess'}))
+  self.assertEqual(p._codex_turn_policies('workspace_auto',False,True),(True,'on-request','danger-full-access',{'type':'dangerFullAccess'}))
+  self.assertEqual(p._codex_turn_policies('interactive',False,True),(True,'untrusted','danger-full-access',{'type':'dangerFullAccess'}))
+  self.assertEqual(p._codex_turn_policies('interactive',False,False),(True,'on-request','workspace-write',{'type':'workspaceWrite'}))
+  self.assertEqual(p._codex_turn_policies('read_only',False,True),(False,'never','read-only',{'type':'readOnly'}))
+
+ def test_codex_worker_over_32_approvals_and_decline_without_rpc_error(self):
+  raw='12345678-1234-4234-8234-123456789abc';sid='codex:'+raw
+  ws=Path(self.tmp.name)/'proj';ws.mkdir(parents=True)
+  cfg=dict(self.cfg(),session_id=sid,request_id='req-35',work_cwd=str(ws),approval_mode='interactive')
+  with patch.object(p.subprocess,'Popen') as spawn:
+   spawn.return_value.pid=123;p._native_start(cfg,'# worker')
+  frames=[{'id':1,'result':{}},{'id':2,'result':{'thread':{'id':raw}}},{'id':3,'result':{'turn':{'id':'t-35'}}}]
+  with patch.object(p,'_permission_capacity',return_value=True):
+   for i in range(35):
+    frames.append({'id':100+i,'method':'item/commandExecution/requestApproval','params':{'threadId':raw,'turnId':'t-35','command':'echo ok'}})
+   # Test that if _open_native_permission returns False mid-turn, Codex receives clean decline instead of -32000
+   with patch.object(p,'NativePipe') as pipe,patch.object(p.shutil,'which',return_value='codex'),patch.object(p,'_open_native_permission',side_effect=[True]*34+[False]):
+    pipe.return_value.receive.side_effect=frames+[self.codex_item('ok'),self.codex_end(id='t-35')]
+    def check_turns(*args,**kwargs):pass
+    p._native_worker(cfg)
+    sent=[c.args[0] for c in pipe.return_value.send.call_args_list]
+  declines=[f for f in sent if f.get('id')==134]
+  self.assertEqual(declines,[{'id':134,'result':{'decision':'decline'}}])
+  self.assertFalse(any(f.get('id')==134 and 'error' in f for f in sent))
+
+ def test_codex_worker_accepts_35_permissions_and_full_auto_catastrophic_guard(self):
+  ws=Path(self.tmp.name)/'proj';ws.mkdir(parents=True)
+  raw='12345678-1234-4234-8234-123456789abc';sid='codex:'+raw;rid='req-cap-40'
+  cfg={'session_id':sid,'request_id':rid,'approval_mode':'workspace_auto','work_cwd':str(ws)}
+  with p.closing(p._stream_db()) as db,db:
+   p._permission_schema(db)
+   db.execute('INSERT INTO requests VALUES(?,?,?,?)',(rid,sid,'h',json.dumps({'request_id':rid,'session_id':sid,'execution_status':'running','pid':4444,'started_at':p._now()})))
+  for i in range(40):
+   ok=p._open_native_permission(cfg,{'id':500+i,'protocol':'codex','codex_method':'item/commandExecution/requestApproval','params':{'sessionId':raw,'toolCall':{'title':'cmd'},'options':[{'optionId':'allow_once','kind':'allow_once'}]}},1)
+   self.assertTrue(ok)
+  self.assertTrue(p._is_catastrophic_host_call('Bash',{'command':'rm -rf /'}))
+  self.assertFalse(p._is_catastrophic_host_call('Bash',{'command':'ssh ry hostname'}))
+
+ def test_resolve_codex_work_cwd_prefers_latest_turn_context(self):
+  xdir=Path(self.tmp.name)/'codex';sdir=xdir/'sessions';sdir.mkdir(parents=True)
+  old_dir=Path(self.tmp.name)/'home_dir';new_dir=Path(self.tmp.name)/'real_proj'
+  old_dir.mkdir(parents=True);new_dir.mkdir(parents=True)
+  raw='12345678-1234-4234-8234-123456789abc'
+  rollout=sdir/f'rollout-{raw}.jsonl'
+  rows=[
+   {'type':'session_meta','payload':{'id':raw,'cwd':str(old_dir)}},
+   {'type':'turn_context','payload':{'cwd':str(old_dir)}},
+   {'type':'turn_context','payload':{'cwd':str(new_dir)}},
+  ]
+  rollout.write_text(''.join(json.dumps(r)+'\n' for r in rows),encoding='utf-8')
+  _,wcwd=p._resolve_codex_work_cwd(rollout)
+  self.assertEqual(wcwd,str(new_dir))
+
 if __name__=='__main__':unittest.main()
