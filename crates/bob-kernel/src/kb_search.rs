@@ -219,6 +219,12 @@ impl LocalApp {
             CREATE INDEX IF NOT EXISTS idx_kb_entity_edges_tag ON kb_entity_edges(entity_tag);
         "#;
         self.store.db.execute_batch(sql)?;
+        self.store.db.execute_batch("CREATE TABLE IF NOT EXISTS kb_index_revision(singleton INTEGER PRIMARY KEY,revision INTEGER NOT NULL,built_revision INTEGER NOT NULL); INSERT OR IGNORE INTO kb_index_revision VALUES(1,0,-1);")?;
+        for table in ["notes","memories","decisions","captures","schedule_items"] {
+            for event in ["INSERT","UPDATE","DELETE"] {
+                self.store.db.execute_batch(&format!("CREATE TRIGGER IF NOT EXISTS kb_revision_{table}_{event} AFTER {event} ON {table} BEGIN UPDATE kb_index_revision SET revision=revision+1 WHERE singleton=1; END;"))?;
+            }
+        }
         Ok(())
     }
 
@@ -235,6 +241,11 @@ impl LocalApp {
             .unchecked_transaction()
             .map_err(|e| Error::Database(e))?;
 
+        let (revision,built):(i64,i64)=tx.query_row("SELECT revision,built_revision FROM kb_index_revision WHERE singleton=1",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
+        if revision==built {
+            let count:i64=tx.query_row("SELECT count(*) FROM kb_fts",[],|r|r.get(0))?;
+            tx.commit()?;return Ok(count as usize);
+        }
         tx.execute("DELETE FROM kb_fts", [])?;
         tx.execute("DELETE FROM kb_entity_edges", [])?;
 
@@ -506,6 +517,7 @@ impl LocalApp {
             }
         }
 
+        tx.execute("UPDATE kb_index_revision SET built_revision=?1 WHERE singleton=1",[revision])?;
         tx.commit()?;
         Ok(total_indexed)
     }

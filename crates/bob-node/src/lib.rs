@@ -463,6 +463,14 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 "storage": saved,
             }))
         }
+        "app_jarvis_worker_tasks" => {
+            let cid = args.get("sessionId").or_else(|| args.get("conversationId")).or_else(|| args.get("conversation_id")).and_then(Value::as_str);
+            if let Some(cid) = cid.filter(|s| !s.trim().is_empty()) {
+                jarvis::reconcile_worker_failures(&ctx.runtime.data_dir, cid);
+            }
+            Ok(serde_json::json!(bob_runtime::worker_ledger::WorkerTaskStore::list_tasks(
+                &ctx.runtime.data_dir, cid, args.get("afterSeq").and_then(Value::as_u64).unwrap_or(0))))
+        }
         "app_jarvis_chat" => jarvis::chat_with_ctx(ctx, args),
         "app_jarvis_approve" => jarvis::approve_with_ctx(ctx, args),
         "app_jarvis_reject" => jarvis::reject_with_ctx(ctx, args),

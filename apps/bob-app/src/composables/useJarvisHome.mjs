@@ -250,7 +250,7 @@ export function useJarvisHome(ctx = {}) {
       return workerTasks.value;
     }
     const prevActiveStatuses = new Map(
-      activeWorkerTasks.value.map(t => [t.task_id, t.status]),
+      workerTasks.value.map(t => [t.task_id, t.status]),
     );
 
     try {
@@ -267,7 +267,7 @@ export function useJarvisHome(ctx = {}) {
         const updated = upsertWorkerTask(item, sessionId);
         if (!updated) continue;
         const prevStatus = prevActiveStatuses.get(updated.task_id);
-        if (prevStatus) {
+        if (prevStatus !== updated.status) {
           const enteredTerminal = ['completed', 'failed', 'cancelled'].includes(
             updated.status,
           );

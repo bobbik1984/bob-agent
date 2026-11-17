@@ -22,6 +22,8 @@ pub const APPROVAL_EXPIRY_MILLIS: i64 = 10 * 60 * 1000; // 10 minutes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActionRiskLevel {
     ReadOnly,
+    /// Request-bound, reversible personal data writes; never unattended.
+    PersonalWrite,
     SideEffect,
     Irreversible,
     SettingsChange,
@@ -425,6 +427,13 @@ impl BobToolBus {
             },
         );
 
+        self.specs.insert("platform_overview".to_owned(), ToolSpec {
+            name: "platform_overview".to_owned(),
+            description: "Reads Bob platform structure, configured execution nodes and project IDs. Configuration is not a live availability probe. No secrets or conversation content.".to_owned(),
+            input_schema: json!({"type":"object","properties":{}}),
+            risk_level: ActionRiskLevel::ReadOnly,
+        });
+
         // 4. todo_add / schedule_create / schedule_list / schedule_delete
         self.specs.insert(
             "todo_add".to_string(),
@@ -469,6 +478,23 @@ impl BobToolBus {
                 risk_level: ActionRiskLevel::ReadOnly,
             },
         );
+
+        self.specs.insert("schedule_update".to_owned(), ToolSpec {
+            name: "schedule_update".to_owned(),
+            description: "Edits an existing event or todo after schedule_list. Never creates a new item. Omitted fields are preserved; null clears optional todo dates. Read the returned saved item before claiming success.".to_owned(),
+            input_schema: json!({"type":"object","properties":{
+                "id":{"type":"string"},
+                "expected_version":{"type":"integer","description":"Version from schedule_list; stale writes are rejected"},
+                "title":{"type":"string"},
+                "notes":{"type":"string","description":"Full revised notes; preserve existing details"},
+                "append_notes":{"type":"string","description":"Append new content without replacing existing notes"},
+                "start_time":{"type":["string","null"],"description":"Local YYYY-MM-DD or YYYY-MM-DD HH:mm; null clears todo start"},
+                "end_time":{"type":["string","null"],"description":"Todo deadline or event end; date-only todos remain all-day"},
+                "allow_past":{"type":"boolean"}
+            },"required":["id","expected_version"]}),
+            // Same personal-edit gate as creation; deletion remains approval-gated.
+            risk_level: ActionRiskLevel::ReadOnly,
+        });
 
         self.specs.insert(
             "schedule_list".to_string(),
@@ -984,6 +1010,10 @@ impl BobToolBus {
             .ok_or_else(|| format!("TOOL_NOT_FOUND: {tool_name}"))?;
 
         match spec.risk_level {
+            ActionRiskLevel::PersonalWrite => match mode {
+                ToolExecutionMode::Interactive => self.execute_bypassing_approval(tool_name,args,app),
+                ToolExecutionMode::UnattendedRoutine => Err("PERSONAL_WRITE_REQUIRES_USER_TURN".into()),
+            },
             ActionRiskLevel::ReadOnly => self.execute_bypassing_approval(tool_name, args, app),
             ActionRiskLevel::SideEffect => match mode {
                 ToolExecutionMode::Interactive => {
@@ -1212,6 +1242,28 @@ impl BobToolBus {
                     card: None,
                 })
             }
+            "platform_overview" => {
+                let catalog = app.catalog_snapshot().map_err(|_| "CATALOG_UNAVAILABLE")?;
+                let projects: Vec<Value> = catalog.projects.iter().map(|p| json!({"id":p.id,"title":p.title})).collect();
+                let mut nodes = Vec::new();
+                if let Some(dir) = &self.data_dir {
+                    if let Ok(raw) = std::fs::read(dir.join("model_hub_state.json")) {
+                        let hub: Value = serde_json::from_slice(&raw).map_err(|_| "PLATFORM_CONFIG_INVALID")?;
+                        if let Some(configured) = hub["remoteNodes"].as_array() {
+                            for node in configured {
+                                let id = node["id"].as_str().unwrap_or("");
+                                let policy: serde_json::Map<String,Value> = crate::tool_policy::TOOLS.iter().map(|tool|
+                                    ((*tool).to_owned(), json!(crate::tool_policy::enabled(dir,id,tool)))).collect();
+                                nodes.push(json!({"id":id,"name":node["name"],"label":node["label"],"enabled":node["enabled"],
+                                    "tool_execution_policy":policy,"availability":"not_probed"}));
+                            }
+                        }
+                    }
+                }
+                Ok(ToolBusOutcome::Executed { output: json!({"projects":projects,"configured_nodes":nodes,
+                    "calendar":"Shared personal events and independent/project todos, read with schedule_list; edit existing IDs with schedule_update.",
+                    "execution":"Node tool policy is necessary but not sufficient: installation, authentication and workspace grants must also be verified. Readable history is not execution permission."}), card:None })
+            }
             "todo_add" => {
                 let title = args
                     .get("title")
@@ -1235,7 +1287,13 @@ impl BobToolBus {
                 if let Some(ts) = due_opt {
                     validate_not_hallucinated_year(ts, now, allow_past, "due_time")?;
                 }
-                let start_at = due_opt.unwrap_or(now);
+                let start_at = 0;
+                let mut timing = bob_kernel::personal_ops::ScheduleTiming::default();
+                let mut deadline = due_opt;
+                if let Some(raw) = args.get("due_time").and_then(Value::as_str).filter(|s| s.len() == 10) {
+                    timing.due_date = Some(raw.to_owned());
+                    deadline = None;
+                }
                 let reminder_at = resolve_tool_time_arg(
                     args,
                     &["reminder_time"],
@@ -1248,16 +1306,17 @@ impl BobToolBus {
 
                 let id = format!("sched-{}", now);
                 let item = app
-                    .create_schedule_item_with_kind(
+                    .create_schedule_item_with_timing(
                         &id,
                         None,
                         None,
                         title,
                         "todo",
                         start_at,
-                        None,
+                        deadline,
                         reminder_at,
                         &notes,
+                        timing,
                         now,
                     )
                     .map_err(|e| format!("SCHEDULE_ERROR: {e:?}"))?;
@@ -1343,6 +1402,46 @@ impl BobToolBus {
                     card: None,
                 })
             }
+            "schedule_update" => {
+                let id = args["id"].as_str().ok_or("MISSING_ID")?;
+                let expected = args["expected_version"].as_i64().ok_or("MISSING_VERSION")?;
+                let old = app.list_schedule_items().map_err(|_| "SCHEDULE_LIST_ERROR")?
+                    .into_iter().find(|s| s.id == id).ok_or("SCHEDULE_NOT_FOUND")?;
+                if old.version != expected { return Err("SCHEDULE_VERSION_CONFLICT: read schedule_list again".to_owned()); }
+                let title = args.get("title").map(|v| v.as_str().ok_or("INVALID_TITLE")).transpose()?.unwrap_or(&old.title);
+                if args.get("notes").is_some() && args.get("append_notes").is_some() {
+                    return Err("Use notes OR append_notes".to_owned());
+                }
+                let mut notes = args.get("notes").map(|v| v.as_str().ok_or("INVALID_NOTES")).transpose()?.unwrap_or(&old.notes).to_owned();
+                if let Some(extra) = args.get("append_notes") {
+                    let extra = extra.as_str().ok_or("INVALID_NOTES")?.trim();
+                    if !extra.is_empty() && !notes.contains(extra) { notes = format!("{}\n\n{}", notes.trim_end(), extra); }
+                }
+                let mut timing = old.timing.clone();
+                let mut start = if old.start_at == 0 { None } else { Some(old.start_at) };
+                let mut end = old.end_at;
+                for (key, target, date) in [("start_time", &mut start, &mut timing.start_date), ("end_time", &mut end, &mut timing.due_date)] {
+                    if let Some(value) = args.get(key) {
+                        *date = None;
+                        if value.is_null() { *target = None; }
+                        else {
+                            let raw = value.as_str().ok_or("INVALID_TIME")?;
+                            let parsed = resolve_tool_time_arg(args, &[key], &[], now)?.ok_or("INVALID_TIME")?;
+                            validate_not_hallucinated_year(parsed, now, args["allow_past"].as_bool().unwrap_or(false), key)?;
+                            if old.kind == "todo" && raw.len() == 10 {
+                                *date = Some(raw.to_owned()); *target = None;
+                            } else { *target = Some(parsed); }
+                        }
+                    }
+                }
+                let item = if old.kind == "todo" {
+                    app.edit_todo_item_with_timing(id, expected, title, old.project_id.as_deref(), start, end, &notes, Some(timing), now)
+                } else {
+                    app.edit_schedule_interval(id, expected, title, start.ok_or("EVENT_REQUIRES_START")?,
+                        args.get("end_time").map(|_| end), &notes, now)
+                }.map_err(|e| format!("SCHEDULE_UPDATE_ERROR: {e:?}"))?;
+                Ok(ToolBusOutcome::Executed { output: annotate_schedule_item_json(&item)?, card: None })
+            }
             "schedule_list" => {
                 let items = app
                     .list_schedule_items()
@@ -1423,58 +1522,11 @@ impl BobToolBus {
                     card: None,
                 })
             }
-            "memory_add" => {
-                let body = args
-                    .get("body")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| "MISSING_BODY".to_string())?;
-                let supersedes_id = args.get("supersedes_id").and_then(Value::as_str);
-
-                let id = format!("mem-{}", now);
-                let _proposed = app
-                    .propose_memory(&id, None, Some("agent_turn"), body, supersedes_id)
-                    .map_err(|e| format!("MEMORY_PROPOSE_ERROR: {e:?}"))?;
-
-                let active = app
-                    .update_memory_state(&id, "active")
-                    .map_err(|e| format!("MEMORY_ACTIVATE_ERROR: {e:?}"))?;
-
-                Ok(ToolBusOutcome::Executed {
-                    output: serde_json::to_value(&active)
-                        .map_err(|e| format!("SERIALIZATION_ERROR: {e}"))?,
-                    card: None,
-                })
-            }
-            "memory_list" => {
-                let active_only = args
-                    .get("active_only")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(true);
-                let items = app
-                    .list_memories(active_only)
-                    .map_err(|e| format!("MEMORY_LIST_ERROR: {e:?}"))?;
-
-                Ok(ToolBusOutcome::Executed {
-                    output: serde_json::to_value(&items)
-                        .map_err(|e| format!("SERIALIZATION_ERROR: {e}"))?,
-                    card: None,
-                })
-            }
-            "memory_forget" => {
-                let id = args
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| "MISSING_ID".to_string())?;
-
-                let forgotten = app
-                    .update_memory_state(id, "forgotten")
-                    .map_err(|e| format!("MEMORY_FORGET_ERROR: {e:?}"))?;
-
-                Ok(ToolBusOutcome::Executed {
-                    output: serde_json::to_value(&forgotten)
-                        .map_err(|e| format!("SERIALIZATION_ERROR: {e}"))?,
-                    card: None,
-                })
+            // Durable memory requires a trusted current user turn and scope.
+            // Interactive harnesses install bound implementations; workers and
+            // unattended routines must not fabricate source identities.
+            "memory_add" | "memory_list" | "memory_forget" => {
+                Err("MEMORY_REQUIRES_BOUND_USER_CONTEXT".to_owned())
             }
             "ticket_save" => {
                 let title = args
@@ -2271,7 +2323,7 @@ impl BobToolBus {
             decls.push(json!({
                 "name": spec.name,
                 "description": spec.description,
-                "parameters": spec.input_schema
+                "parameters": gemini_parameter_schema(&spec.input_schema)
             }));
         }
         json!({ "functionDeclarations": decls })
@@ -2281,6 +2333,9 @@ impl BobToolBus {
         matches!(
             name,
             "show_card"
+                | "platform_overview"
+                | "request_plan"
+                | "request_answer"
                 | "todo_add"
                 | "ticket_save"
                 | "kb_search"
@@ -2371,11 +2426,31 @@ impl BobToolBus {
                 json!({
                     "name": spec.name,
                     "description": spec.description,
-                    "parameters": spec.input_schema
+                    "parameters": gemini_parameter_schema(&spec.input_schema)
                 })
             })
             .collect();
         json!({ "functionDeclarations": decls })
+    }
+}
+
+// Gemini parameters use OpenAPI Schema: nullable is separate from the scalar type.
+fn gemini_parameter_schema(schema: &Value) -> Value {
+    match schema {
+        Value::Object(map) => {
+            let mut out: serde_json::Map<String,Value> = map.iter().map(|(k,v)| (k.clone(),gemini_parameter_schema(v))).collect();
+            if let Some(types) = map.get("type").and_then(Value::as_array) {
+                if types.len() == 2 && types.iter().any(|t| t == "null") {
+                    if let Some(kind) = types.iter().find(|t| *t != "null") {
+                        out.insert("type".to_owned(),kind.clone());
+                        out.insert("nullable".to_owned(),json!(true));
+                    }
+                }
+            }
+            Value::Object(out)
+        }
+        Value::Array(items) => Value::Array(items.iter().map(gemini_parameter_schema).collect()),
+        _ => schema.clone(),
     }
 }
 
@@ -2463,6 +2538,37 @@ mod tests {
     fn create_test_app(dir: &Path) -> LocalApp {
         let db_path = dir.join("test_app.db");
         LocalApp::open(&db_path).expect("LocalApp::open should succeed")
+    }
+
+    #[test]
+    fn calendar_patch_preserves_deadline_identity_and_rejects_stale_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = create_test_app(dir.path());
+        let now = crate::now_millis();
+        let due = now + 86400000;
+        app.create_schedule_item_with_kind("todo-edit",None,None,"Report","todo",0,Some(due),None,"Original",now).unwrap();
+        let mut bus = BobToolBus::new();
+        let outcome = bus.execute("schedule_update",&json!({"id":"todo-edit","expected_version":1,"append_notes":"Plan"}),
+            ToolExecutionMode::Interactive,&mut app).unwrap();
+        let ToolBusOutcome::Executed { output, .. } = outcome else { panic!("not executed") };
+        assert_eq!(output["end_at"],due);
+        assert_eq!(output["start_at"],0);
+        assert_eq!(output["notes"],"Original\n\nPlan");
+        assert_eq!(app.list_schedule_items().unwrap().len(),1);
+        assert!(bus.execute("schedule_update",&json!({"id":"todo-edit","expected_version":1,"notes":"stale"}),
+            ToolExecutionMode::Interactive,&mut app).is_err());
+        assert!(bus.execute("schedule_update",&json!({"id":"missing","expected_version":1,"notes":"x"}),
+            ToolExecutionMode::Interactive,&mut app).is_err());
+        bus.execute("schedule_update",&json!({"id":"todo-edit","expected_version":2,"end_time":"2030-12-15"}),
+            ToolExecutionMode::Interactive,&mut app).unwrap();
+        let saved = app.list_schedule_items().unwrap().remove(0);
+        assert_eq!(saved.timing.due_date.as_deref(),Some("2030-12-15"));
+        assert_eq!(saved.end_at,None);
+        assert!(bus.export_clerk_openai_tools().iter().any(|t| t["function"]["name"]=="schedule_update"));
+        let tools = bus.export_clerk_gemini_tools();
+        let edit = tools["functionDeclarations"].as_array().unwrap().iter().find(|t| t["name"]=="schedule_update").unwrap();
+        assert_eq!(edit["parameters"]["properties"]["start_time"]["type"],"string");
+        assert_eq!(edit["parameters"]["properties"]["start_time"]["nullable"],true);
     }
 
     #[test]

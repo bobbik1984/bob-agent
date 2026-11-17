@@ -502,54 +502,26 @@ impl LocalApp {
         if !matches!(new_state, "active" | "superseded" | "forgotten") {
             return Err(Error::InvalidTransition);
         }
-        let prev_ver: Option<i64> = self
-            .store
-            .db
-            .query_row(
-                "SELECT version FROM memories WHERE id=?1",
-                [id],
-                |r| r.get(0),
-            )
-            .optional()?;
-        let Some(expected_version) = prev_ver else {
-            return Err(Error::InvalidTransition);
-        };
-        let changed = self.store.db.execute(
-            "UPDATE memories SET state=?2, version=version+1 WHERE id=?1",
-            params![id, new_state],
-        )?;
-        if changed != 1 {
+        self.ensure_assistant_context()?;
+        let home=self.paired_home()?;
+        let origin=self.origin.clone();
+        let now=SystemTime::now().duration_since(UNIX_EPOCH).map(|d|d.as_millis() as i64).unwrap_or(0);
+        let tx=self.store.db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let expected_version:i64=tx.query_row("SELECT version FROM memories WHERE id=?1",[id],|r|r.get(0))?;
+        if tx.execute("UPDATE memories SET state=?2,version=version+1 WHERE id=?1 AND version=?3",params![id,new_state,expected_version])?!=1 {
             return Err(Error::InvalidTransition);
         }
-        let item = self.store.db.query_row(
-            "SELECT id,source_capture_id,source_message_id,body,state,supersedes_id,version
-             FROM memories WHERE id=?1",
-            [id],
-            |r| {
-                Ok(MemoryItem {
-                    id: r.get(0)?,
-                    source_capture_id: r.get(1)?,
-                    source_message_id: r.get(2)?,
-                    body: r.get(3)?,
-                    state: r.get(4)?,
-                    supersedes_id: r.get(5)?,
-                    version: r.get(6)?,
-                })
-            },
-        )?;
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
-        let payload = serde_json::to_string(&item)?;
-        self.enqueue_personal_sync(
-            "memory",
-            &item.id,
-            "status_change",
-            expected_version,
-            &payload,
-            now,
-        )?;
+        let item=tx.query_row("SELECT id,source_capture_id,source_message_id,body,state,supersedes_id,version FROM memories WHERE id=?1",[id],|r|Ok(MemoryItem {
+            id:r.get(0)?,source_capture_id:r.get(1)?,source_message_id:r.get(2)?,
+            body:r.get(3)?,state:r.get(4)?,supersedes_id:r.get(5)?,version:r.get(6)?,
+        }))?;
+        if let Some((home_id,home_epoch,_))=home {
+            insert_personal_sync(&tx,&origin,(&home_id,home_epoch),("memory",&item.id,"status_change"),expected_version,&serde_json::to_string(&item)?,now)?;
+        }
+        if new_state=="forgotten" {
+            crate::assistant_context::invalidate_memory_readers(&tx,id,None)?;
+        }
+        tx.commit()?;
         Ok(item)
     }
 

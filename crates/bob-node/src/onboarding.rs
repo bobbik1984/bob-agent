@@ -768,7 +768,7 @@ mod tests {
                     }
                 }
                 if auth_val == "Bearer sk-valid-onboarding-key" {
-                    let body = r#"{"object":"list","data":[{"id":"deepseek-v4.1-flash-1017"},{"id":"deepseek-v4-pro"}]}"#;
+                    let body = r#"{"object":"list","data":[{"id":"deepseek-flash"},{"id":"deepseek-v4-pro"}]}"#;
                     let resp = format!(
                         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                         body.len()
@@ -976,7 +976,7 @@ mod tests {
         assert_eq!(prov_res["connectivityVerified"], true);
         assert_eq!(
             prov_res["clerkRole"],
-            "deepseek::deepseek-v4.1-flash-1017"
+            "deepseek::deepseek-flash"
         );
         assert_eq!(prov_res["makerRole"], "deepseek::deepseek-v4-pro");
 

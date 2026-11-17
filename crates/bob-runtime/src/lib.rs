@@ -26,6 +26,7 @@ pub mod harness_auth;
 pub mod host_tools;
 pub mod model_presets;
 pub mod native_harness;
+pub mod assistant_context;
 pub mod net_guard;
 pub mod node_pairing;
 pub mod project_context;
@@ -454,8 +455,8 @@ impl ModelHubRuntime {
         }
         let def = json!({
             "activeRoles": {
-                "main": "deepseek::deepseek-v4.1-flash-1017",
-                "flash": "deepseek::deepseek-v4.1-flash-1017"
+                "main": "deepseek::deepseek-flash",
+                "flash": "deepseek::deepseek-flash"
             },
             "providerVariants": {},
             "customModels": [],
@@ -608,7 +609,7 @@ impl ModelHubRuntime {
             if !maker_val.is_empty() {
                 hub_state["activeRoles"]["main"] = json!(maker_val);
             } else {
-                hub_state["activeRoles"]["main"] = json!("deepseek::deepseek-v4.1-flash-1017");
+                hub_state["activeRoles"]["main"] = json!("deepseek::deepseek-flash");
             }
         }
         let maker_empty = hub_state
@@ -621,7 +622,7 @@ impl ModelHubRuntime {
             let main_val = hub_state["activeRoles"]
                 .get("main")
                 .and_then(Value::as_str)
-                .unwrap_or("deepseek::deepseek-v4.1-flash-1017")
+                .unwrap_or("deepseek::deepseek-flash")
                 .to_owned();
             hub_state["activeRoles"]["maker"] = json!(main_val);
         }
@@ -642,7 +643,7 @@ impl ModelHubRuntime {
             if !clerk_val.is_empty() {
                 hub_state["activeRoles"]["flash"] = json!(clerk_val);
             } else {
-                hub_state["activeRoles"]["flash"] = json!("deepseek::deepseek-v4.1-flash-1017");
+                hub_state["activeRoles"]["flash"] = json!("deepseek::deepseek-flash");
             }
         }
         let clerk_empty = hub_state
@@ -655,7 +656,7 @@ impl ModelHubRuntime {
             let flash_val = hub_state["activeRoles"]
                 .get("flash")
                 .and_then(Value::as_str)
-                .unwrap_or("deepseek::deepseek-v4.1-flash-1017")
+                .unwrap_or("deepseek::deepseek-flash")
                 .to_owned();
             hub_state["activeRoles"]["clerk"] = json!(flash_val);
         }
@@ -664,7 +665,7 @@ impl ModelHubRuntime {
             .get("activeRoles")
             .and_then(|r| r.get("main"))
             .and_then(Value::as_str)
-            .unwrap_or("deepseek::deepseek-v4.1-flash-1017")
+            .unwrap_or("deepseek::deepseek-flash")
             .to_owned();
         let (active_pid, active_mid) = main_role
             .split_once("::")
@@ -1389,7 +1390,7 @@ impl ModelHubRuntime {
             "main" => pick_non_empty(&["main", "maker"]),
             other => pick_non_empty(&[other, "main", "maker"]),
         }
-        .unwrap_or_else(|| "deepseek::deepseek-v4.1-flash-1017".to_owned());
+        .unwrap_or_else(|| "deepseek::deepseek-flash".to_owned());
 
         self.resolve_profile_for_model_ref(&model_ref)
     }
@@ -1615,7 +1616,7 @@ impl ModelHubRuntime {
                     .find(|id| id.contains("4.1") && id.contains("1017"))
                     .cloned()
                     .or_else(|| candidate_ids.iter().find(|id| id.contains("4.1")).cloned())
-                    .unwrap_or_else(|| "deepseek-v4.1-flash-1017".to_string());
+                    .unwrap_or_else(|| "deepseek-flash".to_string());
                 chosen_main = Some(best.clone());
                 chosen_flash = Some(best);
             }
@@ -1634,7 +1635,7 @@ impl ModelHubRuntime {
             if pid != "deepseek" && judge_profile_opt.is_some() {
                 let prof = judge_profile_opt.as_ref().unwrap();
                 let prompt = format!(
-                    "You are the built-in `model-scout` skill for an AI Agent workbench.\nProvider: {pname} ({pid})\nCandidate Model IDs: {:?}\nLatest Web Search Intelligence:\n{}\n\nSelection Rules:\n1. Pick 'main': The single newest, highest-capability flagship/pro/reasoning model for complex coding and architecture.\n2. Pick 'flash': The single newest, fastest high-efficiency flash/mini/haiku model for daily tasks and routing.\n3. CRITICAL VERSION & SNAPSHOT RULE: Higher version numbers (e.g. v4.1 > v4.0, 3.8 > 3.5, 2.5 > 2.0) and newer date-suffixed snapshots (e.g. `deepseek-v4.1-flash-1017` > `deepseek-v4.1-flash` > `deepseek-flash`; `260215` > `250828`) ALWAYS win over older or generic undated aliases.\n4. Both selected IDs MUST come from the Candidate Model IDs list above and MUST be distinct if at least 2 models exist.\nReturn ONLY raw JSON (no markdown fences):\n{{\"main\": {{\"id\": \"...\", \"vision\": true}}, \"flash\": {{\"id\": \"...\", \"vision\": true}}}}",
+                    "You are the built-in `model-scout` skill for an AI Agent workbench.\nProvider: {pname} ({pid})\nCandidate Model IDs: {:?}\nLatest Web Search Intelligence:\n{}\n\nSelection Rules:\n1. Pick 'main': The single newest, highest-capability flagship/pro/reasoning model for complex coding and architecture.\n2. Pick 'flash': The single newest, fastest high-efficiency flash/mini/haiku model for daily tasks and routing.\n3. Only choose API IDs confirmed by the provider model list. Marketing names and date-suffixed snapshots do not prove API availability; prefer a verified stable alias over an unverified snapshot.\n4. Both selected IDs MUST come from the Candidate Model IDs list above and MUST be distinct if at least 2 models exist.\nReturn ONLY raw JSON (no markdown fences):\n{{\"main\": {{\"id\": \"...\", \"vision\": true}}, \"flash\": {{\"id\": \"...\", \"vision\": true}}}}",
                     &candidate_ids[..candidate_ids.len().min(80)],
                     if search_context.is_empty() { "(No external search configured; apply strict version & date-suffix rules)" } else { &search_context }
                 );

@@ -102,7 +102,7 @@ struct CuratedPresetDef {
 const CURATED_PRESET_DEFS: &[CuratedPresetDef] = &[
     CuratedPresetDef {
         provider_id: "deepseek",
-        clerk_model: "deepseek-v4.1-flash-1017",
+        clerk_model: "deepseek-flash",
         maker_model: "deepseek-v4-pro",
         recommended: true,
         region_hint: "cn",
@@ -393,7 +393,7 @@ mod tests {
         assert_eq!(presets.len(), 10);
 
         let expected = [
-            ("deepseek", "deepseek-v4.1-flash-1017", "deepseek-v4-pro", true, "cn"),
+            ("deepseek", "deepseek-flash", "deepseek-v4-pro", true, "cn"),
             ("gemini", "models/gemini-2.5-flash", "models/gemini-2.5-pro", true, "global"),
             ("openai", "gpt-4o-mini", "gpt-4o", true, "global"),
             ("anthropic", "claude-haiku-4-5", "claude-3-7-sonnet-20250219", true, "global"),
@@ -453,11 +453,11 @@ mod tests {
         assert!(runtime.has_any_provider_key());
         assert_eq!(
             snap["activeRoles"]["clerk"],
-            "deepseek::deepseek-v4.1-flash-1017"
+            "deepseek::deepseek-flash"
         );
         assert_eq!(
             snap["activeRoles"]["flash"],
-            "deepseek::deepseek-v4.1-flash-1017"
+            "deepseek::deepseek-flash"
         );
         assert_eq!(snap["activeRoles"]["maker"], "deepseek::deepseek-v4-pro");
         assert_eq!(snap["activeRoles"]["main"], "deepseek::deepseek-v4-pro");
@@ -466,12 +466,12 @@ mod tests {
         let pool = snap["pool"].as_array().unwrap();
         assert!(pool
             .iter()
-            .any(|m| m["id"] == "deepseek::deepseek-v4.1-flash-1017"));
+            .any(|m| m["id"] == "deepseek::deepseek-flash"));
         assert!(pool.iter().any(|m| m["id"] == "deepseek::deepseek-v4-pro"));
 
         let (clerk_prof, clerk_key) = runtime.resolve_role_profile_with_key("clerk").unwrap();
         let (maker_prof, maker_key) = runtime.resolve_role_profile_with_key("maker").unwrap();
-        assert_eq!(clerk_prof.model_id, "deepseek-v4.1-flash-1017");
+        assert_eq!(clerk_prof.model_id, "deepseek-flash");
         assert_eq!(maker_prof.model_id, "deepseek-v4-pro");
         assert_eq!(clerk_key, "sk-ds-single-123");
         assert_eq!(maker_key, "sk-ds-single-123");

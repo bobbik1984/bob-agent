@@ -181,3 +181,9 @@ F2/F5：`crates/bob-runtime/src/dsh_session.rs`负责原生身份/历史投影�
 - `crates/bob-node/src/project_service.rs`：传输无关的受限项目操作与字段白名单；调用既有内核查询及授权写入。
 - `crates/bob-kernel/src/project_links.rs`：机主与Scoped调用共用关联保存事务，统一Owner/版本CAS及原项目范围检查。当前源码候选，未编译验收。
 - `scripts/provision-bot-account.py`：本机机主初始化受限账号，专用凭证写私密文件，只保存摘要；不访问网络、不覆写已有账号。
+
+### WP-E1-M 主助理长期连续性
+
+- `crates/bob-kernel/src/assistant_context.rs`：记忆作用域/来源、读取依赖、纠正遗忘边界、历史召回、阶段摘要、逐问题清单；测试在 `crates/bob-kernel/tests/assistant_context.rs`。
+- `crates/bob-runtime/src/assistant_context.rs`：绑定真实请求的记忆和历史工具、逐项回答及收尾覆盖；`native_harness.rs` 组装上下文、限制补核对工具并检查审批恢复边界。
+- `personal_ops.rs` 复用既有记忆列表/遗忘操作；`kb_search.rs` 按源 revision 复用索引。节点沿既有主助理入口接入，不新增外部 Bot 记忆权限。

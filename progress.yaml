@@ -14,6 +14,18 @@ project:
   current_task: 完成 BOB-D-015（WP-J1–WP-J6）、WP-E1 本地全栈门禁与 BOB-D-017（WP-C1：去X1C远程优先底座与可插拔多参谋长MCP派单/回执闭环）；下一聚焦：BOB-D-016（WP-E1线上实景验收 → WP-E2–WP-E4）与 Stage 3 主动早晚报/自然语言派单。
   development_plan: docs/CURRENT_STAGE.md
 phases:
+- name: 主助理长期连续性（WP-E1-M）
+  tasks:
+  - text: 来源作用域、纠正遗忘、阶段摘要和历史召回、逐问题覆盖及审批恢复通过258项回归与Gemini/DeepSeek超过24条消息、重启和切换模型真实验证；VPS2已上线，临时资料与凭据副本已清理
+    status: done
+  - text: 浏览器和手机用户终验、独立离线记忆元数据同步、来源范围编辑界面、逐行增量索引、跨项目历史语义检索及长期Worker逐问题结果对账；范围见CURRENT_STAGE第5.7节
+    status: todo
+- name: 主助理连续性修复（WP-E1）
+  tasks:
+  - text: 同会话上下文、日程 CAS 修改、平台概览和失败回告通过256项回归与真实Gemini/DeepSeek多轮及重启验证；VPS2网页后端已发布、生产回读通过、临时资料和凭据副本已清理
+    status: done
+  - text: 主助理连续性浏览器视觉与手机用户终验（本轮未打包APK）
+    status: todo
 - name: ✅ 已交付基座：单一 Rust 内核、三端同源与跨节点扫码配对 (BP0–BP5)
   tasks:
   - text: BP0–BP2 单一 Rust 内核 (bob-kernel + bob-runtime) 与 Tauri v2 + Vue 3 + bob-node 骨架

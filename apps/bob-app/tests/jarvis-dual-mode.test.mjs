@@ -294,3 +294,20 @@ test('Static audit on PrimaryChatPane.vue: compiles cleanly, renders worker step
     assert.equal(emojiRegex.test(enLocale[key]), false);
   }
 });
+
+
+test('first poll recovers a fast failure and unchanged terminal status does not reload repeatedly', async () => {
+  let reloads = 0;
+  const jarvis = useJarvisHome({
+    kernelBridge: { jarvisWorkerTasks: async () => [{
+      task_id: 'failed-before-first-poll', conversation_id: 'reconnect-session', status: 'failed',
+      title: 'Failed worker', steps: [],
+    }] },
+    reload: async () => { reloads += 1; },
+  });
+  await jarvis.refreshWorkerTasks('reconnect-session');
+  assert.equal(reloads, 1);
+  assert.equal(jarvis.activeWorkerTasks.value.length, 0);
+  await jarvis.refreshWorkerTasks('reconnect-session');
+  assert.equal(reloads, 1);
+});

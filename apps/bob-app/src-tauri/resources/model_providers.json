@@ -7,7 +7,7 @@
       "id": "deepseek",
       "models": [
         {
-          "default": true,
+          "default": false,
           "discovered": true,
           "id": "deepseek-v4.1-flash-1017",
           "name": "DeepSeek V4.1 Flash 1017",
@@ -15,7 +15,7 @@
             "input": 1.0,
             "output": 2.0
           },
-          "visible": true,
+          "visible": false,
           "vision": true
         },
         {
@@ -26,9 +26,9 @@
             "input": 1.0,
             "output": 2.0
           },
-          "visible": false,
+          "visible": true,
           "vision": false,
-          "default": false
+          "default": true
         },
         {
           "id": "deepseek-v4-pro",

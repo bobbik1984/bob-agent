@@ -35,6 +35,7 @@ use std::sync::{Arc, Mutex};
 pub fn risk_to_wire(r: ActionRiskLevel) -> &'static str {
     match r {
         ActionRiskLevel::ReadOnly => "read_only",
+        ActionRiskLevel::PersonalWrite => "personal_write",
         ActionRiskLevel::SideEffect => "side_effect",
         ActionRiskLevel::Irreversible => "irreversible",
         ActionRiskLevel::SettingsChange => "settings",
@@ -438,6 +439,10 @@ pub fn build_worker_harness(
 }
 
 fn save_worker_assistant_reply(data_dir: &Path, conv_id: &str, task_id: &str, reply_text: &str) {
+    save_worker_message(data_dir, conv_id, task_id, reply_text, "completed");
+}
+
+fn save_worker_message(data_dir: &Path, conv_id: &str, task_id: &str, reply_text: &str, status: &str) {
     let trimmed = reply_text.trim();
     if trimmed.is_empty() {
         return;
@@ -455,14 +460,15 @@ fn save_worker_assistant_reply(data_dir: &Path, conv_id: &str, task_id: &str, re
             |r| r.get(0),
         )
         .unwrap_or_else(|_| "local".to_owned());
-    let reply_id = format!("worker-reply:{task_id}");
+    let reply_id = if status == "failed" { format!("worker-failure:{task_id}") } else { format!("worker-reply:{task_id}") };
     let payload = json!({
         "text": trimmed,
         "source": "jarvis_worker",
         "worker_task_id": task_id,
+        "worker_status": status,
     });
     let _ = conn.execute(
-        "INSERT OR REPLACE INTO messages(id, conversation_id, origin_device_id, role, content_json, acceptance, created_at)
+        "INSERT OR IGNORE INTO messages(id, conversation_id, origin_device_id, role, content_json, acceptance, created_at)
          VALUES(?1, ?2, ?3, 'assistant', ?4, 'local', ?5)",
         params![
             reply_id,
@@ -472,6 +478,22 @@ fn save_worker_assistant_reply(data_dir: &Path, conv_id: &str, task_id: &str, re
             now
         ],
     );
+}
+
+// Reconcile durable failed tasks on polling/reconnect as well as immediately on failure.
+pub fn reconcile_worker_failures(data_dir: &Path, conv_id: &str) {
+    for task in WorkerTaskStore::list_tasks(data_dir, Some(conv_id), 0) {
+        if task["status"] != "failed" { continue; }
+        let Some(id) = task["task_id"].as_str() else { continue; };
+        let title = task["title"].as_str().unwrap_or("Background task");
+        let zh = task["objective"].as_str().unwrap_or("").chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
+        let message = if zh {
+            format!("后台任务“{title}”已失败，未完成。请检查模型配置或任务详情；没有自动重试，请勿将已派发当作已完成。")
+        } else {
+            format!("Background task '{title}' failed and did not complete. Check the model configuration or task details. It was not automatically retried.")
+        };
+        save_worker_message(data_dir, conv_id, id, &message, "failed");
+    }
 }
 
 pub fn build_shared_standard_harness(
@@ -534,6 +556,7 @@ fn spawn_background_worker_task(
             Ok(pair) => pair,
             Err(e) => {
                 let _ = WorkerTaskStore::fail_task(&data_dir, &task_id, e, None);
+                reconcile_worker_failures(&data_dir, &conv_id);
                 return;
             }
         };
@@ -549,6 +572,7 @@ fn spawn_background_worker_task(
             Err((err_msg, _)) => {
                 let _ = std::fs::remove_dir_all(&dummy_dir);
                 let _ = WorkerTaskStore::fail_task(&data_dir, &task_id, &err_msg, None);
+                reconcile_worker_failures(&data_dir, &conv_id);
                 return;
             }
         };
@@ -610,6 +634,7 @@ fn spawn_background_worker_task(
                         let _ = WorkerTaskStore::fail_task(&data_dir, &task_id, &err_code, None);
                     }
                 }
+                reconcile_worker_failures(&data_dir, &conv_id);
             }
         }
     });
@@ -1015,7 +1040,7 @@ pub fn handle_http_stream(
     let mut dispatched_workers: Vec<DispatchedWorkerSpec> = Vec::new();
     let mut deferred_done_wire: Option<Value> = None;
 
-    let run_res = harness.run_turn(&conv_id, &user_text, &mut |evt| {
+    let run_res = harness.run_turn_for_request(&conv_id, &user_text, Some(&req_id), &mut |evt| {
         if let JarvisStreamEvent::TaskDispatched {
             ref task_id,
             ref title,
@@ -1240,7 +1265,7 @@ pub fn chat(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &'st
     let mut usage = TurnUsageSummary::default();
     let mut captured_full_text = String::new();
 
-    let run_res = harness.run_turn(&conv_id, &user_text, &mut |evt| {
+    let run_res = harness.run_turn_for_request(&conv_id, &user_text, Some(&req_id), &mut |evt| {
         match evt {
             JarvisStreamEvent::TaskDispatched {
                 task_id,
@@ -1403,7 +1428,7 @@ pub fn chat_with_ctx(ctx: &mut NodeContext, args: &Value) -> Result<Value, &'sta
     let mut usage = TurnUsageSummary::default();
     let mut captured_full_text = String::new();
 
-    let run_res = harness.run_turn(&conv_id, &user_text, &mut |evt| {
+    let run_res = harness.run_turn_for_request(&conv_id, &user_text, Some(&req_id), &mut |evt| {
         match evt {
             JarvisStreamEvent::Card { card } => cards.push(card_to_wire(&card)),
             JarvisStreamEvent::ApprovalRequired { approval } => {
@@ -2448,6 +2473,23 @@ mod tests {
     }
 
     #[test]
+    fn failed_worker_is_recovered_once_without_exporting_provider_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = bob_kernel::app::LocalApp::open(&dir.path().join("kernel.sqlite")).unwrap();
+        app.import_conversation("failure-conv", None, "", 1).unwrap();
+        let task = WorkerTaskStore::create_task(dir.path(),"failure-conv","req-fail","Report","Organize report","","clerk","maker");
+        WorkerTaskStore::fail_task(dir.path(),&task.task_id,"LLM_HTTP_ERROR 400 secret-provider-body",None).unwrap();
+        reconcile_worker_failures(dir.path(),"unrelated");
+        assert!(app.history("failure-conv").unwrap().is_empty());
+        reconcile_worker_failures(dir.path(),"failure-conv");
+        reconcile_worker_failures(dir.path(),"failure-conv");
+        let history = app.history("failure-conv").unwrap();
+        assert_eq!(history.len(),1);
+        assert!(history[0].content.contains("failed"));
+        assert!(!history[0].content.contains("secret-provider-body"));
+    }
+
+    #[test]
     fn test_event_to_wire_format_contract() {
         let card = StructuredCard {
             id: "card-1".to_string(),
@@ -3038,7 +3080,7 @@ mod tests {
                 let sse_headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n";
                 let _ = sock.write_all(sse_headers.as_bytes());
 
-                if model == "deepseek-v4.1-flash-1017" {
+                if model == "deepseek-flash" {
                     let idx = clerk_calls_srv.fetch_add(1, Ordering::SeqCst);
                     if idx == 0 {
                         let chunk1 = json!({
@@ -3213,7 +3255,7 @@ mod tests {
         }
 
         let task_val = completed_task.expect("Background Worker must reach completed status");
-        assert_eq!(task_val["clerk_model"], "deepseek-v4.1-flash-1017");
+        assert_eq!(task_val["clerk_model"], "deepseek-flash");
         assert_eq!(task_val["maker_model"], "deepseek-v4-pro");
         let step_kinds: Vec<&str> = task_val["steps"]
             .as_array()
