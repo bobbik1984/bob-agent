@@ -101,5 +101,41 @@ class IndexTests(unittest.TestCase):
             self.assertTrue(page['cli_interrupted'])
             self.assertGreaterEqual(len(page['messages']), 1)
 
+    def test_discover_multi_excludes_unowned_opt_runtime_sessions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sid_opt_ql = str(__import__('uuid').UUID(int=201))
+            sid_opt_qb = str(__import__('uuid').UUID(int=202))
+            sid_oracle_no_uri = str(__import__('uuid').UUID(int=203))
+            sid_dev_ql = str(__import__('uuid').UUID(int=204))
+            sid_bob_opt = str(__import__('uuid').UUID(int=205))
+            with closing(sqlite3.connect(root / 'conversation_summaries.db')) as db:
+                db.execute('CREATE TABLE conversation_summaries(conversation_id,title,workspace_uris,last_modified_time,step_count,status,parent_conversation_id)')
+                db.executemany(
+                    'INSERT INTO conversation_summaries VALUES(?,?,?,?,?,?,?)',
+                    [
+                        (sid_opt_ql, "你是一名顶尖量化与主观交易员，代号'硅基先知 (Silicon Oracle)'，正在 Quant Lab 赛马竞技场中执行交易。", '["file:///opt/quant_lab"]', '2026-11-17T03:00:00Z', 4, 'IDLE', ''),
+                        (sid_opt_qb, 'Arena Run', '["file:///opt/quant_bot"]', '2026-11-17T02:00:00Z', 2, 'IDLE', ''),
+                        (sid_oracle_no_uri, "硅基先知 · Quant Lab 赛马竞技场定时执行", '[]', '2026-11-17T01:30:00Z', 2, 'IDLE', ''),
+                        (sid_dev_ql, 'Quant Lab 核心回测修复', '["file:///home/ubuntu/work/code/quant_lab"]', '2026-11-17T01:00:00Z', 8, 'IDLE', ''),
+                        (sid_bob_opt, 'User-launched Opt Check', '["file:///opt/quant_lab"]', '2026-11-17T00:30:00Z', 2, 'IDLE', ''),
+                    ],
+                )
+                db.commit()
+
+            orig_streamed = probe._sessions_with_bob_streams
+            probe._sessions_with_bob_streams = lambda: {f'agy:{sid_bob_opt}'}
+            try:
+                res = probe.discover_multi({'agyDataDir': str(root)})
+            finally:
+                probe._sessions_with_bob_streams = orig_streamed
+
+            ids = [item['id'] for item in res['sessions']]
+            self.assertNotIn(f'agy:{sid_opt_ql}', ids)
+            self.assertNotIn(f'agy:{sid_opt_qb}', ids)
+            self.assertNotIn(f'agy:{sid_oracle_no_uri}', ids)
+            self.assertIn(f'agy:{sid_dev_ql}', ids)
+            self.assertIn(f'agy:{sid_bob_opt}', ids)
+
 if __name__ == '__main__':
     unittest.main()

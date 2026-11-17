@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {workspaceName,directoryGroups,extractFilterOptions,filterAndSortRows,groupIconKind,TEST_ARCHIVE_PROJECT_ID} from '../src/conversation-directory.mjs';
+import {workspaceName,directoryGroups,extractFilterOptions,filterAndSortRows,groupIconKind,isRuntimeDaemonSession,TEST_ARCHIVE_PROJECT_ID} from '../src/conversation-directory.mjs';
 test('short path labels support POSIX, Windows and trailing separators',()=>{
  assert.equal(workspaceName('/home/user/projects/winter-shelter/'),'winter-shelter');
  assert.equal(workspaceName('C:\\projects\\winter-shelter'),'winter-shelter');
@@ -78,7 +78,7 @@ test('extractFilterOptions and filterAndSortRows support multi-node, multi-harne
 
 test('canonical task keyword and project tag grouping clusters sessions across VPS2, VPS3, and X1T', () => {
   const rows = [
-    { uid: 'vps2:1', remote: true, node: { id: 'local', label: 'VPS2' }, workspace: '/opt/quant_lab', title: '量化交易回测管线' },
+    { uid: 'vps2:1', remote: true, node: { id: 'local', label: 'VPS2' }, workspace: '/home/ubuntu/work/code/quant_lab', title: '量化交易回测管线' },
     { uid: 'vps3:1', remote: true, node: { id: 'vps3', label: 'VPS3' }, workspace: '/home/ubuntu/quant_lab', title: 'quant_lab data loader' },
     { uid: 'x1t:1', remote: true, node: { id: 'x1t', label: 'X1T' }, workspace: '/home/bobbik/dsh_projects/games/sea2', title: 'Sea2 海图渲染管线' },
     { uid: 'vps2:2', remote: true, node: { id: 'local', label: 'VPS2' }, workspace: '/home/ubuntu/sea2-server', title: '海路纪元后端同步' },
@@ -98,8 +98,8 @@ test('canonical task keyword and project tag grouping clusters sessions across V
 
 test('test, probe, and scratch sessions are automatically shielded into testAndScratchGroup at bottom', () => {
   const rows = [
-    { uid: 'vps2:core', remote: true, node: { id: 'local', label: 'VPS2' }, workspace: '/opt/quant_lab', title: 'Quant Lab 核心算法' },
-    { uid: 'vps2:test1', remote: true, node: { id: 'local', label: 'VPS2' }, workspace: '/opt/quant_lab/tests', title: 'test_order_matcher' },
+    { uid: 'vps2:core', remote: true, node: { id: 'local', label: 'VPS2' }, workspace: '/home/ubuntu/work/code/quant_lab', title: 'Quant Lab 核心算法' },
+    { uid: 'vps2:test1', remote: true, node: { id: 'local', label: 'VPS2' }, workspace: '/home/ubuntu/work/code/quant_lab/tests', title: 'test_order_matcher' },
     { uid: 'x1t:probe', remote: true, node: { id: 'x1t', label: 'X1T' }, workspace: '/tmp/probe', title: 'probe_network_vps3' },
     { uid: 'vps3:eval', remote: true, node: { id: 'vps3', label: 'VPS3' }, workspace: '/home/ubuntu/eval', title: '临时冒烟验证' },
   ];
@@ -176,7 +176,7 @@ test('inferred project clustering merges unlinked workspace/canonical siblings i
       uid: 'vps2:quant-1',
       remote: true,
       node: { id: 'local', label: 'VPS2' },
-      workspace: '/opt/quant_lab',
+      workspace: '/home/ubuntu/work/code/quant_lab',
       title: 'Strategy Backtest Refresh',
       updated_at: '2026-11-14T07:00:00Z',
     },
@@ -233,4 +233,28 @@ test('disposable workspaces, prompt-wrapped tests, test-archive sentinel, and ge
   const testGroup = groups.find(g => g.isTestGroup);
   assert.ok(testGroup);
   assert.deepEqual(testGroup.items.map(i => i.uid).sort(), ['vps3:codex', 'vps3:disp', 'x1t:linked-test']);
+});
+
+test('/opt runtime daemon sessions are hidden from directoryGroups and extractFilterOptions unless Bob-initiated or pinned', () => {
+  const rows = [
+    { uid: 'vps2:cron-ql', remote: true, node: { id: 'local', label: 'VPS2' }, workspace: '/opt/quant_lab', title: "你是一名顶尖量化与主观交易员，代号'硅基先知 (Silicon Oracle)'，正在 Quant Lab 赛马竞技场中执行交易。" },
+    { uid: 'vps2:cron-qb', remote: true, node: { id: 'local', label: 'VPS2' }, workspace: '/opt/quant_bot', title: 'Quant Bot Arena Cron' },
+    { uid: 'vps2:bob-opt', remote: true, bobInitiated: true, node: { id: 'local', label: 'VPS2' }, workspace: '/opt/bob-online', title: 'Bob-initiated opt check' },
+    { uid: 'vps2:dev-ql', remote: true, node: { id: 'local', label: 'VPS2' }, workspace: '/home/ubuntu/work/code/quant_lab', title: 'Quant Lab dev session' },
+  ];
+
+  assert.equal(isRuntimeDaemonSession(rows[0]), true);
+  assert.equal(isRuntimeDaemonSession(rows[1]), true);
+  assert.equal(isRuntimeDaemonSession(rows[2]), false);
+  assert.equal(isRuntimeDaemonSession(rows[3]), false);
+
+  const opts = extractFilterOptions(rows, { projects: [{ id: 'quant_lab', title: 'Quant Lab' }], ownerInstance: 'hostinger' });
+  assert.deepEqual(opts.topics.map(t => t.count), [1, 1]);
+
+  const groups = directoryGroups(rows, 'project', null, { projects: [{ id: 'quant_lab', title: 'Quant Lab' }], ownerInstance: 'hostinger' });
+  const visibleIds = groups.flatMap(g => g.items.map(i => i.uid)).sort();
+  assert.deepEqual(visibleIds, ['vps2:bob-opt', 'vps2:dev-ql']);
+
+  const pinnedGroups = directoryGroups(rows, 'project', new Set(['vps2:cron-qb']), { projects: [{ id: 'quant_lab', title: 'Quant Lab' }], ownerInstance: 'hostinger' });
+  assert.equal(pinnedGroups.flatMap(g => g.items).some(i => i.uid === 'vps2:cron-qb'), true);
 });

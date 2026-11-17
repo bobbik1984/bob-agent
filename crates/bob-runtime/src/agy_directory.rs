@@ -872,6 +872,7 @@ fn normalize(connection: &str, s: &Value)->Result<Value,&'static str>{
             "historyReason":s["historyReason"],
             "cliInterrupted":cli_interrupted,
             "resumable":resumable,
+            "bobInitiated":s["bobInitiated"].as_bool().unwrap_or(false),
             "readOnlyDirectory":!readable
         }));
     }
@@ -885,6 +886,7 @@ fn normalize(connection: &str, s: &Value)->Result<Value,&'static str>{
         "title":s["title"].as_str().filter(|x|!x.is_empty()).unwrap_or(id),
         "workspace":decode_file_uri(uri),"updated_at":s["updatedAt"],
         "nativeStatus":s["nativeStatus"],"cliInterrupted":cli_interrupted,"resumable":resumable,
+        "bobInitiated":s["bobInitiated"].as_bool().unwrap_or(false),
         "historyReadable":false,"historyReason":s["historyReason"],"readOnlyDirectory":true}))
 }
 

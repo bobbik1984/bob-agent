@@ -171,7 +171,7 @@ export function rowTopicInfo(row) {
 
 export function extractFilterOptions(rows, options = null) {
   const nonLegacy = attachInferredProjects(
-    (rows || []).filter(r => !r.legacy),
+    (rows || []).filter(r => !r.legacy && !isRuntimeDaemonSession(r)),
     options?.projects,
     options?.ownerInstance
   );
@@ -251,6 +251,7 @@ export function filterAndSortRows(rows, pinnedSet = null, options = null) {
 
   const filtered = (enriched || []).filter(row => {
     if (row.legacy) return false;
+    if (!pins.has(row.uid || row.id) && isRuntimeDaemonSession(row)) return false;
     if (nodeSet && !nodeSet.has(rowNodeKey(row)) && !nodeSet.has(rowNodeLabel(row))) {
       return false;
     }
@@ -306,7 +307,6 @@ export const CANONICAL_PROJECTS = [
   { id: 'bob-bot', name: 'Bob-bot 助手', pattern: /(bob[\s_-]*bot|bobbot)/i },
   { id: 'sea2', name: '海路纪元 · Sea2', pattern: /(sea2|海路纪元|海路|地球渲染|航海)/i },
   { id: 'quant_lab', name: 'Quant Lab', pattern: /(quant_lab|quant|量化)/i },
-  { id: 'quant_bot', name: 'Quant Bot', pattern: /(quant_bot|bot\s*arena|模拟操盘)/i },
   { id: 'wild', name: 'Winter Shelter', pattern: /(winter[\s_-]*shelter|winter|雪洞)/i },
   { id: 'history_map', name: '时空华夏', pattern: /(history_map|history-map|历史地图|时空华夏)/i },
   { id: 'village', name: 'Village Dashboard', pattern: /(village|cluster-os|集控|运维控制台)/i },
@@ -318,6 +318,15 @@ export const CANONICAL_PROJECTS = [
   { id: 'mall_coordination', name: 'Mall_coordination', pattern: /(mall_coordination|mall[\s_-]*coord|招商协同)/i },
   { id: 'timeline', name: 'Timeline', pattern: /(timeline|甘特图)/i },
 ];
+
+export function isRuntimeDaemonSession(row) {
+  if (!row || !row.remote || row.pinned || row.bobInitiated === true) return false;
+  const normWs = normWorkspacePath(row.workspace || '');
+  if (normWs === '/opt' || normWs.startsWith('/opt/')) return true;
+  const title = String(row.title || '');
+  if (title.includes('硅基先知') && title.includes('赛马竞技场')) return true;
+  return false;
+}
 
 function normWorkspacePath(path) {
   return String(path || '')

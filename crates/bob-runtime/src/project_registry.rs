@@ -12,6 +12,25 @@ pub struct FormalProjectEntry {
     pub name: String,
     pub stage: String,
     pub path: Option<String>,
+    pub bob_project: Option<bool>,
+}
+
+impl FormalProjectEntry {
+    pub fn is_excluded_from_bob(&self) -> bool {
+        self.bob_project == Some(false)
+            || matches!(
+                self.stage.to_ascii_lowercase().as_str(),
+                "archived" | "runtime" | "ops"
+            )
+    }
+}
+
+fn parse_optional_bool(val: &str) -> Option<bool> {
+    match val.to_ascii_lowercase().as_str() {
+        "true" | "yes" | "1" => Some(true),
+        "false" | "no" | "0" => Some(false),
+        _ => None,
+    }
 }
 
 fn strip_inline_comment_and_unquote(raw: &str) -> String {
@@ -96,6 +115,7 @@ pub fn parse_project_registry_yaml(content: &str) -> Vec<FormalProjectEntry> {
                 name: String::new(),
                 stage: "dev".to_owned(),
                 path: None,
+                bob_project: None,
             };
             let rest = trimmed_start[2..].trim_start();
             if let Some((k, v)) = rest.split_once(':') {
@@ -105,6 +125,10 @@ pub fn parse_project_registry_yaml(content: &str) -> Vec<FormalProjectEntry> {
                     "name" => next.name = val,
                     "stage" if !val.is_empty() => next.stage = val,
                     "path" if !val.is_empty() => next.path = Some(val),
+                    "bob_project" => next.bob_project = parse_optional_bool(&val),
+                    "runtime_only" if parse_optional_bool(&val) == Some(true) => {
+                        next.bob_project = Some(false);
+                    }
                     _ => {}
                 }
             }
@@ -120,6 +144,10 @@ pub fn parse_project_registry_yaml(content: &str) -> Vec<FormalProjectEntry> {
                         "name" if !val.is_empty() => cur.name = val,
                         "stage" if !val.is_empty() => cur.stage = val,
                         "path" if !val.is_empty() => cur.path = Some(val),
+                        "bob_project" => cur.bob_project = parse_optional_bool(&val),
+                        "runtime_only" if parse_optional_bool(&val) == Some(true) => {
+                            cur.bob_project = Some(false);
+                        }
                         _ => {}
                     }
                 }
@@ -172,13 +200,13 @@ pub fn discover_registry_path() -> Option<PathBuf> {
 
 /// Sync parsed formal projects from `project_registry.yaml` into `LocalApp`.
 /// Non-archived entries become `active` projects so both catalog & inbox triage accept them;
-/// `archived` entries become `archived` tombstones.
+/// `archived`, `runtime`/`ops`, or `bob_project: false` entries become `archived` tombstones.
 pub fn sync_registry_file(app: &mut LocalApp, path: &Path, now: i64) -> Result<usize, &'static str> {
     let raw = std::fs::read_to_string(path).map_err(|_| "PROJECT_REGISTRY_READ_FAILED")?;
     let entries = parse_project_registry_yaml(&raw);
     let mut synced = 0usize;
     for (idx, entry) in entries.iter().enumerate() {
-        if entry.stage.eq_ignore_ascii_case("archived") {
+        if entry.is_excluded_from_bob() {
             app.upsert_formal_project(&entry.id, &entry.name, "archived", now, now)
                 .map_err(|_| "PROJECT_REGISTRY_SYNC_FAILED")?;
         } else {
@@ -302,5 +330,41 @@ ideas:
         assert_eq!(count2, 5);
         let snap2 = app.catalog_snapshot().unwrap();
         assert_eq!(snap1.projects, snap2.projects);
+    }
+
+    #[test]
+    fn bob_project_false_and_runtime_stage_archive_previously_active_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("kernel.sqlite");
+        let reg = dir.path().join("project_registry.yaml");
+        let yaml = r#"projects:
+  - id: quant_bot
+    stage: dev
+    bob_project: false  # /opt runtime daemon
+    name: Quant Bot
+    path: ~/work/code/quant_bot
+
+  - id: ops_daemon
+    stage: runtime
+    name: Ops Daemon
+
+  - id: bob_agent
+    stage: dev
+    name: bob-agent
+"#;
+        std::fs::write(&reg, yaml).unwrap();
+
+        let mut app = LocalApp::open(&db).unwrap();
+        app.upsert_formal_project("quant_bot", "Quant Bot", "active", 500, 500)
+            .unwrap();
+        app.upsert_formal_project("ops_daemon", "Ops Daemon", "active", 500, 500)
+            .unwrap();
+
+        let count = sync_registry_file(&mut app, &reg, 1_000_000).unwrap();
+        assert_eq!(count, 3);
+        let snap = app.catalog_snapshot().unwrap();
+        assert!(snap.projects.iter().any(|p| p.id == "bob_agent"));
+        assert!(!snap.projects.iter().any(|p| p.id == "quant_bot"));
+        assert!(!snap.projects.iter().any(|p| p.id == "ops_daemon"));
     }
 }

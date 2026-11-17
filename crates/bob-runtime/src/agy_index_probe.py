@@ -154,7 +154,7 @@ def discover(data_dir, limit=100):
             'localHistoryPresent': loc, 'historyReadable': readable,
             'historyReason': None if readable else ('AGY_HISTORY_CODEC_UNSUPPORTED' if loc else 'AGY_HISTORY_NOT_LOCAL'),
             'cliInterrupted': cli_interrupted, 'resumable': resumable,
-            'resumeVerified': readable,
+            'resumeVerified': readable, 'bobInitiated': has_bob_stream,
         })
     return {'schemaVersion': 1, 'sessions': out, 'hasMore': len(rows) > limit,
             'authentication': 'unverified', 'source': 'local_readonly_index'}
@@ -400,29 +400,40 @@ def discover_control_plane(dbs, harnesses=None, limit=40):
                 break
     return out
 
+def _is_opt_runtime_session(item):
+    if not isinstance(item, dict) or item.get('bobInitiated'):
+        return False
+    for u in (item.get('workspaceUris') or []):
+        p = _uri_to_path(str(u or '')).replace('\\', '/').rstrip('/')
+        if p == '/opt' or p.startswith('/opt/'):
+            return True
+    txt = f"{item.get('title') or ''} {item.get('firstPrompt') or ''}"
+    if '硅基先知' in txt and '赛马竞技场' in txt:
+        return True
+    return False
+
 def discover_multi(cfg):
     s = []
     if cfg.get('agyDataDir'):
         try:
             raw_agy = discover(cfg['agyDataDir'], min(MAX_ROWS, int(cfg.get('limit', 120)))).get('sessions', [])
-            ql_cron = 0
             for item in raw_agy:
                 if item.get('stepCount', 0) == 0 and not (item.get('title') or '').strip():
                     continue
-                uris = item.get('workspaceUris') or []
-                if any('quant_lab' in u for u in uris) and item.get('stepCount', 0) <= 3:
-                    ql_cron += 1
-                    if ql_cron > 5:
-                        continue
+                if _is_opt_runtime_session(item):
+                    continue
                 s.append(item)
                 if len(s) >= 45:
                     break
         except Exception:
             pass
-    s.extend(discover_claude(cfg.get('claudeDataDir')))
-    s.extend(discover_pi(cfg.get('piDataDir')))
-    s.extend(discover_codex(cfg.get('codexDataDir')))
-    s.extend(discover_control_plane(cfg.get('controlPlaneDbs'), cfg.get('harnesses')))
+    for extra in (
+        discover_claude(cfg.get('claudeDataDir')),
+        discover_pi(cfg.get('piDataDir')),
+        discover_codex(cfg.get('codexDataDir')),
+        discover_control_plane(cfg.get('controlPlaneDbs'), cfg.get('harnesses')),
+    ):
+        s.extend(x for x in extra if not _is_opt_runtime_session(x))
     return {'schemaVersion': 1, 'sessions': s, 'hasMore': False, 'authentication': 'unverified', 'source': 'local_readonly_index'}
 
 def _tstep(name, d):
