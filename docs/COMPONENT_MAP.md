@@ -17,18 +17,21 @@
 | 原生 Harness 能力探测 | `crates/bob-runtime/src/harness_auth.rs`、`harness_probe.py`、`agy_directory.rs`、`runtime_rpc.rs` | 授权宿主内只读探测已接共用 RPC；VPS3 协议实测，新增工具 UI 流式待接 |
 | JSONL 协议回归 | `crates/bob-runtime/tests/test_harness_probe.py` | 请求关联、通知保留、UTF-8、背压、超时、脱敏和空模型检查 |
 
-### 1.1 Jarvis 主助理、云浏览器与自扩展模块落点（WP-J1～WP-J6 已落地源码）
+### 1.1 Jarvis 主助理、记忆连续性、多参谋长与自扩展模块落点（`WP-J1`–`WP-J6` / `WP-E1` / `WP-C1`）
 
 | 逻辑组件 | 落点 | 关键职责与状态 |
 |---|---|---|
 | 运行时安全护栏 | `crates/bob-runtime/src/{budget.rs, net_guard.rs, tool_tracker.rs}` | 月度花费上限（默认 `$10`、80% 预警/100% 拦截）、SSRF 公网守卫、死循环工具调用熔断器 |
-| Tool Bus 与流式主脑 | `crates/bob-runtime/src/{tool_bus.rs, native_harness.rs, runtime_rpc.rs}` | 分级 `Action Gates`、OpenAI/Anthropic/Gemini 多服务商流式 ReAct 循环、跨平台 RPC 分发 |
-| 自扩展、Routine、成长与本机工具 | `crates/bob-runtime/src/{features.rs, routines.rs, growth.rs, host_tools.rs}` | 零 Node 功能包/3 分钟试用 5 版回退/Skill/MCP 注册表、Routine 试运行与 `Draft`、五阶段做梦/晨报/四档主动关心、PC 获准目录受控工具 |
-| 全文知识检索 | `crates/bob-kernel/src/kb_search.rs` | SQLite FTS5 全文检索（笔记/记忆/决定/归档会话）与来源链接返回 |
+| Tool Bus、快慢主脑与预设 | `crates/bob-runtime/src/{tool_bus.rs, native_harness.rs, model_presets.rs, worker_ledger.rs, runtime_rpc.rs}` | 分级 `Action Gates`（含 UTC+8 ISO 日期防偏移校验）、`Resident Clerk + Async Worker`、`StepLedger` 与 10 家服务商预设 |
+| 长期记忆、摘要与多问题覆盖 | `crates/bob-kernel/src/assistant_context.rs`、`crates/bob-runtime/src/assistant_context.rs`、`crates/bob-kernel/src/personal_ops.rs` | 有来源/作用域持久记忆、CAS 纠正与事务遗忘失效边界、16 条阶段摘要游标、逐问题持久化清单与受限补核对 |
+| 正式项目 SSOT 与测试归档哨兵 | `crates/bob-runtime/src/project_registry.rs`、`crates/bob-kernel/src/{catalog.rs, project_links.rs}`、`apps/bob-app/src/conversation-directory.mjs` | 解析 `project_registry.yaml`（分离 `bob-agent` / `bob-bot`、排除 `bob_project: false`）、`/opt/*` 运行态过滤与 `__bob_test_archive__` 归档哨兵 |
+| 自扩展、Routine、成长与本机工具 | `crates/bob-runtime/src/{features.rs, routines.rs, growth.rs, host_tools.rs, inbox_triage.rs}` | 无 Node 功能包/3 分钟试用 5 版回退/Skill/MCP 注册表、Routine 试运行与 `Draft`、五阶段做梦/晨报/四档主动关心、PC 获准目录工具与收集箱分拣 |
+| 全文知识检索 | `crates/bob-kernel/src/kb_search.rs` | SQLite FTS5 全文检索（笔记/记忆/决定/归档会话）与源 `revision` 复用 |
 | 纯 Rust CDP 浏览器引擎 | `crates/bob-browser/src/*`、`crates/bob-node/src/browser_ws.rs` | 精简 AXTree 穿透 iframe/Shadow DOM、密码/验证码零入模拦截、`/api/ws/browser-takeover` 双向 WebSocket 与 CSWSH `Origin` 防护 |
-| SSE 网关与推送通道 | `crates/bob-node/src/{jarvis.rs, push_channels.rs}` | `/api/jarvis/v1/stream` 逐字 SSE 流、VAPID Web Push 与 `/v1/chat` 微信桥兼容入口 |
-| Jarvis 主屏与交付 UI | `apps/bob-app/src/components/{JarvisOrb.vue, ActionCard.vue, JarvisWidgetGrid.vue, FeatureWidgetFrame.vue, FeatureTrialBanner.vue, VirtualBrowserModal.vue, SiteSessionVault.vue, ArtifactRevisionReview.vue}`、`src/composables/useJarvisHome.mjs`、`public/{manifest.webmanifest, sw.js}` | 流体水滴球、结构化审批卡、手机桌面小组件网格、无凭据沙箱小组件、3 分钟试用条、虚拟浏览器接管窗、网站授权中心、`V1→V2` 行/框选批注对照与 Web Push PWA |
-| 单 VPS 部署模板 | `deploy/{Dockerfile, docker-compose.yml, Caddyfile.example}`、`scripts/deploy-vps-oneclick.sh` | 容器构建模板（`WP-E3` 将升级为预编译镜像分发、中文字体补齐与交互式向导） |
+| 网关、开箱、推送、额度与多参谋长总线 | `crates/bob-node/src/{jarvis.rs, onboarding.rs, push_channels.rs, quota_sync.rs, chief_service.rs, bot_access.rs, todo_service.rs, project_service.rs}` | `/api/jarvis/v1/stream` 逐字 SSE、CSPRNG 6 位开箱配对、VAPID Web Push / 微信桥、周额度自动打点、`/api/bot/v1/mcp` 无状态多参谋长平权派单与待办 CAS |
+| 原生多 Harness 探测、权限预设与策略 | `crates/bob-runtime/src/{harness_auth.rs, agy_directory.rs, agy_index_probe.py, tool_inventory.rs, tool_policy.rs}` | 五动作统一探测与持久接口、L3 会话 `read_only` / `workspace_auto` / `full_auto` + 灾难命令硬拦截、跨节点工具启停策略与 `bob-node qr` 紧凑二维码 |
+| 客户端安全锁与 Jarvis / 收集箱 UI | `apps/bob-app/src/components/{JarvisOrb.vue, ActionCard.vue, JarvisWidgetGrid.vue, FeatureWidgetFrame.vue, FeatureTrialBanner.vue, VirtualBrowserModal.vue, SiteSessionVault.vue, ArtifactRevisionReview.vue, OnboardingWizard.vue, MobileSecurityGate.vue}`、`apps/bob-app/src/views/InboxView.vue`、`apps/bob-app/src-tauri/src/security_lock.rs` | 流体水滴球、结构化审批卡、小组件网格、3 分钟沙箱试用、虚拟浏览器接管、`V1→V2` 批注对照、开箱向导、Android 可选生物安全锁、收集箱手动建项与推送通知（[approval-notifications.mjs](../apps/bob-app/src/approval-notifications.mjs)） |
+| 单 VPS 部署模板 | `deploy/{Dockerfile, docker-compose.yml, Caddyfile.example}`、`scripts/deploy-vps-oneclick.sh` | 含 `fonts-noto-cjk` 与 Chromium 容器模板（`WP-E3` 将升级为多架构预编译镜像与交互式向导） |
 
 ## 2 旧 App（`bob-agent/`，Tauri v2 + Vue 3，0.9.30）
 
@@ -157,10 +160,10 @@ F2/F5：`crates/bob-runtime/src/dsh_session.rs`负责原生身份/历史投影�
 
 ## BP4-04 项目上下文与任务卡
 
-- crates/bob-runtime/src/project_context.rs：有界胶囊及来源身份；workspace_context.rs：显式工作区源提取、持久版本及派发前复核。
-- crates/bob-node/src/context_capsule.rs：宿主grant读取、context RPC、固定任务卡装配与5秒变化刷新；lib.rs与ssistant.rs的实际发送入口调用该模块。
-- pps/bob-app/src/components/ProjectContextPane.vue与kernel-bridge.mjs：网页来源和任务卡读回；Android宿主context RPC仍未接通，不等同手机可扫描远端工作区。
-- 同一用户原文沿既有派发回执处理，任务卡引用不是另一套执行状态；验收范围唯一见CURRENT_STAGE §3.5。
+- `crates/bob-runtime/src/project_context.rs`：有界胶囊及来源身份；`workspace_context.rs`：显式工作区源提取、持久版本及派发前复核。
+- `crates/bob-node/src/context_capsule.rs`：宿主 grant 读取、context RPC、固定任务卡装配与 5 秒变化刷新；`lib.rs` 与 `assistant.rs` 的实际发送入口调用该模块。
+- `apps/bob-app/src/components/ProjectContextPane.vue` 与 `kernel-bridge.mjs`：网页来源和任务卡读回；Android 宿主 context RPC 仍未接通，不等同手机可扫描远端工作区。
+- 同一用户原文沿既有派发回执处理，任务卡引用不是另一套执行状态；验收范围唯一见 [CURRENT_STAGE](CURRENT_STAGE.md)。
 
 ### 节点统一认证与连接入口
 
@@ -173,7 +176,7 @@ F2/F5：`crates/bob-runtime/src/dsh_session.rs`负责原生身份/历史投影�
 
 - `crates/bob-runtime/src/agy_index_probe.py`：原 ID 续聊驱动、目标端 JSONL 管道、私有 SQLite 请求/事件与未知执行核对；`agy_directory.rs` 依据宿主授权路由。
 - `crates/bob-node/src/lib.rs` / `apps/bob-app/src/kernel-bridge.mjs`：共用 app_native_events 游标读取；`components/DshSessions.vue` 展示原会话正文、处理中及真实增量。不是 SSE 或已完成的 Tauri 手机接线。
-- `crates/bob-runtime/tests/test_native_stream.py`：幂等、同会话竞争、恢复失败拒绝新建、死进程未知、AGY 格式、Pi 截断及角色隔离。实际节点/浏览器范围见 CURRENT_STAGE §3.6。
+- `crates/bob-runtime/tests/test_native_stream.py`：幂等、同会话竞争、恢复失败拒绝新建、死进程未知、AGY 格式、Pi 截断、角色隔离与 `workspace_auto`/`full_auto` 权限回归。实际节点/浏览器范围见 [CURRENT_STAGE §2.2](CURRENT_STAGE.md)。
 
 ### 外部 Bot 受限入口
 

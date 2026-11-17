@@ -11,82 +11,54 @@ project:
   - Desktop
   - Android
   - Web (bob-node)
-  current_task: 完成 BOB-D-015（WP-J1–WP-J6）、WP-E1 本地全栈门禁与 BOB-D-017（WP-C1：去X1C远程优先底座与可插拔多参谋长MCP派单/回执闭环）；下一聚焦：BOB-D-016（WP-E1线上实景验收 → WP-E2–WP-E4）与 Stage 3 主动早晚报/自然语言派单。
+  current_task: 基线 7978e2e 已完成 BOB-D-015（WP-J1–WP-J6）、BOB-D-017（WP-C1 多参谋长总线与去 X1C 底座）、WP-E1 本地全栈与 WP-E1-M 长期记忆/多问题覆盖、正式项目 SSOT（bob-agent/bob-bot 分立）与 /opt 运行态排除；当前推进 WP-E1 线上实景接管/真机终验与 Stage 3 收集箱分拣、再依次启动 WP-E2–WP-E4。
   development_plan: docs/CURRENT_STAGE.md
 phases:
-- name: 主助理长期连续性（WP-E1-M）
+- name: ✅ 已交付基座：单一 Rust 内核、三端同源、Jarvis 主脑与多参谋长总线 (BP0–BP5 / WP-J1–J6 / WP-C1)
   tasks:
-  - text: 来源作用域、纠正遗忘、阶段摘要和历史召回、逐问题覆盖及审批恢复通过258项回归与Gemini/DeepSeek超过24条消息、重启和切换模型真实验证；VPS2已上线，临时资料与凭据副本已清理
+  - text: BP0–BP3 单一纯 Rust 内核 (bob-kernel/transport/runtime/node) 与三端同源 UI、凭据脱敏及扫码配对
     status: done
-  - text: 浏览器和手机用户终验、独立离线记忆元数据同步、来源范围编辑界面、逐行增量索引、跨项目历史语义检索及长期Worker逐问题结果对账；范围见CURRENT_STAGE第5.7节
+  - text: BOB-D-015 (WP-J1–WP-J6) 全栈交付：BobNativeHarness 流式主脑、水滴与小组件桌面、3 分钟沙箱试用、Routine/做梦晨报/推送、bob-browser CDP、PC 受控工具与 V1→V2 批注
+    status: done
+  - text: BOB-D-017 (WP-C1) 去 X1C 远程优先底座与可插拔多参谋长 MCP 总线：chief_briefing 与 chief_service（bob_briefing / bob_order_submit / bob_orders）并入人工审批流
+    status: done
+  - text: 正式项目 SSOT（project_registry.yaml 严格分开 bob-agent 与 bob-bot）、收集箱手动输入新项目、/opt 运行态守护排除与测试会话归档哨兵（7978e2e）
+    status: done
+- name: 🧠 WP-E1 实景闭环、主助理连续性与长期记忆 (WP-E1 / WP-E1-M)
+  tasks:
+  - text: Resident Clerk + Async Worker、OnboardingWizard、UTC+8 ISO 日期防偏移、CAS 日程原位修改与失败回告（本地门禁与 VPS2 发布通过）
+    status: done
+  - text: WP-E1-M 长期记忆（来源作用域/CAS 纠正遗忘/16 条阶段摘要/历史召回/逐问题覆盖/旧审批失效）通过 258 项回归与 Gemini/DeepSeek 真实验证并上线
+    status: done
+  - text: WP-E1.1 常驻节点 Headless Chromium + fonts-noto-cjk 3～5 个真实办公站点 390px 接管与 Cookie 重启保活实测
     status: todo
-- name: 主助理连续性修复（WP-E1）
-  tasks:
-  - text: 同会话上下文、日程 CAS 修改、平台概览和失败回告通过256项回归与真实Gemini/DeepSeek多轮及重启验证；VPS2网页后端已发布、生产回读通过、临时资料和凭据副本已清理
-    status: done
-  - text: 主助理连续性浏览器视觉与手机用户终验（本轮未打包APK）
+  - text: WP-E1.4 真实商业 LLM 对话生成 ≥2 个白领小组件与 3 分钟试用回退调优
     status: todo
-- name: ✅ 已交付基座：单一 Rust 内核、三端同源与跨节点扫码配对 (BP0–BP5)
+  - text: 桌面/手机浏览器视觉与 Android 真机覆盖安装终验（水滴与键盘适配、三天日历拖动、记忆/连续性、零对话与归档跨端同步）
+    status: todo
+- name: 🏗️ BP4 多节点 Harness 监管、工具策略与跨端增强
   tasks:
-  - text: BP0–BP2 单一 Rust 内核 (bob-kernel + bob-runtime) 与 Tauri v2 + Vue 3 + bob-node 骨架
-    status: done
-  - text: BP3 个人环境 MVP：凭据脱敏、PeerSync 同步、原位会话升级 Work 与 Outbox 必达
-    status: done
-  - text: BP4–BP5 常开节点 (bob-online) 上线、扫码配对下发关联节点与 Bearer RPC 鉴权
-    status: done
-  - text: 紧凑额度监控菜单上线（Codex / AGY / Claude 多源采集与周额度窗口校准）
-    status: done
-  - text: Android 签名安装包 (Bob-1.0.1) 云端构建与校验就绪（三日历与水滴首页已出包待真机核验）
-    status: done
-  - text: Stage 0 看板净室：清理过期拦截回执、归档旧版重复卡片与过期项目关联
-    status: done
-  - text: 'BOB-D-015 (WP-J1–WP-J6) 全栈落地：BobNativeHarness流式主脑、Jarvis水滴与小组件桌面、无Node 3分钟试用沙箱、Routine/做梦晨报/推送、bob-browser CDP手机接管、PC受控工具与V1→V2批注对照'
-    status: done
-- name: 🏗️ 第一大项：基础架构与多节点接管 (Stage 1 / Stage 2 / Stage 4)
-  tasks:
-  - text: '节点工具清单/目录授权分离与工具启用策略已发布：VPS2/VPS3/X1T Claude 均停用、历史可读，重启和重新启用验证通过；审批中撤销/离线恢复/浏览器手机矩阵仍待，见 native-session-stream evidence'
+  - text: 节点工具清单/目录授权分离与工具停用策略已在三节点发布（历史只读、重启/重启用通过）；TP4 审批中停用/离线恢复/手机开关矩阵继续
     status: in_progress
-  - text: '[Stage 1] Claude 终端会话「双模分流」：识别 --remote-control 只读看板模式；普通终端占用时同步拦截并支持一键切换 Bob 接管'
+  - text: 节点工程会话三档权限预设（read_only / workspace_auto / full_auto + 灾难命令硬拦截）、执行记录折叠与 VAPID Web Push 通知
     status: done
-  - text: '[Stage 2] 跨设备工作区与成果全链路：打通 Codex/Claude 绝对路径图片安全映射、X1T Blender 渲染成果回传预览、磨砂高斯模糊背景与 PDF/网页包渲染'
-    status: done
-  - text: '[Stage 2] 跨节点项目交接与素材同步：会话附带图片/参考文件发往远端执行工作区 (.bob_attachments)'
-    status: done
-  - text: '[Stage 4] 额度回调与去个人化收尾：X1T Claude 真实 rate_limits 回调落盘；抽离固定域名/节点配置支持第三方部署'
+  - text: 外部独立 CLI（Claude/AGY/Codex TUI）实时旁观、DSH 待问答全链路、X1T Claude rate_limits 回调与跨 Harness 成果渲染
+    status: in_progress
+  - text: 跨节点工作区交接素材传输、主对话任务草案卡挂载与主助理自然语言代建会话
     status: todo
-- name: 🎨 第二大项：UI 与多端交互体验 (Stage 1 / Stage 2 / Stage 4)
+- name: 📥 BOB-D-014 收集箱分拣与外部消费端验收
   tasks:
-  - text: '[Stage 1] 远端 Agent 阻塞提问与权限「气泡内直接点选」：在聊天流内直接点击回答选择题或批准工具，顶栏提供权限档位开关（只读 / 自动读写）'
-    status: done
-  - text: '[Stage 2] 多模态输入入口：输入框工具栏增加麦克风语音转文字录入，支持选图/传附件'
-    status: done
-  - text: '[Stage 2] 会话列表降噪与全文搜索：支持本地一键隐藏/归档测试或完结会话（不删远端文件，随时找回）及 SQLite FTS5 全局历史检索'
-    status: done
-  - text: '[Stage 4] 主动提醒通知与多端精修：长任务完成/异常或日程到期通知（Toast / 手机通知）、桌面宽屏分栏布局优化与 Android 真机终验'
+  - text: 单一收集箱、每日分拣草案引擎与手动新建正式项目下拉已上线；待补每日定时触发、确认写入 todo.md（Waiting for PC）与「展开想法」Step 4
+    status: in_progress
+  - text: 外部 Bot（grok_bot / meta_muse）消费端真实调用待办修改与多参谋长派单闭环及手机端读回
     status: todo
-- name: 🧠 第三大项：置顶「主 Agent 小助理」大脑升维 (Stage 3)
+- name: 🚀 WP-E2 → WP-E4 系统性进化与开源发行 (BOB-D-016 / BP6)
   tasks:
-  - text: '[Stage 3] Chief of Staff 接入 VPS2 本机节点：挂载 local 节点并支持无缝侧栏目录与多轮会话浏览'
-    status: done
-  - text: '[Stage 3] Chief of Staff 跨节点同类任务归一：resolveCanonicalProject 跨设备聚合同名工程并标注主机徽章'
-    status: done
-  - text: '[Stage 3] Chief of Staff 实验与临时测试智能屏蔽：识别 test/probe/eval 会话并折叠收纳入底部临时测试组'
-    status: done
-  - text: '[Stage 3] 跨设备主动巡检与早晚报 (Daily Briefing)：打开主 Agent 自动汇总各节点 (X1T / VPS3) 已完成、待拍板与异常任务'
+  - text: '[WP-E2] 纯 Rust 办公文档（PDF/.xlsx/.docx/.csv）读写生成直连 V1→V2 批注，以及标准化 ChannelAdapter（飞书/Telegram/微信桥增强）'
     status: todo
-  - text: '[Stage 3] 自然语言跨节点派单 (Chat-to-Dispatch)：对主 Agent 说一句话即可自动路由并下发指令至目标设备与会话'
+  - text: '[WP-E3] 三路径零门槛安装体系：CI 多架构预编译镜像 + 90 秒单行脚本 + 1Panel/NAS 模板；桌面端托盘首次 3 步向导与手机扫码直连'
     status: todo
-  - text: '[Stage 3] 注意力分层与灵感结晶 (Topic HOT/WARM & Bob Notebook)：日常闪念与长笔记自动关联活跃话题，成熟后一键转化为远端开发项目'
+  - text: '[WP-E4] 纯 Rust MCP Streamable HTTP + OAuth 2.1 客户端（默认 SideEffect 门禁）与内嵌 rquickjs .bobpkg 沙箱及统一能力目录'
     status: todo
-  - text: '[Stage 3 / BOB-D-017 / WP-C1] 去X1C远程优先底座与可插拔多参谋长MCP总线：common/chief_briefing跨端战报、bob-node chief_service (bob_briefing/bob_order_submit/bob_orders) 与 Jarvis 审批卡闭环'
-    status: done
-- name: 🚀 第四大项：系统性进化——白领生产力、三路径傻瓜安装与 MCP/Plugin 生态 (BOB-D-016 / WP-E1–WP-E4)
-  tasks:
-  - text: '[WP-E1] 线上实景闭环、快慢双模与 3 步开箱向导：常驻节点 Headless Chromium + CJK 字体真实接管、Resident Clerk + Async Worker 分流、首次访问图形向导与现场小组件试用调优'
-    status: todo
-  - text: '[WP-E2] 白领办公文档深度处理与高频 IM 触达：BobNativeHarness 纯 Rust PDF/Excel/Word/CSV 读写生成并联动 V1→V2 批注审阅；标准化 ChannelAdapter（飞书 / Telegram / 微信桥增强）'
-    status: todo
-  - text: '[WP-E3] 三路径零门槛安装体系与桌面扫码直连：CI 多架构预编译镜像 + 90 秒单行交互安装脚本 + 1Panel/NAS 模板；桌面端首次启动 3 步向导与手机扫码直连'
-    status: todo
-  - text: '[WP-E4] 三层可扩展生态（零 Node 依赖）：纯 Rust MCP Streamable HTTP + OAuth 2.1 客户端（默认 SideEffect 门禁）与内嵌 rquickjs .bobpkg 插件沙箱及统一能力目录'
+  - text: '[BP6] 开源许可证、依赖审计、彻底去个人化配置注入（BOB-D-007）与旧 0.9.x 迁移收口'
     status: todo

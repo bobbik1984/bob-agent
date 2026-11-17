@@ -75,3 +75,19 @@
 - [x] 2026-11-12 已实核并解除 VPS3 旧连接 68 条过期关联，27 条现役归属完整保留，41 条旧任务仅解除关系；无引用测试项目归档。日历 0–23 已发布并浏览器验证，详见 CURRENT_STAGE 后续核查节。
 
 - [x] 2026-11-12 外部Bot待办读/新增：独立权限、共用账本、原子幂等回执；12项Bot、5项个人事务测试及11组独立进程HTTP检查通过。仅本地候选验收，生产/真实消费端仍待办；见 evidence/2026-11-12-bot-todos.md。
+
+---
+
+## 归档时间: 2026-11-17
+
+### 正式项目 SSOT、运行态 `/opt/*` 排除与节点自治闭环（基线 `7978e2e`）
+- [x] **正式项目目录与 `bob-agent` / `bob-bot` 分立**：新增 `project_registry.rs` 对接 `project_registry.yaml` SSOT，分离 `bob-agent` 与独立原型实验室 `bob-bot`，阻止 `organize_projects` 采集非正式分类桶；收集箱与关联下拉过滤 `proj-default` 与非正式项目并新增「+ 手动输入新项目...」显式新建入口。
+- [x] **排除 `/opt/*` 运行态守护进程与侧栏测试折叠**：支持 `bob_project: false`（`Quant Bot` 等非研发后台）与 `/opt/*` 运行态会话过滤；测试/探针会话统一链接至隐藏归档哨兵 `__bob_test_archive__`，探索会话与历史导入默认折叠（189 项 `bob-runtime`、6 项 `agy_index_probe`、270 项前端单测全绿并发布）。
+- [x] **节点工具清单/目录授权分离与工具启停策略后端发布**：常驻节点每 120s 后台探测工具快照、新建可授权现有目录；全局默认与单设备停用策略及历史只读保留已在 `VPS2`/`VPS3`/`X1T` 发布并验停用/重启/重启用（`TP4` 审批中停用/离线恢复/手机端设置矩阵保留在 `todo.md`）。
+- [x] **节点会话权限分级、执行记录折叠与待批唤醒通知（2026-11-16～17）**：接入 `read_only` / `workspace_auto` / `full_auto` + 灾难命令硬拦截、30 分钟待批 TTL、执行日志默认折叠与输入框悬浮确认条、VAPID Web Push 唤醒通知、16px Harness 图标对齐与堆叠执行记录去重。
+- [x] **`BOB-D-017`（`WP-C1`）去 `X1C` 远程底座与可插拔多参谋长 MCP 总线（2026-11-16）**：落地 `chief_briefing.py`、`chief_service.rs`（`bob_briefing` / `bob_order_submit` / `bob_orders` 并入 `pending_approval` 审批卡）及零锁定退订契约，`bob-node` 55 项单测与双端 `test_chief_briefing.py` 全绿。
+- [x] **`WP-E1` 主助理连续性、`WP-E1-M` 长期记忆与 ISO 日期防偏移（2026-11-16～17）**：完成 UTC+8 ISO 日期防三年偏移门禁、`Resident Clerk + Async Worker` 本地全栈门禁、同会话有界续聊、CAS `schedule_update`、24 条窗口之外的分层记忆（来源/作用域/CAS 纠正/遗忘边界/16 条阶段摘要/逐问题覆盖/遗忘后拒旧审批），通过 258 项回归与 Gemini/DeepSeek 真实模型及生产回读（浏览器视觉与手机 APK 终验保留在 `todo.md`）。
+- [x] **`BOB-D-015`（`WP-J1`～`WP-J6`）Jarvis 底座与近期日历/待办/视觉发布（2026-11-11～14）**：完成 `BobNativeHarness` SSE ReAct、水滴 `<JarvisOrb />` 与 `<JarvisWidgetGrid />`、3 分钟沙箱小组件、Routine/`Draft`/五阶段做梦晨报、`bob-browser` CDP 引擎、`<OnboardingWizard />`、`bob-node qr` 紧凑二维码、Android 可选生物识别锁（源码底座）、额度周窗口校准与选字防崩、日历标题优先与拖动改期/手机三天视图（`47141cf` / `c7555da` / `e6da7e7`）。
+
+### 原 BP4-06 多 Harness 过程增量（历史施工日志已收口）
+- [x] 完成 DSH 实时正文订阅、Codex `app-server` 写入锁冲突细分/只读旁观/`interrupted` 终态与独立回执恢复、AGY 官方 ACP 驻留队列/单次审批/`file://` 附件精确定位、受管 Claude 流事件/单次审批与断线连续正文恢复、双页 PDF 浏览器弹窗预览（详细过程与每次提交哈希完整保留于 [2026-11-17 历史阶段归档](evidence/2026-11-17-historical-stage-archive-oct31-nov15.md) 与 [2026-11-05 原生会话流证据](evidence/2026-11-05-native-session-stream.md)；跨工具外部 CLI 实时订阅、Office 预览与长尾矩阵继续保留在 `todo.md`）。

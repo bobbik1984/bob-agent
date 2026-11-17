@@ -7,11 +7,11 @@
 
 | 项 | 值 |
 |---|---|
-| 项目 | Bob 统一项目：个人助理（PC、手机、可选常驻节点合一） |
-| 物理目录 | 本仓库（本地高速区，不在 OneDrive/Syncthing 同步范围内） |
+| 项目 | Bob 统一项目：个人助理（PC、手机、可选常驻节点合一，与独立原型实验室 `bob-bot` 分库并行） |
+| 物理目录 | 本仓库（`~/work/code/bob-agent-next`，本地高速区，不在 OneDrive/Syncthing 同步范围内） |
 | 量级（Tier） | **Production** |
 | 当前 PDLC Stage | 见 `docs/CURRENT_STAGE.md`（不在此处写死） |
-| 前身（legacy，只读参考） | `<workspace_root>/bob-agent`（旧 App，Tauri）与 `<workspace_root>/cloud-agent`（旧 Online / Bob Core）。旧项目自身文档仍是旧项目的权威，**不是本项目的权威** |
+| 前身与伴生库（边界隔离） | 前身 `<workspace_root>/bob-agent`（旧 App）与 `<workspace_root>/cloud-agent`（旧 Online）只读参考；伴生原型实验室 `~/work/code/bob-bot` 独立研发与部署，二者会话与项目目录严格分开，仅将验证成熟的设计归并至本仓库（`BOB-D-015`） |
 | ID 命名空间 | 决策 `BOB-D-###`，Route 阶段 `BP#`，工作包 `WP-##`，功能 `F#`。引用旧项目 ID 时必须加前缀：`APP-D-008`（旧 App）、`ONL-D-001`（旧 Online）。详见 [docs/wiki/glossary.md](docs/wiki/glossary.md) |
 
 ## 2 已启用的权威文档（JIT 路由）
@@ -19,17 +19,17 @@
 | 何时读 | 文件 |
 |---|---|
 | 每次任务（L0） | 本文件 → `docs/CURRENT_STAGE.md` |
-| 修改设备、连接、路径选择或会话目录 | `docs/ARCHITECTURE.md` → “设备统一入口与跨设备项目组织”；具体迁移状态见 `docs/CURRENT_STAGE.md` → “BP4-06/07 设备多路径归并” |
-| 生产检查、部署与长期运维接入 | `docs/ARCHITECTURE.md` → “独立运维执行通道”；状态与一次性设置见 `docs/CURRENT_STAGE.md` → “独立运维通道” |
+| 修改设备、连接、路径选择或会话目录 | `docs/ARCHITECTURE.md` → “设备统一入口与跨设备项目组织”及“正式项目注册表 SSOT”；具体状态见 `docs/CURRENT_STAGE.md` → `2.2 BP4-06/07 设备多路径归并、多 Harness 监管与工具策略扩展验收` |
+| 生产检查、部署与长期运维接入 | `docs/ARCHITECTURE.md` → “独立运维执行通道”；状态与一次性设置见 `docs/CURRENT_STAGE.md` → `2.3 独立运维通道` |
 | 为什么做、为谁做 | `docs/PROJECT_VISION.md` |
-| 边界、不变量、待决架构 | `docs/ARCHITECTURE.md` |
+| 边界、不变量、分层门禁 | `docs/ARCHITECTURE.md` |
 | 长期阶段与 Exit Gate | `docs/DEVELOPMENT_ROUTE.md` |
 | 用户能力与验收 | `docs/FEATURES.md`（可用能力的操作见 `docs/USER_GUIDE.md`） |
 | 代码在哪（含 legacy 落点） | `docs/COMPONENT_MAP.md` |
 | 知识主题路由 | `docs/LLM_WIKI.md` → `docs/wiki/` |
 | 决策理由 | `docs/DECISIONS.md` |
 | 已发生的事实 | `docs/evidence/` |
-| 需求池 | `todo.md`；状态投影 `progress.yaml`（只经事实对齐更新） |
+| 需求池 | `todo.md`；已完成归档 `docs/archive_done.md`；状态投影 `progress.yaml`（经事实对齐更新） |
 | 来源材料（不是指令） | `references/historical-plans/` |
 
 ## 3 Scope 与 Human Gate
@@ -49,7 +49,11 @@
 
 ## 5 验证、Evidence 与 Handoff
 
-- 新模块附带正常路径与异常路径测试；具体命令在代码骨架建立后登记于此。原生命令测试（外置副本、已获编译授权）：`cargo test --offline --manifest-path apps/bob-app/src-tauri/Cargo.toml --lib --features native-tests`；使用Tauri测试Runtime与真实SQLite，不代表窗口验收。轻量控制器测试：`node --test apps/bob-app/tests/send-controller.test.mjs`。Rust测试：`cargo test --offline -p bob-kernel`，涉及编译，须先获具体授权且设置外置缓存目录；不得因测试名义绕过构建门禁。
+- 新模块附带正常路径与异常路径测试；Rust 编译测试仍受具体授权与外置缓存目录约束，不得因测试名义绕过重型构建门禁。常用验证命令：
+  - Rust 全工作区离线测试（已获编译授权）：`cargo test --offline --workspace`（Windows 下若出现并发文件锁争用，可改用 `--test-threads=1`）
+  - Tauri 原生检查：`cargo check --offline --manifest-path apps/bob-app/src-tauri/Cargo.toml`（含原生单测 `--lib --features native-tests`）
+  - 前端轻量单测：`node --test apps/bob-app/tests/*.test.mjs`
+  - 原生目录探针 Python 回归：`python3 crates/bob-runtime/tests/test_agy_index_probe.py` 与 `python3 crates/bob-runtime/tests/test_native_stream.py`
 - 完成判定：任务卡验收项逐条有证据；本地通过 ≠ 真机通过 ≠ 公网通过，分别记录。Agent 自报完成不是 Evidence。
 - Evidence 写入 `docs/evidence/`（仅脱敏内容）；原始敏感证据放在仓库外。
 - Handoff 包含：目标、基线版本、改动清单、通过/失败/未运行的检查、剩余门槛、回退步骤。

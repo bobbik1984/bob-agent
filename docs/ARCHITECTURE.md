@@ -1,6 +1,6 @@
 # Bob — Architecture
 
-> 本文记录已接受的边界与待决方案；目标架构图不代表全部已实现。当前实现是 bob-kernel/bob-transport + Windows/Android Tauri，已包含 bob-runtime/bob-node；Online兼容接口与DSH原生会话接入是不同能力，后者网页路径已部分验证，手机原生接线仍待补齐。事实与验证范围见 [CURRENT_STAGE](CURRENT_STAGE.md)，代码位置见 [COMPONENT_MAP](COMPONENT_MAP.md)，决策理由见 [DECISIONS](DECISIONS.md)。
+> 本文记录已接受的架构边界与不变量；目标架构图不代表全部跨端/真机/扩展能力已全部验收。当前实现基于单一纯 Rust 内核与共享前端工作区（`bob-kernel` / `bob-transport` / `bob-runtime` / `bob-browser` / `bob-node` + Vue 3 UI，覆盖 Tauri Desktop / Android 与 Web/PWA 形态）；真实验证范围与待补缺口见 [CURRENT_STAGE](CURRENT_STAGE.md)，代码落点见 [COMPONENT_MAP](COMPONENT_MAP.md)，决策理由见 [DECISIONS](DECISIONS.md)。
 
 ## 1 已接受的不变量
 
@@ -62,7 +62,7 @@
 
 API助理与原生Harness共享连续对话入口。已有原生会话直接延续，不强制经过API规划；跨工具委派才按需装配上下文和任务卡。kernel持领域状态/权限，runtime负责调用与有界调度；不另造任务生命周期。详细协议唯一见[kernel-schema §10](wiki/kernel-schema.md#10-多节点能力互借项目画像胶囊与快慢双轨子代理契约2026-10-31bob-d-010)。
 
-对象owner不可达时，仅该对象的远端写入排队；本地独立工作继续。已有授权执行可在有效范围内继续并暂存回执。常开节点不自动获得其他实例对象所有权。对象交接、旧owner恢复与fencing需单独验证；实施队列见CURRENT_STAGE §3。模型出口与渲染能力不得绕过凭据隔离或B4原有门槛。
+对象owner不可达时，仅该对象的远端写入排队；本地独立工作继续。已有授权执行可在有效范围内继续并暂存回执。常开节点不自动获得其他实例对象所有权。对象交接、旧owner恢复与fencing需单独验证；实施与待验队列见 [CURRENT_STAGE](CURRENT_STAGE.md)。模型出口与渲染能力不得绕过凭据隔离或B4原有门槛。
 
 ### 侧栏与现有 Online 的接入边界（部分实现）
 
@@ -88,11 +88,11 @@ API助理与原生Harness共享连续对话入口。已有原生会话直接延�
 
 连接/安全设计见 [connectivity](wiki/connectivity.md) 与 [threat-model](wiki/threat-model.md)。本地 Outbox、单飞唤醒、Home 接收、原生 IPC 与私网 Pixel 配对/回复均已有实现及不同层次证据；公网、当前工作区增量与完整产品验收仍分开记录。2026-10-28/29 的未接线历史见既有 Evidence，不继续作为当前状态。
 
-### 当前增量与已接受边界的冲突（2026-10-31 审计，尚未修复）
+### 凭据不同步与快照脱敏边界（S0 已修复，BP6 持续审计）
 
-未提交的 PeerSync 共享配置会读取 vault 凭据并放入同步包；与不变量9的“不同步”冲突。Home 端共享配置合并调用位于包级接收校验之前，需验证失败无副作用。Online 凭据已使用 vault 槽位，但普通模型中心快照会向 Vue 返回原值。当前没有真实泄漏证据，也未读取运行凭据；这属于代码路径审查发现，不能因 mTLS 存在就视为产品策略已获批准。
+2026-10-31 初始审计曾发现未提交 PeerSync 共享配置及快照路径存在凭据泄漏风险；该问题已在 `S0` 阶段完成源码修复与回归验证（见 [S0–S4 验证报告](evidence/2026-10-31-s0-s4-bob-online-verification.md)）：`export_shared_config_for_sync` / `merge_shared_config_with_app` 已彻底剔除明文凭据并先验签后合并，`remoteNodes` 与模型快照仅暴露布尔存在位/掩码前缀（`hasToken` / `hasKey`）。
 
-按现行规则，普通同步只传非秘密配置，认证请求保留在受控原生端；跨设备凭据转移若作为便利功能须先明确范围/设备/撤销与威胁模型，并记录决定。修复及验收见 CURRENT_STAGE S0；本次文档审查不修改已接受决策或业务代码。
+按现行安全不变量，普通同步永不传输秘密凭据；若未来（`BP6` 前后）评估“跨设备加密迁移 API Key”，必须先单独定义范围、设备验证、撤销与威胁模型，并记录正式决定。
 
 ### BP2回复证据边界
 
@@ -156,7 +156,7 @@ Windows原生vault仅接受可信app-data目录，使用当前用户DPAPI固定�
 
 ### 受控自治路由与执行防退化护栏（2026-11-02 架构归并）
 
-结合 DeepSeek `dsh-superagent-prototype`（Router-Worker / Observe Mode / Ticket Mandate）与智能体决策退化研究（USC过度顺从膨胀、Google事前锦囊防错误反转、NCSU诊断继承式热重启），主Agent与Harness执行层遵循以下护栏（当前为已接纳设计约束，具体代码接线按 `CURRENT_STAGE §3.6` 推进）：
+结合 DeepSeek `dsh-superagent-prototype`（Router-Worker / Observe Mode / Ticket Mandate）与智能体决策退化研究（USC过度顺从膨胀、Google事前锦囊防错误反转、NCSU诊断继承式热重启），主Agent与Harness执行层遵循以下护栏（内核胶囊/断言/热重启底座已落盘并通过单测，主对话前端草案卡交互仍在演进中，见 [CURRENT_STAGE](CURRENT_STAGE.md)）：
 
 1. **常驻主路由（Resident Router）与 Observe/Draft 缓冲**：
    - 置顶「Agent」主对话采用快路径（确定性规则）+ 慢路径（Flash 1017语义路由）两级过滤，遵守“低打扰、高价值”原则：Worker执行期间过程事件入隔离存储，仅在需要人工澄清或终态成果/验证就绪时向主对话回流引用。
@@ -170,7 +170,7 @@ Windows原生vault仅接受可信app-data目录，使用当前用户DPAPI固定�
    - 首次派生Worker时注入 3～8KB `ProjectContextCapsule`，跳过前 20,000 Token 的同质化目录盲探。
    - 当执行卡死、超时或跨Harness换手（`Execution V1 -> V2`）时，禁止丢弃前序探索记忆做纯冷重启；内核自动提取前序已定位文件（`located_files`）、失败假设与报错摘要（`failed_hypotheses`）及有效增量（`git diff`）构造 `WarmRestartState` 注入新任务卡。
 
-实施及未验边界由[当前施工§3.6](CURRENT_STAGE.md#36-第四项bp4-06一个执行者的真实成果闭环含-tmux-保活--原生-session_id-续接)维护。
+实施及未验边界由 [CURRENT_STAGE §2.2](CURRENT_STAGE.md) 维护。
 
 ### 自治护栏的证据与反馈边界
 
@@ -262,7 +262,7 @@ Dashboard 的 `#inbox` 是前端路由，其数据来自独立 `/api/inbox`；Bo
 
 ### 主助理长期连续性（WP-E1-M）
 
-近期窗口、持久记忆、阶段摘要、历史原文和实时业务状态是不同对象。最近 24 条 user/assistant 消息（不是 24 轮）仍作为工作窗口，原始 messages 不因此删除；长期连续性由 Bob 主助理运行主机保存，与模型供应商无关。发布与实测状态见 CURRENT_STAGE §5.7。
+近期窗口、持久记忆、阶段摘要、历史原文和实时业务状态是不同对象。最近 24 条 user/assistant 消息（不是 24 轮）仍作为工作窗口，原始 messages 不因此删除；长期连续性由 Bob 主助理运行主机保存，与模型供应商无关。发布与实测状态见 [CURRENT_STAGE §1–§2.1](CURRENT_STAGE.md) 与 [长期连续性证据](evidence/2026-11-17-assistant-memory.md)。
 
 - **单一真相与边界**：稳定需求复用 memories 的 active/superseded/forgotten 生命周期；作用域、主题、真实 request/source_message 和时间在附属元数据表保存。日历、待办、项目与 Worker 状态继续读取原业务记录，记忆和摘要不能覆盖当前状态或授予执行权限。配对客户端通过已有主机对话通道使用这些记忆；本轮没有新增离线副本的记忆元数据同步协议，也未向外部 Bot 开放私人记忆。
 - **来源与纠正**：交互工具绑定服务端当前会话和请求，写入须提供当前用户消息的原文证据；默认 conversation，明确通用偏好可 global，有已关联项目才可 project。旧数据保留 legacy 来源，不伪造真实消息。替换使用 expected_version 和替代链，错误版本拒绝；未绑定用户上下文的 Worker/无人值守工具不能写入私人记忆。PersonalWrite 独立于 ReadOnly，交互记忆操作不重复弹审批，后台不能自行使用。
@@ -328,3 +328,16 @@ Codex 官方常驻 app-server 已加载的会话，发送必须优先连接同�
 - 保留适配器源码与凭据，禁用、隐藏历史、删除记录、删除凭据互相独立；停用不卸载 Claude、不删除其历史。当前机主要求全部节点停用 Claude；重新启用测试不调用 Claude 模型，测试完成恢复停用。
 
 实现说明：设置 → 我的连接提供所有设备默认开关和设备工具开关。可信网页宿主先持久保存策略并阻止自己的新执行，再转发节点；每 60 秒重试节点策略同步。节点读取本地持久策略，原生 Bob worker 在执行循环中响应停用，审批提交再次校验。独立外部终端不被终止。灰显是状态表达，后端拒绝使用 TOOL_DISABLED。
+
+### 正式项目注册表 SSOT、运行态守护隔离与 L1/L2 vs L3 权限分层（2026-11-17）
+
+1. **正式项目注册表 SSOT 与双项目分立（`project_registry.rs`）**：
+   - 平台 `projects` 目录以工作区公共 `project_registry.yaml` 为正式项目唯一真相源（仅同步未归档且未标记 `bob_project: false` 的研发项目），将主干 `bob-agent` 与独立原型实验室 `bob-bot`（`bob_bot`）严格分立。
+   - `organize_projects` 禁止自动创建新项目或收集「实验与临时测试」「每日助手与平台验收」等分类桶；`import_legacy_nexus_db` 跳过已归档与历史测试占位；`export_projects_and_links` 传播墓碑版本以保证跨端收敛。
+   - 收集箱与关联下拉过滤 `proj-default` 与非正式项目，仅在用户显式点击「+ 手动输入新项目...」并确认名称后创建新项目。
+2. **运行态守护进程与噪声会话隔离**：
+   - 对非 Bob 主动拉起、位于 `/opt/*` 的常驻生产运行态守护进程（如已标记 `bob_project: false` 的量化执行器 `Quant Bot`）直接从节点目录清单中排除，不混入软件研发侧栏。
+   - 测试/探针/空白连通验证会话统一链接至隐藏归档哨兵 `__bob_test_archive__`（永远不进入收集箱或项目下拉）；泛型工作区探索与旧导入会话分别折入侧栏折叠区（`未归属探索会话` / `历史导入`）。
+3. **L1/L2 主权门禁 vs L3 节点编程自治严格隔离**：
+   - **L3 开发者工人会话边界**：仅在机主配对授权的开发节点（DSH/Codex/Claude/AGY 会话）上默认启用 `full_auto`（或降级至 `workspace_auto` / `read_only`）权限预设，自动放行合法构建、`git push`、`ssh`/`scp` 与获准服务重启，仍硬拦截删根（`rm -rf /`）、磁盘格式化、强制推送（`git push --force`/`-f`）、删库表（`DROP`/`TRUNCATE TABLE`）等灾难级命令以及交互问答 `AskUserQuestion`。
+   - **L1/L2 消费侧门禁不降级**：上述 L3 编程会话自治预设**绝不外溢**到 `BobToolBus` 的 `Action Gates`、高危网页弹窗（`bob-browser` 密码/支付/提交）、外部 MCP 写入（强制 `SideEffect`）、无人值守 Routine 写操作（强制 `SavedActionDraft`）及多参谋长 `ChiefOrder`（强制 `pending_approval` 手机/桌面人工审批）。
