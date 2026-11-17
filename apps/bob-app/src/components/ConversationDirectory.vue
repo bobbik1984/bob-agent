@@ -5,7 +5,7 @@ import HarnessIcon from './HarnessIcon.vue';
 import {useI18n} from 'vue-i18n';
 import {readingCache,readingKey,singleFlight} from '../reading-cache.mjs';
 import {kernelBridge} from '../native-bridge.mjs';
-import {nodeLabel as label,directoryGroups,extractFilterOptions,groupIconKind} from '../conversation-directory.mjs';
+import {nodeLabel as label,directoryGroups,extractFilterOptions,groupIconKind,TEST_ARCHIVE_PROJECT_ID} from '../conversation-directory.mjs';
 import {checkPath,pathState} from '../path-health.mjs';
 import {deviceGroups,deviceFilterKeys} from '../device-paths.mjs';
 const recentClock=ref(Date.now());
@@ -70,31 +70,38 @@ async function refresh(){const g=++generation;loading.value=true;const nodes=(pr
 watch(()=>JSON.stringify((props.nodes||[]).map(n=>[n.id,n.deviceId,n.enabled,n.baseUrl])),()=>{selectedNodes.value=deviceFilterKeys(selectedNodes.value,props.nodes||[]);return refresh()},{immediate:true});
 watch(()=>props.creationRevision,()=>refresh());
 onUnmounted(()=>{if(rodTimer&&typeof clearInterval==='function')clearInterval(rodTimer);generation++});
+const activeCatalogProjects=computed(()=>{
+ const imported=new Set(props.catalog?.imported_project_ids||[]);
+ return (props.catalog?.projects||[]).filter(p=>p?.id&&p.status!=='archived'&&p.id!=='proj-default'&&!p.id.startsWith('__bob_')&&p.source_kind!=='legacy_import'&&!imported.has(p.id));
+});
+const selectableProjectValue=s=>{const pid=association(s)?.project_id||s.project_id||'';if(pid===TEST_ARCHIVE_PROJECT_ID)return TEST_ARCHIVE_PROJECT_ID;return activeCatalogProjects.value.some(p=>p.id===pid)?pid:'';};
 const stamp=s=>{const raw=s.updated_at;const n=Number(raw);return Number.isFinite(n)?(n<1e12?n*1000:n):(Date.parse(raw)||0)};
 const rows=computed(()=>{
  const projects=props.catalog?.projects||[], imported=new Set(props.catalog?.imported_project_ids||[]);
- const local=(props.catalog?.conversations||[]).filter(s=>!s.id.startsWith('assistant:')).map(s=>{const p=projects.find(p=>p.id===s.project_id);return {...s,title:s.id.startsWith('assistant:')?t('defaultAssistant'):s.title,uid:s.id,project:p?.title,project_owner:associations.value.owner_instance,legacy:imported.has(s.project_id)||p?.source_kind==='legacy_import',device:(props.catalog?.device_groups||[]).find(g=>g.conversations?.some(c=>c.id===s.id))?.label||t('sidebarLocal')}});
+ const activeProjMap=new Map(activeCatalogProjects.value.map(p=>[p.id,p]));
+ const isLegacyConv=s=>{const p=projects.find(p=>p.id===s.project_id);return /^(conv-task[_-]|conv-direct-task:)/.test(String(s.id||''))||imported.has(s.project_id)||p?.source_kind==='legacy_import';};
+ const isTestBucket=title=>/(test|tmp|scratch|probe|测试|探针|临时|实验|冒烟|验收)/i.test(String(title||''));
+ const local=(props.catalog?.conversations||[]).filter(s=>!s.id.startsWith('assistant:')).map(s=>{const p=projects.find(p=>p.id===s.project_id);return {...s,title:s.id.startsWith('assistant:')?t('defaultAssistant'):s.title,uid:s.id,project:p?.title,project_owner:associations.value.owner_instance,legacy:isLegacyConv(s),device:(props.catalog?.device_groups||[]).find(g=>g.conversations?.some(c=>c.id===s.id))?.label||t('sidebarLocal')}});
  const q=(props.search||'').trim().toLocaleLowerCase();
- const linkedRemote=remote.value.map(s=>{const a=association(s);return a?.project_id?{...s,project_id:a.project_id,project:a.project_title,project_owner:a.owner_instance}:s;});
+ const linkedRemote=remote.value.map(s=>{const a=association(s);if(!a?.project_id)return s;if(a.project_id===TEST_ARCHIVE_PROJECT_ID||isTestBucket(a.project_title))return {...s,project_id:TEST_ARCHIVE_PROJECT_ID,project:t('testAndScratchSessions'),project_owner:a.owner_instance};const matched=activeProjMap.get(a.project_id);if(matched)return {...s,project_id:matched.id,project:matched.title,project_owner:a.owner_instance};return s;});
  return [...local,...linkedRemote].filter(s=>!q||[s.title,s.project,s.workspace,s.toolLabel,s.harness,s.remote?label(s.node):s.device].join(' ').toLocaleLowerCase().includes(q)).sort((a,b)=>stamp(b)-stamp(a)||a.uid.localeCompare(b.uid));});
-const filterOptions=computed(()=>extractFilterOptions(rows.value,{projects:props.catalog?.projects||[],ownerInstance:associations.value?.owner_instance||'local'}));
+const filterOptions=computed(()=>extractFilterOptions(rows.value,{projects:activeCatalogProjects.value,ownerInstance:associations.value?.owner_instance||'local'}));
 const groups=computed(()=>{
- const groups=directoryGroups(rows.value,props.mode,pinnedUids.value,{selectedNodes:hasConnectedNodes.value?selectedNodes.value:[],selectedHarnesses:selectedHarnesses.value,selectedTopic:selectedTopic.value,sortBy:effectiveSortBy.value,projects:props.catalog?.projects||[],ownerInstance:associations.value?.owner_instance||'local'});
+ const groups=directoryGroups(rows.value,props.mode,pinnedUids.value,{selectedNodes:hasConnectedNodes.value?selectedNodes.value:[],selectedHarnesses:selectedHarnesses.value,selectedTopic:selectedTopic.value,sortBy:effectiveSortBy.value,projects:activeCatalogProjects.value,ownerInstance:associations.value?.owner_instance||'local'});
  if(props.mode!=='project')return groups;
  const projectIds=new Set();
  for(const group of groups){
   const member=group.items[0];
-  if(!group.isTestGroup&&member?.project_owner&&member?.project_id){
+  if(!group.isTestGroup&&!group.isUnassignedGroup&&member?.project_owner&&member?.project_id&&member.project_id!==TEST_ARCHIVE_PROJECT_ID){
    group.projectId=member.project_id;
    projectIds.add(group.projectId);
   }
  }
  const query=(props.search||'').trim().toLocaleLowerCase();
- const imported=new Set(props.catalog?.imported_project_ids||[]);
  if(!activeFilterCount.value){
-  for(const project of props.catalog?.projects||[]){
-   if(isRecentProject(project.id,Math.max(recentClock.value,Date.now()))&&!projectIds.has(project.id)&&!rows.value.some(row=>row.project_id===project.id)&&!imported.has(project.id)
-       && project.source_kind!=='legacy_import'&&project.title.toLocaleLowerCase().includes(query)){
+  for(const project of activeCatalogProjects.value){
+   if(isRecentProject(project.id,Math.max(recentClock.value,Date.now()))&&!projectIds.has(project.id)&&!rows.value.some(row=>row.project_id===project.id)
+       && project.title.toLocaleLowerCase().includes(query)){
     groups.push({key:'empty-project:'+project.id,name:project.title,fullName:project.title,items:[],projectId:project.id});
    }
   }
@@ -188,7 +195,7 @@ const toolLabel=s=>s.remote?(s.toolLabel||s.tool_label||(s.harness==='claude'||s
   <p v-for="failure in failures" :key="failure.id" role="status">{{t('directoryPathFailed',{name:failure.name,url:failure.url})}} <span v-if="failure.cached">{{t('directoryCacheRetained')}}</span></p>
   <p v-if="associationError" role="alert">{{associationError}}</p>
   <template v-for="group in groups" :key="group.key">
-   <details v-if="group.isTestGroup" class="directory-test-group" :open="!!search"><summary :title="group.fullName"><span class="directory-heading test-heading"><svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg><span>{{t('testAndScratchSessions')}}</span><small>{{group.items.length}}</small></span></summary>
+   <details v-if="group.isTestGroup || group.isUnassignedGroup" class="directory-test-group" :open="!!search"><summary :title="group.fullName"><span class="directory-heading test-heading"><svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg><span>{{group.isTestGroup ? t('testAndScratchSessions') : t('unassignedExplorations')}}</span><small>{{group.items.length}}</small></span></summary>
     <div class="directory-children">
     <button v-if="group.projectId" type="button" class="project-create-session" @click="emit('create-in-project',group.projectId)">+ {{t('newConversation')}}</button>
     <div v-for="s in group.items" :key="s.uid" class="directory-item-wrap"><div class="directory-row-bar"><button class="directory-row" @click="select(s)"><span>{{s.title}}</span><small><template v-if="s.remote || hasConnectedNodes"><span class="node-tag-pill">{{s.remote?label(s.node):s.device}}</span><span v-if="s.remote && (props.nodes||[]).filter(n=>(n.deviceId||n.id)===(s.node.deviceId||s.node.id)).length>1"> · {{s.node.baseUrl||s.node.url}}</span><template v-if="toolLabel(s)"> · <HarnessIcon :class="{'tool-disabled':s.execution_enabled===false}" :title="s.execution_enabled===false?t('toolPolicyDisabled'):undefined" :session="s" :label="toolLabel(s)" /></template> · </template>{{date(s)}}<template v-if="s.directoryStale"> · {{t('directoryCached')}}</template></small></button><button type="button" class="directory-pin-btn" :class="{pinned:isPinned(s.uid)}" :aria-label="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" :title="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" @click.stop="togglePin(s.uid)"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" :fill="isPinned(s.uid)?'currentColor':'none'" stroke="currentColor" stroke-width="1.8"/></svg></button>
@@ -198,7 +205,7 @@ const toolLabel=s=>s.remote?(s.toolLabel||s.tool_label||(s.harness==='claude'||s
       :aria-label="t('localConversationDeleteLabel', { title: s.title })" @click="confirmDelete(s)">
      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 10v6m4-6v6"/></svg>
     </button></div>
-    <select v-if="s.remote && linksAvailable" class="project-link-select" :aria-label="t('projectLinkLabel')" :disabled="linking" :value="association(s)?.project_id||s.project_id||''" @change="setProject(s,$event)"><option value="">{{t('projectLinkNone')}}</option><option v-for="p in catalog?.projects||[]" :key="p.id" :value="p.id">{{p.title}}</option></select></div>
+    <select v-if="s.remote && linksAvailable" class="project-link-select" :aria-label="t('projectLinkLabel')" :disabled="linking" :value="selectableProjectValue(s)" @change="setProject(s,$event)"><option value="">{{t('projectLinkNone')}}</option><option :value="TEST_ARCHIVE_PROJECT_ID">{{t('testAndScratchSessions')}}</option><option v-for="p in activeCatalogProjects" :key="p.id" :value="p.id">{{p.title}}</option></select></div>
     </div>
    </details>
    <details v-else-if="group.name" :open="!!search || mode==='device' || mode==='smart' || activeFilterCount>0"><summary :title="group.fullName"><span class="directory-heading"><svg v-if="groupIconKind(group, mode)==='project'" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg><svg v-else-if="groupIconKind(group, mode)==='phone'" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M10 18h4"/></svg><svg v-else-if="groupIconKind(group, mode)==='cloud'" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 19h11a4.5 4.5 0 0 0 .7-8.95A5.5 5.5 0 0 0 7.4 8.5 4 4 0 0 0 6.5 19Z"/></svg><svg v-else aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg><span>{{group.name}}</span><small>{{group.items.length}}</small></span></summary>
@@ -211,7 +218,7 @@ const toolLabel=s=>s.remote?(s.toolLabel||s.tool_label||(s.harness==='claude'||s
       :aria-label="t('localConversationDeleteLabel', { title: s.title })" @click="confirmDelete(s)">
      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 10v6m4-6v6"/></svg>
     </button></div>
-    <select v-if="s.remote && linksAvailable" class="project-link-select" :aria-label="t('projectLinkLabel')" :disabled="linking" :value="association(s)?.project_id||s.project_id||''" @change="setProject(s,$event)"><option value="">{{t('projectLinkNone')}}</option><option v-for="p in catalog?.projects||[]" :key="p.id" :value="p.id">{{p.title}}</option></select></div>
+    <select v-if="s.remote && linksAvailable" class="project-link-select" :aria-label="t('projectLinkLabel')" :disabled="linking" :value="selectableProjectValue(s)" @change="setProject(s,$event)"><option value="">{{t('projectLinkNone')}}</option><option :value="TEST_ARCHIVE_PROJECT_ID">{{t('testAndScratchSessions')}}</option><option v-for="p in activeCatalogProjects" :key="p.id" :value="p.id">{{p.title}}</option></select></div>
     </div>
    </details>
    <template v-else><div v-for="s in group.items" :key="s.uid" class="directory-item-wrap"><div class="directory-row-bar"><button class="directory-row" @click="select(s)"><span>{{s.title}}</span><small><template v-if="s.remote || hasConnectedNodes">{{s.remote?label(s.node):s.device}}<span v-if="s.remote && (props.nodes||[]).filter(n=>(n.deviceId||n.id)===(s.node.deviceId||s.node.id)).length>1"> · {{s.node.baseUrl||s.node.url}}</span><template v-if="toolLabel(s)"> · <HarnessIcon :class="{'tool-disabled':s.execution_enabled===false}" :title="s.execution_enabled===false?t('toolPolicyDisabled'):undefined" :session="s" :label="toolLabel(s)" /></template> · </template>{{date(s)}}<template v-if="s.directoryStale"> · {{t('directoryCached')}}</template></small></button><button type="button" class="directory-pin-btn" :class="{pinned:isPinned(s.uid)}" :aria-label="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" :title="t(isPinned(s.uid)?'unpinSessionLabel':'pinSessionLabel')" @click.stop="togglePin(s.uid)"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" :fill="isPinned(s.uid)?'currentColor':'none'" stroke="currentColor" stroke-width="1.8"/></svg></button>
@@ -221,7 +228,7 @@ const toolLabel=s=>s.remote?(s.toolLabel||s.tool_label||(s.harness==='claude'||s
       :aria-label="t('localConversationDeleteLabel', { title: s.title })" @click="confirmDelete(s)">
      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 10v6m4-6v6"/></svg>
     </button></div>
-    <select v-if="s.remote && linksAvailable" class="project-link-select" :aria-label="t('projectLinkLabel')" :disabled="linking" :value="association(s)?.project_id||s.project_id||''" @change="setProject(s,$event)"><option value="">{{t('projectLinkNone')}}</option><option v-for="p in catalog?.projects||[]" :key="p.id" :value="p.id">{{p.title}}</option></select></div></template>
+    <select v-if="s.remote && linksAvailable" class="project-link-select" :aria-label="t('projectLinkLabel')" :disabled="linking" :value="selectableProjectValue(s)" @change="setProject(s,$event)"><option value="">{{t('projectLinkNone')}}</option><option :value="TEST_ARCHIVE_PROJECT_ID">{{t('testAndScratchSessions')}}</option><option v-for="p in activeCatalogProjects" :key="p.id" :value="p.id">{{p.title}}</option></select></div></template>
   </template>
   <details v-if="legacy.length" :open="!!search"><summary>{{t('sidebarLegacy',{count:legacy.length})}}</summary><button v-for="s in legacy" :key="s.uid" class="directory-row" @click="select(s)"><span>{{s.title}}</span><small>{{t('sidebarImported')}} · {{date(s)}}<template v-if="s.directoryStale"> · {{t('directoryCached')}}</template></small></button></details>
   <dialog ref="deleteDialog" class="directory-delete-dialog" :aria-label="t('localConversationDelete')"

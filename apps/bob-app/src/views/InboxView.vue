@@ -23,6 +23,7 @@ const activeProjects = computed(() => {
       p?.id &&
       p.status !== 'archived' &&
       p.id !== 'proj-default' &&
+      !p.id.startsWith('__bob_') &&
       !p.id.startsWith('assistant:') &&
       !p.id.startsWith('local-project:') &&
       !p.id.startsWith('direct-project:') &&

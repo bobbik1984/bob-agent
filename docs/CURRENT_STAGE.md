@@ -1,6 +1,9 @@
 # Bob — Current Stage（1.0.1 施工与交接合同）
 
 > **最新交接入口（2026-11-14）**：`WP-J1`～`WP-J6` 核心底座与生产端升级已合入主干（当前代码基线 `431b63d`）；后续任何 Agent 接手系统性进化任务，请直接跳转本文件末尾 **「5. 后 WP-J6 系统性进化施工合同（BOB-D-016：WP-E1 → WP-E4）」** 按序领取工作包。
+> - **侧边栏测试/历史/泛型工作区会话折叠闭环（`__bob_test_archive__`，2026-11-17）**：
+>   - **隐藏测试归档哨兵（`crates/bob-kernel/src/project_links.rs` / `crates/bob-runtime/src/assistant.rs`）**：引入保留归档哨兵 ID `__bob_test_archive__`（写入 `projects` 时 `status = 'archived'`），使 `catalog_snapshot()`、收集箱与 AI 分拣永远排除该哨兵，同时 `project_session_links` 可稳定持久化与跨端同步测试会话归档关系；`organize_projects` 对「实验与临时测试」分组改为链接至此哨兵而非直接清空关联。
+>   - **侧栏零泄漏折叠（`ConversationDirectory.vue` / `conversation-directory.mjs` / `zh-CN.json` / `en-US.json`）**：识别 `conv-task_*` / `conv-direct-task:*` 前缀保留进折叠区「历史导入」；扩展 `isTestOrScratchSession` 覆盖 `disposable_*`、`bob-codex-candidates`、`four_harness`、`User [message <uuid>]:` 与空白/连通探针；将位于 `/home/ubuntu`、`/home/bobbik/dsh_projects` 等泛型目录下的未归属远端探索会话统一折入底部折叠「未归属探索会话（`unassignedExplorations`）」；侧栏会话下拉提供手动折入「实验与临时测试」选项；`InboxView.vue` 防御性过滤 `__bob_` 前缀。
 > - **项目目录与收集箱下拉对齐 `project_registry.yaml` SSOT 及手动新建项目（2026-11-17）**：
 >   - **SSOT 正式项目同步（`crates/bob-runtime/src/project_registry.rs` / `crates/bob-kernel/src/catalog.rs` / `crates/bob-node` / `apps/bob-app/src-tauri`）**：新增零依赖 `project_registry.yaml` 解析与幂等同步引擎（通过 `BOB_PROJECT_REGISTRY_PATH` / `GEMINI_WORKSPACE` / `$HOME/work/common/project_registry.yaml` 自动发现），将全量正式项目（含此前被合并或缺失的 `bob-agent`）导入平台 `projects` 目录并将 `archived` 项置为归档；`conversation-directory.mjs` 同步拆分 `bob-agent`（`bob_agent`）与 `Bob-bot 助手`（`bob-bot`）。
 >   - **拦截非正式桶采集与跨端归档传播（`assistant.rs` / `project_links.rs` / `bob-node/src/lib.rs`）**：`organize_projects` 禁止创建新项目或收集「实验与临时测试」「每日助手与平台验收」等分类桶进 `projects` 表，仅将真实工作链接到既有正式项目并解除测试会话关联；`import_legacy_nexus_db` 跳过已归档与测试历史项目；`export_projects_and_links` 保留已归档项的墓碑版本以便手机端/桌面端在拓扑同步时自动收敛清理历史测试项。

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {workspaceName,directoryGroups,extractFilterOptions,filterAndSortRows,groupIconKind} from '../src/conversation-directory.mjs';
+import {workspaceName,directoryGroups,extractFilterOptions,filterAndSortRows,groupIconKind,TEST_ARCHIVE_PROJECT_ID} from '../src/conversation-directory.mjs';
 test('short path labels support POSIX, Windows and trailing separators',()=>{
  assert.equal(workspaceName('/home/user/projects/winter-shelter/'),'winter-shelter');
  assert.equal(workspaceName('C:\\projects\\winter-shelter'),'winter-shelter');
@@ -209,4 +209,28 @@ test('inferred project clustering merges unlinked workspace/canonical siblings i
     assert.ok(testGroup, `expected test group in ${mode} mode`);
     assert.deepEqual(testGroup.items.map(i => i.uid), ['x1t:verify']);
   }
+});
+
+test('disposable workspaces, prompt-wrapped tests, test-archive sentinel, and generic remote dirs fold cleanly', () => {
+  const rows = [
+    { uid: 'vps3:disp', remote: true, node: { id: 'vps3', label: 'VPS3' }, workspace: '/home/ubuntu/.bob/workspaces/disposable_v1c_candidate_a_snake', title: 'Snake index.html' },
+    { uid: 'vps3:codex', remote: true, node: { id: 'vps3', label: 'VPS3' }, workspace: '/tmp/bob-codex-candidates/exec_codex_123', title: 'User [message a78516d7-ae97-4eee-ba78-43dd22655869]: Test' },
+    { uid: 'x1t:uuid', remote: true, node: { id: 'x1t', label: 'X1T' }, workspace: '/home/bobbik/dsh_projects', title: 'session-a09f1adb-cb47-4604-a7c5-025615f7d0ae' },
+    { uid: 'x1t:linked-test', remote: true, node: { id: 'x1t', label: 'X1T' }, workspace: '/home/bobbik/models', title: 'Random model check', project_id: TEST_ARCHIVE_PROJECT_ID, project: '实验与临时测试', project_owner: 'hostinger' },
+    { uid: 'vps2:unlinked', remote: true, node: { id: 'local', label: 'VPS2' }, workspace: '/home/ubuntu', title: 'General architecture exploration' },
+    { uid: 'x1t:unlinked', remote: true, node: { id: 'x1t', label: 'X1T' }, workspace: '/home/bobbik/dsh_projects', title: '寻找丢失的历史会话记录' },
+  ];
+
+  const groups = directoryGroups(rows, 'project', null, { projects: [{ id: 'bob_agent', title: 'bob-agent' }], ownerInstance: 'hostinger' });
+  assert.equal(groups.some(g => g.name.includes('VPS2 / ubuntu') || g.name.includes('VPS3 / disposable') || g.name.includes('X1T / dsh_projects')), false);
+
+  const unassignedGroup = groups.find(g => g.isUnassignedGroup);
+  assert.ok(unassignedGroup);
+  assert.equal(unassignedGroup.name, '未归属探索会话');
+  assert.deepEqual(unassignedGroup.items.map(i => i.uid).sort(), ['vps2:unlinked', 'x1t:unlinked', 'x1t:uuid']);
+  assert.equal(groupIconKind(unassignedGroup, 'project'), 'archive');
+
+  const testGroup = groups.find(g => g.isTestGroup);
+  assert.ok(testGroup);
+  assert.deepEqual(testGroup.items.map(i => i.uid).sort(), ['vps3:codex', 'vps3:disp', 'x1t:linked-test']);
 });

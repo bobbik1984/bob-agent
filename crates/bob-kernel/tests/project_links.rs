@@ -70,3 +70,23 @@ fn archived_project_tombstone_syncs_and_suppresses_stale_active_copy() {
     phone.merge_projects_and_links(&hub_payload, 30).unwrap();
     assert!(phone.catalog_snapshot().unwrap().projects.is_empty());
 }
+
+#[test]
+fn test_archive_sentinel_links_persist_and_sync_without_polluting_catalog_snapshot() {
+    use bob_kernel::project_links::TEST_ARCHIVE_PROJECT_ID;
+    let dir = tempfile::tempdir().unwrap();
+    let mut hub = LocalApp::open(&dir.path().join("hub.sqlite")).unwrap();
+    let mut phone = LocalApp::open(&dir.path().join("phone.sqlite")).unwrap();
+
+    let links = hub
+        .set_project_session_link("n1", "codex", "codex:1", Some(TEST_ARCHIVE_PROJECT_ID), 0, 10)
+        .unwrap();
+    assert_eq!(links["links"][0]["project_id"], TEST_ARCHIVE_PROJECT_ID);
+    assert!(hub.catalog_snapshot().unwrap().projects.is_empty());
+
+    let hub_payload = hub.export_projects_and_links().unwrap();
+    phone.merge_projects_and_links(&hub_payload, 20).unwrap();
+    let phone_links = phone.project_session_links().unwrap();
+    assert_eq!(phone_links["links"][0]["project_id"], TEST_ARCHIVE_PROJECT_ID);
+    assert!(phone.catalog_snapshot().unwrap().projects.is_empty());
+}

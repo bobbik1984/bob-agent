@@ -7,6 +7,10 @@ use serde_json::{json, Value};
 
 const SCHEMA: &str = include_str!("../migrations/0010.sql");
 
+/// Reserved archived sentinel project ID for folded test/scratch sessions in the sidebar.
+/// Because its `status` is `'archived'`, it never appears in formal `catalog_snapshot().projects` or Inbox.
+pub const TEST_ARCHIVE_PROJECT_ID: &str = "__bob_test_archive__";
+
 /// Authorization context supplied by a trusted entry point, never deserialized
 /// from an external request. All writers use the same transaction below.
 pub enum ProjectLinkAuthority<'a> {
@@ -108,6 +112,13 @@ impl LocalApp {
             .db
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(p) = project {
+            if p == TEST_ARCHIVE_PROJECT_ID {
+                tx.execute(
+                    "INSERT OR IGNORE INTO projects(id,title,acceptance,status,version,created_at,updated_at)
+                     VALUES(?1,'实验与临时测试','local','archived',1,?2,?2)",
+                    params![p, now],
+                )?;
+            }
             let exists: bool = tx.query_row(
                 "SELECT EXISTS(SELECT 1 FROM projects WHERE id=?1 AND acceptance='local')",
                 [p],
@@ -333,10 +344,15 @@ impl LocalApp {
                             .map(str::trim)
                             .filter(|s| !s.is_empty())
                             .unwrap_or(pid);
+                        let status = if pid.starts_with("__bob_") {
+                            "archived"
+                        } else {
+                            "active"
+                        };
                         tx.execute(
                             "INSERT OR IGNORE INTO projects(id,title,acceptance,status,version,created_at,updated_at)
-                             VALUES(?1,?2,'local','active',1,?3,?3)",
-                            params![pid, ptitle, now],
+                             VALUES(?1,?2,'local',?3,1,?4,?4)",
+                            params![pid, ptitle, status, now],
                         )?;
                     }
                 }

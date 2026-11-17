@@ -659,6 +659,7 @@ pub fn apply_personal_proposal(
                     group.project_id.as_deref(),
                     g_title,
                 );
+                let archive_as_test = matched_project.is_none() && is_test_bucket_title(g_title);
                 let links_val = app
                     .project_session_links()
                     .map_err(|_| "PROJECT_LINK_READ_FAILED")?;
@@ -714,6 +715,17 @@ pub fn apply_personal_proposal(
                         .map_err(|_| "PROJECT_LINK_SAVE_FAILED")?;
                         linked_count += 1;
                         touched_any = true;
+                    } else if archive_as_test {
+                        app.set_project_session_link(
+                            &s.connection_id,
+                            harness,
+                            &s.session_id,
+                            Some(bob_kernel::project_links::TEST_ARCHIVE_PROJECT_ID),
+                            expected_ver,
+                            now,
+                        )
+                        .map_err(|_| "PROJECT_LINK_SAVE_FAILED")?;
+                        unlinked_count += 1;
                     } else if existing_link
                         .and_then(|item| item["project_id"].as_str())
                         .is_some()
@@ -757,23 +769,19 @@ pub fn apply_personal_proposal(
     }
 }
 
+fn is_test_bucket_title(title: &str) -> bool {
+    let lower = title.to_lowercase();
+    ["实验", "临时", "测试", "探针", "验收", "冒烟", "test", "scratch", "probe"]
+        .iter()
+        .any(|kw| lower.contains(kw))
+}
+
 fn is_non_project_bucket_title(title: &str) -> bool {
     let lower = title.to_lowercase();
-    [
-        "实验",
-        "临时",
-        "测试",
-        "探针",
-        "验收",
-        "杂项",
-        "未分类",
-        "test",
-        "scratch",
-        "misc",
-        "unlinked",
-    ]
-    .iter()
-    .any(|kw| lower.contains(kw))
+    is_test_bucket_title(title)
+        || ["杂项", "未分类", "misc", "unlinked"]
+            .iter()
+            .any(|kw| lower.contains(kw))
 }
 
 fn normalize_project_match_key(s: &str) -> String {
@@ -1067,7 +1075,17 @@ mod tests {
         let org_receipt = apply_personal_proposal(&mut app, "req-4", &p_org, 4000).unwrap();
         assert!(org_receipt.unwrap().contains("海路纪元 (SEA2)"));
         let links = app.project_session_links().unwrap();
-        assert_eq!(links["links"].as_array().unwrap().len(), 2);
+        assert_eq!(links["links"].as_array().unwrap().len(), 3);
+        let probe_link = links["links"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["session_id"] == "session-probe")
+            .unwrap();
+        assert_eq!(
+            probe_link["project_id"],
+            bob_kernel::project_links::TEST_ARCHIVE_PROJECT_ID
+        );
         let snap = app.catalog_snapshot().unwrap();
         assert_eq!(snap.projects.len(), 1);
         assert_eq!(snap.projects[0].id, "sea2");

@@ -6,6 +6,7 @@ export function workspaceName(path) {
 }
 
 export const REMOTE_NODE_PREFIX = 'node:';
+export const TEST_ARCHIVE_PROJECT_ID = '__bob_test_archive__';
 
 /** Build a distinct UI selection key for remote/paired nodes so id="local" never collides with built-in local chat. */
 export function nodeCreationKey(node) {
@@ -369,9 +370,12 @@ export function resolveCanonicalProject(row) {
 export function isTestOrScratchSession(row) {
   if (!row) return false;
   if (row.pinned) return false;
+  if (row.project_id === TEST_ARCHIVE_PROJECT_ID) {
+    return true;
+  }
   if (row.project_owner && row.project_id && !row.project_inferred) {
     const pName = String(row.project || row.project_id || '');
-    return /(test|tmp|scratch|probe|测试|探针|临时|实验|冒烟)/i.test(pName);
+    return /(test|tmp|scratch|probe|测试|探针|临时|实验|冒烟|验收)/i.test(pName);
   }
   const title = String(row.title || '').trim().toLocaleLowerCase();
   const ws = workspaceName(row.workspace || '').toLocaleLowerCase();
@@ -380,7 +384,16 @@ export function isTestOrScratchSession(row) {
   if (/(^|[\s_/-])(test|eval|probe|tmp|temp|scratch|benchmark|fixture|mock|smoke|check|verification|verify)([\s_/-]|$)/i.test(title)) {
     return true;
   }
-  if (/^(are you online\??|r u online\??|hello\??|hi\??|ping\??|blank message|synced conversation)$/i.test(title)) {
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(title)) {
+    return true;
+  }
+  if (/^user\s*\[message\s+[0-9a-f-]+\]:/i.test(title)) {
+    return true;
+  }
+  if (/^(are you online\??|r u online\??|hello\??|hi\??|ping\??|blank message( sent)?|blank conversation( start)?|checking system availability status|synced conversation)$/i.test(title)) {
+    return true;
+  }
+  if (/(bob_inventory_ok|bob connection (check|verification)|bob inventory verification|disposable restart validation)/i.test(title)) {
     return true;
   }
   if (/(测试|探针|临时|冒烟|评测|验证|连通检查)/.test(title)) {
@@ -390,7 +403,10 @@ export function isTestOrScratchSession(row) {
   if (/(^|[\s_/-])(test|tmp|temp|scratch)([\s_/-]|$)/i.test(ws)) {
     return true;
   }
-  if (/(^|\/)(tmp|temp|verification-workspaces|bob-agy-candidates|bob-native-setup)(\/|$)/i.test(normWs)) {
+  if (/(^|\/)(tmp|temp|verification-workspaces|bob-agy-candidates|bob-codex-candidates|bob-native-setup)(\/|$)/i.test(normWs)) {
+    return true;
+  }
+  if (/(\/|^)(disposable[_-]|bob-cf08-|four[_-]harness|mobile-loop-live|daily-assistant-basic)/i.test(normWs)) {
     return true;
   }
   return false;
@@ -603,6 +619,7 @@ export function directoryGroups(rows, mode, pinnedSet = null, options = null) {
 
   // mode === 'project' (default)
   const groups = new Map();
+  const unassignedRemoteRows = [];
   for (const row of activeRows) {
     const device = row.remote ? nodeLabel(row.node) : row.device;
     const owner = row.remote ? ['remote', deviceKey(row.node)] : ['local', row.device];
@@ -621,6 +638,9 @@ export function directoryGroups(rows, mode, pinnedSet = null, options = null) {
       key = JSON.stringify(['canonical_project', canonical.id]);
       name = canonical.name;
       fullName = canonical.name;
+    } else if (row.remote && !isMeaningfulWorkspace(row.workspace)) {
+      unassignedRemoteRows.push(row);
+      continue;
     } else {
       const project = row.project || row.workspace || '';
       key = JSON.stringify([...owner, row.project_id || row.workspace || '']);
@@ -640,6 +660,15 @@ export function directoryGroups(rows, mode, pinnedSet = null, options = null) {
   }
 
   const res = [...groups.values()];
+  if (unassignedRemoteRows.length > 0) {
+    res.push({
+      key: 'group:unassigned-remote',
+      name: '未归属探索会话',
+      fullName: '未归属探索会话',
+      isUnassignedGroup: true,
+      items: unassignedRemoteRows,
+    });
+  }
   if (testRows.length > 0) {
     res.push({
       key: 'group:test-scratch',
@@ -653,7 +682,7 @@ export function directoryGroups(rows, mode, pinnedSet = null, options = null) {
 }
 
 export function groupIconKind(group, mode = 'project') {
-  if (group?.isTestGroup) return 'archive';
+  if (group?.isTestGroup || group?.isUnassignedGroup) return 'archive';
   if (mode !== 'device') return 'project';
   const sample = group?.items?.[0];
   const node = sample?.node || {};
