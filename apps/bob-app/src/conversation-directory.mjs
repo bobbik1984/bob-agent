@@ -148,6 +148,7 @@ export function rowHarnessLabel(row) {
   const h = rowHarnessKey(row);
   if (h === 'claude') return 'Claude';
   if (h === 'agy') return 'AGY';
+  if (h === 'copilot') return 'Copilot';
   if (h === 'pi') return 'Pi';
   if (h === 'codex') return 'Codex';
   return 'DSH';

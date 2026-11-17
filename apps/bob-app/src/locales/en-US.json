@@ -605,7 +605,7 @@
   "dshStop": "Stop",
   "dshStopChecking": "Checking stop…",
   "dshStopUnconfirmed": "DSH has not confirmed the stop. Check the original session.",
-  "createAssistantCommandHelp": "Use /new-<dsh|claude|codex|agy|pi> | device | workspace | project | title, or choose the fields below.",
+  "createAssistantCommandHelp": "Use /new-<dsh|claude|codex|agy|pi|copilot> | device | workspace | project | title, or choose the fields below.",
   "createAssistantDeviceMissing": "Choose the device. The command did not match exactly one connection.",
   "createNoToolWorkspaces": "This device did not report a workspace for this tool.",
   "createFirstMessage": "First message",

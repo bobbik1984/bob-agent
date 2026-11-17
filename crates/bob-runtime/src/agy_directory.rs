@@ -20,6 +20,8 @@ struct HostGrant {
     pi_data_dir: Option<String>,
     #[serde(default, alias = "codex_data_dir")]
     codex_data_dir: Option<String>,
+    #[serde(default, alias = "copilot_data_dir")]
+    copilot_data_dir: Option<String>,
     #[serde(default, alias = "control_plane_dbs")]
     control_plane_dbs: Vec<String>,
     #[serde(default)]
@@ -33,6 +35,7 @@ impl HostGrant {
         self.claude_data_dir.is_some()
             || self.pi_data_dir.is_some()
             || self.codex_data_dir.is_some()
+            || self.copilot_data_dir.is_some()
             || !self.control_plane_dbs.is_empty()
     }
     fn is_local(&self) -> bool {
@@ -91,6 +94,10 @@ pub fn discover_local_grant(connection_id: &str) -> Option<Value> {
     let codex_opt = codex_dir
         .is_dir()
         .then(|| codex_dir.to_string_lossy().replace('\\', "/"));
+    let copilot_dir = home.join(".copilot");
+    let copilot_opt = copilot_dir
+        .is_dir()
+        .then(|| copilot_dir.to_string_lossy().replace('\\', "/"));
 
     let mut cp_dbs = Vec::new();
     let bob_state = home.join(".bob").join("state");
@@ -123,6 +130,9 @@ pub fn discover_local_grant(connection_id: &str) -> Option<Value> {
     if !agy_dir.is_empty() || crate::tool_inventory::executable("agy").is_some() {
         harnesses.push("agy".to_owned());
     }
+    if copilot_opt.is_some() || crate::tool_inventory::executable("copilot").is_some() {
+        harnesses.push("copilot".to_owned());
+    }
     if harnesses.is_empty() {
         return None;
     }
@@ -148,6 +158,7 @@ pub fn discover_local_grant(connection_id: &str) -> Option<Value> {
         "claudeDataDir": claude_opt.unwrap_or_else(||claude_dir.to_string_lossy().into_owned()),
         "piDataDir": pi_opt.unwrap_or_else(||pi_dir.to_string_lossy().into_owned()),
         "codexDataDir": codex_opt.unwrap_or_else(||codex_dir.to_string_lossy().into_owned()),
+        "copilotDataDir": copilot_opt.unwrap_or_else(||copilot_dir.to_string_lossy().into_owned()),
         "controlPlaneDbs": cp_dbs,
         "harnesses": harnesses,
         "claudeTools": claude_tools,
@@ -193,6 +204,7 @@ fn grants(data: &Path) -> Result<Vec<HostGrant>, &'static str> {
         let claude_data_dir = item.get("claudeDataDir").or_else(|| item.get("claude_data_dir")).and_then(Value::as_str).map(str::to_owned);
         let pi_data_dir = item.get("piDataDir").or_else(|| item.get("pi_data_dir")).and_then(Value::as_str).map(str::to_owned);
         let codex_data_dir = item.get("codexDataDir").or_else(|| item.get("codex_data_dir")).and_then(Value::as_str).map(str::to_owned);
+        let copilot_data_dir = item.get("copilotDataDir").or_else(|| item.get("copilot_data_dir")).and_then(Value::as_str).map(str::to_owned);
         let control_plane_dbs = item.get("controlPlaneDbs").or_else(|| item.get("control_plane_dbs")).and_then(Value::as_array).map(|arr| arr.iter().filter_map(Value::as_str).map(str::to_owned).collect()).unwrap_or_default();
         let harnesses = item.get("harnesses").or_else(|| item.get("enabledHarnesses")).or_else(|| item.get("enabled_harnesses")).and_then(Value::as_array).map(|arr| arr.iter().filter_map(Value::as_str).map(str::to_owned).collect()).unwrap_or_default();
         let claude_tools = item.get("claudeTools").or_else(|| item.get("claude_tools")).and_then(Value::as_array).map(|arr| arr.iter().filter_map(Value::as_str).map(str::to_owned).collect()).unwrap_or_default();
@@ -203,6 +215,7 @@ fn grants(data: &Path) -> Result<Vec<HostGrant>, &'static str> {
             claude_data_dir,
             pi_data_dir,
             codex_data_dir,
+            copilot_data_dir,
             control_plane_dbs,
             harnesses,
             claude_tools,
@@ -215,6 +228,7 @@ pub fn owns_session(id: &str) -> bool { id.starts_with("agy:") }
 
 pub fn owns_readable_session(id: &str) -> bool {
     id.starts_with("agy:")
+        || id.starts_with("copilot:")
         || id.starts_with("claude:")
         || id.starts_with("claude-jsonl:")
         || id.starts_with("pi:")
@@ -409,7 +423,7 @@ fn run_host_python(ssh_target: &str, arg_str: &str, timeout_secs: u64, source: &
 /// Inputs never supply executable paths, shell text, credentials, or a new host.
 pub fn probe_native_harness(data: &Path, connection: &str, tool: &str, discovery_only: bool) -> Result<Value, &'static str> {
     crate::tool_policy::require(data,connection,tool)?;
-    if !["codex", "pi", "agy", "claude"].contains(&tool) {
+    if !["codex", "pi", "agy", "claude", "copilot"].contains(&tool) {
         return Err("HARNESS_TOOL_UNSUPPORTED");
     }
     let all = grants(data)?;
@@ -438,6 +452,7 @@ fn fetch_list(data: &Path, connection: &str) -> Result<Vec<Value>, &'static str>
             "claudeDataDir": g.claude_data_dir,
             "piDataDir": g.pi_data_dir,
             "codexDataDir": g.codex_data_dir,
+            "copilotDataDir": g.copilot_data_dir,
             "controlPlaneDbs": g.control_plane_dbs,
             "harnesses": g.harnesses,
         })).map_err(|_|"AGY_CONFIG_INVALID")?
@@ -487,6 +502,7 @@ pub fn read_page(data: &Path, connection: &str, session_id: &str, after: Option<
         "claudeDataDir": g.claude_data_dir,
         "piDataDir": g.pi_data_dir,
         "codexDataDir": g.codex_data_dir,
+        "copilotDataDir": g.copilot_data_dir,
         "controlPlaneDbs": g.control_plane_dbs,
     })).map_err(|_|"AGY_CONFIG_INVALID")?;
     let b=run_ssh_python(&g.ssh_target, &arg_str, 35)?;
@@ -520,7 +536,7 @@ pub fn read_page(data: &Path, connection: &str, session_id: &str, after: Option<
 
 pub fn setup_native_session(data: &Path, connection: &str, args: &Value) -> Result<Value, &'static str> {
     let tool = args["harness"].as_str()
-        .filter(|h| matches!(*h,"claude" | "codex" | "agy" | "pi"))
+        .filter(|h| matches!(*h,"claude" | "codex" | "agy" | "pi" | "copilot"))
         .ok_or("HARNESS_SETUP_UNSUPPORTED")?;
     let workspace = args["workspace"].as_str()
         .filter(|s| !s.is_empty() && s.len() <= 4096 && !s.chars().any(char::is_control))
@@ -661,6 +677,7 @@ pub fn prompt_session_with_details(
         "claudeDataDir": g.claude_data_dir,
         "piDataDir": g.pi_data_dir,
         "codexDataDir": g.codex_data_dir,
+        "copilotDataDir": g.copilot_data_dir,
         "controlPlaneDbs": g.control_plane_dbs,
     })).map_err(|_|"AGY_CONFIG_INVALID")?;
     let b=run_ssh_python(&g.ssh_target, &arg_str, 35)?;
@@ -680,6 +697,7 @@ pub fn prompt_session_with_details(
 fn resolve_approval_mode(session_id: &str, approval_mode_override: Option<&str>, claude_tools: &[String]) -> &'static str {
     let supported = session_id.starts_with("codex:")
         || session_id.starts_with("agy:")
+        || session_id.starts_with("copilot:")
         || (session_id.starts_with("claude-jsonl:") && !claude_tools.is_empty());
     match approval_mode_override {
         Some("deny") => "deny",
@@ -701,7 +719,7 @@ fn resolve_approval_mode(session_id: &str, approval_mode_override: Option<&str>,
 fn require_native_harness_grant(grant: &HostGrant, session: &str) -> Result<(), &'static str> {
     let tool = match session.split_once(':').map(|(tool, _)| tool) {
         Some("claude-jsonl") => "claude",
-        Some(tool @ ("codex" | "agy" | "pi" | "claude")) => tool,
+        Some(tool @ ("codex" | "agy" | "pi" | "claude" | "copilot")) => tool,
         _ => return Err("HARNESS_EVENTS_UNSUPPORTED"),
     };
     if !grant.harnesses.iter().any(|allowed| allowed == tool) {
@@ -713,7 +731,7 @@ fn require_native_harness_grant(grant: &HostGrant, session: &str) -> Result<(), 
 pub fn native_permission(data: &Path, connection: &str, session: &str, request: &str, permission: &str, option: Option<&str>) -> Result<Value, &'static str> {
     use sha2::{Sha256,Digest};
     if option.is_some(){crate::tool_policy::require(data,connection,crate::tool_policy::session_tool(session))?;}
-    if !session.starts_with("agy:") && !session.starts_with("claude-jsonl:") && !session.starts_with("codex:") { return Err("HARNESS_APPROVAL_UNSUPPORTED") }
+    if !session.starts_with("agy:") && !session.starts_with("copilot:") && !session.starts_with("claude-jsonl:") && !session.starts_with("codex:") { return Err("HARNESS_APPROVAL_UNSUPPORTED") }
     if permission.is_empty() || permission.len()>128 || option.is_some_and(|x|x.len()>128) { return Err("HARNESS_APPROVAL_INVALID") }
     let all=grants(data)?;
     let grant=all.iter().find(|g|g.connection_id==connection).ok_or("DSH_CONNECTION_REQUIRED")?;
@@ -731,7 +749,7 @@ pub fn native_permission(data: &Path, connection: &str, session: &str, request: 
 
 pub fn native_cancel(data: &Path, connection: &str, session: &str, request: &str) -> Result<Value, &'static str> {
     use sha2::{Sha256,Digest};
-    if !session.starts_with("codex:") && !session.starts_with("pi:") && !session.starts_with("agy:") && !session.starts_with("claude-jsonl:") { return Err("HARNESS_CANCEL_UNSUPPORTED") }
+    if !session.starts_with("codex:") && !session.starts_with("pi:") && !session.starts_with("agy:") && !session.starts_with("copilot:") && !session.starts_with("claude-jsonl:") { return Err("HARNESS_CANCEL_UNSUPPORTED") }
     let all=grants(data)?;
     let grant=all.iter().find(|g|g.connection_id==connection).ok_or("DSH_CONNECTION_REQUIRED")?;
     require_native_harness_grant(grant, session)?;
@@ -761,7 +779,7 @@ pub fn preview_native_file(data: &Path, connection: &str, session: &str, path: &
     let tool=if session.starts_with("claude-jsonl:") {"claude"} else {session.split(':').next().unwrap_or("")};
     if !g.harnesses.iter().any(|h|h==tool) { return Err("HARNESS_TOOL_NOT_GRANTED") }
     let args=json!({"mode":"preview","sessionId":session,"path":path,"known":known,
-        "agyDataDir":g.agy_data_dir,"claudeDataDir":g.claude_data_dir,"piDataDir":g.pi_data_dir,"codexDataDir":g.codex_data_dir});
+        "agyDataDir":g.agy_data_dir,"claudeDataDir":g.claude_data_dir,"piDataDir":g.pi_data_dir,"codexDataDir":g.codex_data_dir,"copilotDataDir":g.copilot_data_dir});
     let bytes=run_ssh_python(&g.ssh_target,&args.to_string(),preview_host_timeout_secs(path))
         .map_err(|e|if e=="AGY_HOST_TIMEOUT" {"DSH_FILE_TIMEOUT"} else {e})?;
     let mut value:Value=serde_json::from_slice(&bytes).map_err(|_|"DSH_PREVIEW_UNAVAILABLE")?;
@@ -812,6 +830,7 @@ pub fn inspect_receipt(data: &Path, connection: &str, session_id: &str, text: &s
         "claudeDataDir": g.claude_data_dir,
         "piDataDir": g.pi_data_dir,
         "codexDataDir": g.codex_data_dir,
+        "copilotDataDir": g.copilot_data_dir,
         "controlPlaneDbs": g.control_plane_dbs,
     })).map_err(|_|"AGY_CONFIG_INVALID")?;
     let b=run_ssh_python(&g.ssh_target, &arg_str, 35)?;
@@ -966,6 +985,10 @@ mod native_grant_tests {
         assert_eq!(resolve_approval_mode("agy:12345678", Some("workspace_auto"), &[]), "workspace_auto");
         assert_eq!(resolve_approval_mode("agy:12345678", Some("full_auto"), &[]), "full_auto");
         assert_eq!(resolve_approval_mode("agy:12345678", Some("deny"), &[]), "deny");
+        assert!(owns_readable_session("copilot:13030914-03d7-459c-9705-603a11750989"));
+        assert_eq!(resolve_approval_mode("copilot:12345678", None, &[]), "full_auto");
+        let copilot_grant: HostGrant = serde_json::from_value(json!({"connectionId":"test","sshTarget":"local","harnesses":["copilot"]})).unwrap();
+        assert!(require_native_harness_grant(&copilot_grant, "copilot:12345678").is_ok());
         assert_eq!(resolve_approval_mode("claude-jsonl:12345678", None, &[]), "deny");
         assert_eq!(resolve_approval_mode("claude-jsonl:12345678", None, &tools), "full_auto");
         assert_eq!(resolve_approval_mode("claude-jsonl:12345678", Some("workspace_auto"), &tools), "workspace_auto");

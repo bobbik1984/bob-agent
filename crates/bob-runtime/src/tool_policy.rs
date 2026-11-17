@@ -3,7 +3,7 @@
 use std::{path::Path,sync::{Mutex,OnceLock}};
 use serde_json::{Value,json};
 static WRITE:OnceLock<Mutex<()>>=OnceLock::new();
-pub const TOOLS:[&str;5]=["dsh","codex","agy","claude","pi"];
+pub const TOOLS:[&str;6]=["dsh","codex","agy","claude","pi","copilot"];
 pub fn read(data:&Path)->Result<Value,&'static str>{
  match std::fs::read(data.join("tool_policy.json")){
   Ok(b)=>{
@@ -34,7 +34,7 @@ pub fn require(data:&Path,connection:&str,tool:&str)->Result<(),&'static str>{
  if !enabled(data,connection,tool){return Err("TOOL_DISABLED")} Ok(())
 }
 pub fn session_tool(s:&str)->&str{
- if s.starts_with("claude"){ "claude" }else if s.starts_with("codex:"){"codex"}else if s.starts_with("agy:"){"agy"}else if s.starts_with("pi:"){"pi"}else{"dsh"}
+ if s.starts_with("claude"){ "claude" }else if s.starts_with("codex:"){"codex"}else if s.starts_with("agy:"){"agy"}else if s.starts_with("pi:"){"pi"}else if s.starts_with("copilot:"){"copilot"}else{"dsh"}
 }
 pub fn set(data:&Path,connection:&str,tool:&str,value:bool,all:bool)->Result<Value,&'static str>{
  if !TOOLS.contains(&tool){return Err("TOOL_POLICY_TOOL_INVALID")}

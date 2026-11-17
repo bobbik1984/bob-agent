@@ -326,6 +326,57 @@ def discover_pi(d, limit=30):
                            title or fp or f'Pi · {wn} ({sid[:8]})', cwd or wn, ms, cnt, 'completed', False, fp, ls))
     return out
 
+def _copilot_workspace_meta(ws_file):
+    meta = {}
+    try:
+        for line in ws_file.read_text(encoding='utf-8', errors='replace').splitlines():
+            if ':' not in line:
+                continue
+            k, v = line.split(':', 1)
+            meta[k.strip()] = v.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return meta
+
+def discover_copilot(d, limit=30):
+    sr = (Path(d) / 'session-state') if d else None
+    if not sr or not sr.is_dir():
+        return []
+    out = []
+    dirs = [p for p in sr.iterdir() if p.is_dir() and not p.name.startswith('.')]
+    for sdir in sorted(dirs, key=lambda p: p.stat().st_mtime, reverse=True)[:limit]:
+        ws_file = sdir / 'workspace.yaml'
+        ev_file = sdir / 'events.jsonl'
+        if not ws_file.is_file() and not ev_file.is_file():
+            continue
+        meta = _copilot_workspace_meta(ws_file) if ws_file.is_file() else {}
+        sid = meta.get('id') or sdir.name
+        cwd = meta.get('cwd') or ''
+        title = _clean(meta.get('summary') or '')
+        ms = _ts(meta.get('updated_at') or meta.get('created_at'), int(sdir.stat().st_mtime * 1000))
+        cnt, fp, ls = 0, '', ''
+        if ev_file.is_file():
+            ms = max(ms, int(ev_file.stat().st_mtime * 1000))
+            for _, o in _iter_jsonl(ev_file, 200):
+                tp = o.get('type')
+                data = o.get('data') if isinstance(o.get('data'), dict) else {}
+                if tp == 'user.message':
+                    cnt += 1
+                    txt = _clean(data.get('content') or '')
+                    if txt and not fp:
+                        fp = txt
+                    if txt and not title:
+                        title = txt
+                elif tp == 'assistant.message':
+                    cnt += 1
+                    txt = _clean(data.get('content') or '')
+                    if txt:
+                        ls = txt
+        wn = Path(cwd).name if cwd else 'copilot'
+        out.append(_mk_row(f'copilot:{sid}', sid, 'copilot', 'Copilot', 'copilot_native',
+                           title or fp or f'Copilot · {wn} ({sid[:8]})', cwd or wn, ms, max(cnt, 1), 'completed', False, fp, ls))
+    return out
+
 def discover_codex(d, limit=20):
     sr = (Path(d) / 'sessions') if d else None
     if not sr or not sr.is_dir():
@@ -372,7 +423,7 @@ def discover_control_plane(dbs, harnesses=None, limit=40):
     if not dbs:
         return []
     allow = set(harnesses or ['dsh', 'pi', 'codex', 'agy'])
-    lmap = {'dsh': 'DSH', 'pi': 'Pi', 'codex': 'Codex', 'agy': 'AGY', 'claude': 'Claude'}
+    lmap = {'dsh': 'DSH', 'pi': 'Pi', 'codex': 'Codex', 'agy': 'AGY', 'claude': 'Claude', 'copilot': 'Copilot'}
     seen, out = set(), []
     for dbp in dbs:
         p = Path(dbp)
@@ -431,6 +482,7 @@ def discover_multi(cfg):
         discover_claude(cfg.get('claudeDataDir')),
         discover_pi(cfg.get('piDataDir')),
         discover_codex(cfg.get('codexDataDir')),
+        discover_copilot(cfg.get('copilotDataDir')),
         discover_control_plane(cfg.get('controlPlaneDbs'), cfg.get('harnesses')),
     ):
         s.extend(x for x in extra if not _is_opt_runtime_session(x))
@@ -615,6 +667,25 @@ def read_session_page(cfg, sid):
                         ct = str(o.get('content') or '').strip()
                         if ct:
                             push('assistant', ct, ts)
+    elif sid.startswith('copilot:'):
+        h, raw, cpdir = 'copilot', sid.split(':', 1)[1], cfg.get('copilotDataDir') or str(Path.home() / '.copilot')
+        sdir = (Path(cpdir) / 'session-state' / raw) if cpdir else None
+        if sdir and sdir.is_dir():
+            ws_file = sdir / 'workspace.yaml'
+            if ws_file.is_file():
+                ws = _copilot_workspace_meta(ws_file).get('cwd') or ws
+            ev_file = sdir / 'events.jsonl'
+            if ev_file.is_file():
+                fb = int(ev_file.stat().st_mtime * 1000)
+                for _, o in _iter_jsonl(ev_file):
+                    ts, tp = _ts(o.get('timestamp'), fb), o.get('type')
+                    data = o.get('data') if isinstance(o.get('data'), dict) else {}
+                    if tp == 'user.message':
+                        push('user', str(data.get('content') or ''), ts)
+                    elif tp == 'assistant.message':
+                        push('assistant', str(data.get('content') or ''), ts)
+                    elif tp == 'tool.execution_start' and data.get('toolName'):
+                        push('step', _tstep(data['toolName'], data.get('arguments') or ''), ts)
     elif sid.startswith('claude-jsonl:'):
         h, raw, cdir = 'claude', sid.split(':', 1)[1], cfg.get('claudeDataDir') or ''
         m = list((Path(cdir) / 'projects').glob(f'*/{raw}.jsonl')) if cdir else []
@@ -839,7 +910,7 @@ def read_session_page(cfg, sid):
             holder = _safe_agy_holder(sid, cfg.get('agyDataDir') or '')
         if holder is not None:
             out['terminal_holder'] = holder
-        if sid.startswith(('claude-jsonl:', 'codex:', 'agy:')):
+        if sid.startswith(('claude-jsonl:', 'codex:', 'agy:', 'copilot:')):
             out['bob_holder'] = _inspect_bob_holder(sid)
     return out
 
@@ -961,7 +1032,7 @@ def _document_preview(data, extension, budget=2*1024*1024):
 
 def preview_native_file(cfg):
     sid, requested = cfg.get('sessionId', ''), cfg.get('path', '')
-    if not re.fullmatch(r'(codex|claude-jsonl|agy|pi):[A-Za-z0-9_-]{8,128}', sid):
+    if not re.fullmatch(r'(codex|claude-jsonl|agy|pi|copilot):[A-Za-z0-9_-]{8,128}', sid):
         raise ValueError('DSH_SESSION_NOT_FOUND')
     if not isinstance(requested, str) or not requested or len(requested)>1024 or any(c in requested for c in '\\:%?#\x00'):
         raise ValueError('DSH_FILE_PATH_REJECTED')
@@ -2210,7 +2281,7 @@ def _inspect_bob_holder(sid):
                     if rec.get('execution_status') in ('accepted', 'running'):
                         running = True
                         active_pid = rec.get('pid') or active_pid
-            if sid.startswith('agy:') and 'agy_supervisors' in tbls:
+            if sid.startswith(('agy:', 'copilot:')) and 'agy_supervisors' in tbls:
                 row = db.execute('SELECT token, pid FROM agy_supervisors WHERE session=?', (sid,)).fetchone()
                 if row and _agy_process_owned(row[1], row[0], sid):
                     return {'held': True, 'running': running, 'kind': 'agy_supervisor', 'pid': int(row[1])}
@@ -2275,12 +2346,12 @@ def _permission_activity(db, cfg, entry, status):
 
 
 def _permission_owner(rec, sid):
-    if sid.startswith('agy:'):return rec.get('supervisor_token')
+    if sid.startswith(('agy:', 'copilot:')):return rec.get('supervisor_token')
     if sid.startswith(('claude-jsonl:', 'codex:')):return 'worker:'+str(rec.get('request_id') or '')
     return None
 
 def _permission_owner_alive(rec, sid):
-    if sid.startswith('agy:'):return _agy_process_owned(rec.get('pid'),rec.get('supervisor_token'),sid)
+    if sid.startswith(('agy:', 'copilot:')):return _agy_process_owned(rec.get('pid'),rec.get('supervisor_token'),sid)
     if not sid.startswith(('claude-jsonl:', 'codex:')):return False
     try:
         pid=int(rec.get('pid') or 0)
@@ -2462,7 +2533,7 @@ def _open_native_permission(cfg, frame, serial):
 
 def submit_native_permission(cfg):
     sid,rid=cfg.get('sessionId'),cfg.get('requestId');pid=cfg.get('permissionId');choice=cfg.get('optionId')
-    if not isinstance(sid,str) or not sid.startswith(('agy:','claude-jsonl:','codex:')):raise ValueError('HARNESS_APPROVAL_UNSUPPORTED')
+    if not isinstance(sid,str) or not sid.startswith(('agy:','copilot:','claude-jsonl:','codex:')):raise ValueError('HARNESS_APPROVAL_UNSUPPORTED')
     _stream_records(sid)
     with closing(_stream_db()) as db,db:
         db.execute('BEGIN IMMEDIATE');_permission_schema(db)
@@ -2536,9 +2607,9 @@ def _flush_native_permissions(cfg, pipe):
 
 class AgyAcpSession:
     """One official connection; load replay is never a new execution event."""
-    def __init__(self, exe, raw, cwd, env):
+    def __init__(self, exe, raw, cwd, env, acp_cmd=None):
         self.raw, self.serial = raw, 0
-        self.pipe = NativePipe([exe, 'acp', '--stdio'], cwd, env)
+        self.pipe = NativePipe(acp_cmd or [exe, 'acp', '--stdio'], cwd, env)
         try:
             result = self.control('initialize', {'protocolVersion': 1,
                 'clientCapabilities': {}, 'clientInfo': {'name': 'bob-native', 'version': '1.0.1'}})
@@ -2622,9 +2693,10 @@ class AgyAcpSession:
                 if frame['method'] == 'session/request_permission':
                     if mode in ('interactive', 'workspace_auto', 'full_auto'):
                         tool_call = params.get('toolCall') or {}
+                        tool_name = 'copilot' if str(cfg.get('session_id') or '').startswith('copilot:') or cfg.get('new_harness') == 'copilot' else 'agy'
                         auto_allow = (
-                            (mode == 'workspace_auto' and not _is_high_risk_tool_call('agy', tool_call, cfg.get('work_cwd')))
-                            or (mode == 'full_auto' and not _is_catastrophic_host_call('agy', tool_call))
+                            (mode == 'workspace_auto' and not _is_high_risk_tool_call(tool_name, tool_call, cfg.get('work_cwd')))
+                            or (mode == 'full_auto' and not _is_catastrophic_host_call(tool_name, tool_call))
                         )
                         if auto_allow:
                             allow_id = next((o.get('optionId') for o in (params.get('options') or []) if isinstance(o, dict) and o.get('kind') in ('allow_once', 'allow_always') and o.get('optionId')), None)
@@ -2782,8 +2854,9 @@ def _native_worker(cfg):
             pipe = NativePipe([exe,*model_args,'--mode','rpc',*session_args,'--no-tools',
                 '--no-extensions','--no-skills','--no-prompt-templates','--no-themes'],cwd,env)
             pipe.send({'id':'identity','type':'get_state'})
-        elif tool == 'agy':
-            pipe = AgyAcpSession(exe, None if creating else raw, cwd, env)
+        elif tool in ('agy', 'copilot'):
+            acp_cmd = [exe, '--acp', '--stdio'] if tool == 'copilot' else [exe, 'acp', '--stdio']
+            pipe = AgyAcpSession(exe, None if creating else raw, cwd, env, acp_cmd=acp_cmd)
             if creating:
                 _stream_update(rid,native_session_id=pipe.raw)
             pipe.prompt(cfg)
@@ -3089,10 +3162,12 @@ def _agy_supervise(command):
                 raise ValueError('HARNESS_WORKSPACE_MISMATCH')
             if session is None:
                 env = _augment_user_path()
-                exe = shutil.which('agy', path=env['PATH'])
+                is_copilot = sid.startswith('copilot:')
+                exe = shutil.which('copilot' if is_copilot else 'agy', path=env['PATH'])
                 if not exe: raise ValueError('HARNESS_EXECUTABLE_MISSING')
                 cwd = active['work_cwd']
-                session = AgyAcpSession(exe, sid.split(':',1)[1], cwd, env)
+                acp_cmd = [exe, '--acp', '--stdio'] if is_copilot else [exe, 'acp', '--stdio']
+                session = AgyAcpSession(exe, sid.split(':',1)[1], cwd, env, acp_cmd=acp_cmd)
             session.prompt(active)
             with closing(_stream_db()) as db, db:
                 db.execute('DELETE FROM agy_queue WHERE request=?', (active['request_id'],))
@@ -3118,7 +3193,7 @@ def _agy_supervise(command):
 
 
 def _native_start(cfg, source):
-    if cfg['session_id'].startswith('agy:'): return _agy_start(cfg, source)
+    if cfg['session_id'].startswith(('agy:', 'copilot:')): return _agy_start(cfg, source)
     sid,rid,text=cfg['session_id'],cfg['request_id'],cfg['text']
     digest=hashlib.sha256(text.encode('utf-8')).hexdigest()
     # Reconcile the original worker before answering a repeated delivery.
@@ -3138,7 +3213,7 @@ def _native_start(cfg, source):
         for row in db.execute('SELECT body FROM requests WHERE session=?',(sid,)):
             if json.loads(row[0]).get('execution_status') in ('accepted','running','unknown'):
                 raise ValueError('HARNESS_SESSION_BUSY')
-        record={'request_id':rid,'session_id':sid,'text':text,'execution_status':'accepted','started_at':_now(),'cancel_supported':sid.startswith(('codex:','pi:','agy:','claude-jsonl:'))}
+        record={'request_id':rid,'session_id':sid,'text':text,'execution_status':'accepted','started_at':_now(),'cancel_supported':sid.startswith(('codex:','pi:','agy:','copilot:','claude-jsonl:'))}
         if cfg.get('new_harness'):
             record.update(setup_harness=cfg['new_harness'],setup_workspace=cfg['work_cwd'])
         if sid.startswith('claude-jsonl:'):
@@ -3161,7 +3236,7 @@ def setup_native_session(cfg):
     rid, tool, cwd = (cfg.get(key) for key in ('requestId','harness','workspace'))
     if not isinstance(rid, str) or not re.fullmatch(r'setup-[0-9a-f-]{36}', rid):
         raise ValueError('HARNESS_REQUEST_CONFLICT')
-    prefixes = {'claude':'claude-jsonl', 'codex':'codex', 'agy':'agy', 'pi':'pi'}
+    prefixes = {'claude':'claude-jsonl', 'codex':'codex', 'agy':'agy', 'pi':'pi', 'copilot':'copilot'}
     if tool not in prefixes or not isinstance(cwd,str) or not Path(cwd).is_absolute():
         raise ValueError('HARNESS_WORKSPACE_MISSING')
     sid = 'setup:' + rid.removeprefix('setup-')
@@ -3275,6 +3350,16 @@ def prompt_session(cfg):
             wcwd = pcwd = found_uri
         elif isinstance(cfg.get('workspace'), str) and cfg['workspace'].strip() and Path(cfg['workspace'].strip()).is_dir():
             wcwd = pcwd = cfg['workspace'].strip()
+    elif sid.startswith('copilot:'):
+        raw, cpdir = sid.split(':', 1)[1], cfg.get('copilotDataDir') or str(Path.home() / '.copilot')
+        sdir = (Path(cpdir) / 'session-state' / raw) if cpdir else None
+        if sdir and sdir.is_dir():
+            jpath = str(sdir / 'workspace.yaml') if (sdir / 'workspace.yaml').is_file() else str(sdir / 'events.jsonl')
+            meta = _copilot_workspace_meta(sdir / 'workspace.yaml') if (sdir / 'workspace.yaml').is_file() else {}
+            if meta.get('cwd') and Path(meta['cwd']).is_dir():
+                wcwd = pcwd = meta['cwd']
+        elif isinstance(cfg.get('workspace'), str) and cfg['workspace'].strip() and Path(cfg['workspace'].strip()).is_dir():
+            wcwd = pcwd = cfg['workspace'].strip()
     elif sid.startswith('claude-jsonl:'):
         raw, cdir = sid.split(':', 1)[1], cfg.get('claudeDataDir') or ''
         m = list((Path(cdir) / 'projects').glob(f'*/{raw}.jsonl')) if cdir else []
@@ -3320,7 +3405,7 @@ def prompt_session(cfg):
         raise ValueError('HARNESS_NATIVE_BINDING_REQUIRED')
     if not re.fullmatch(r'[a-z-]+:[a-zA-Z0-9-]{8,80}', sid):
         raise ValueError('HARNESS_SESSION_INVALID')
-    if not jpath and not sid.startswith('agy:'):
+    if not jpath and not sid.startswith(('agy:', 'copilot:')):
         raise ValueError('HARNESS_SESSION_NOT_FOUND')
     if sid.startswith('agy:') and not (idx and idx.is_file() and row):
         raise ValueError('HARNESS_SESSION_NOT_FOUND')

@@ -18,7 +18,7 @@ import threading
 import time
 
 TOOLS = {
-    'codex': 'app_server_stdio', 'agy': 'acp_stdio', 'pi': 'stdio_rpc',
+    'codex': 'app_server_stdio', 'agy': 'acp_stdio', 'copilot': 'acp_stdio', 'pi': 'stdio_rpc',
     'claude': 'structured_cli', 'dsh': 'native_service',
     'hermes': 'http_service', 'openclaw': 'native_gateway',
 }
@@ -277,6 +277,39 @@ def probe(config):
                 caps = result.get('agentCapabilities') or {}
                 report['advertised_methods'] = {'loadSession': caps.get('loadSession') is True}
                 report['reason'] = 'SESSION_AND_AUTH_NOT_PROBED'
+            elif tool == 'copilot':
+                try:
+                    process = JsonLinesProcess([executable, '--acp', '--stdio'], work, env)
+                    result = process.request({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize',
+                        'params': {'protocolVersion': 1, 'clientCapabilities': {},
+                                   'clientInfo': {'name': 'bob-capability-probe', 'version': '1.0.1'}}})
+                    if not isinstance(result, dict) or 'protocolVersion' not in result:
+                        raise ProbeError('PROTOCOL_INVALID')
+                    report['protocol_verified'] = True
+                    report['observed_transport'] = TOOLS[tool]
+                    report['checks'].append('initialize')
+                    caps = result.get('agentCapabilities') or {}
+                    report['advertised_methods'] = {'loadSession': caps.get('loadSession') is True}
+                    sessions = process.request({'jsonrpc': '2.0', 'id': 2, 'method': 'session/list', 'params': {}})
+                    if isinstance(sessions, dict) and isinstance(sessions.get('sessions'), list):
+                        report['capabilities']['list_sessions'] = 'supported'
+                        report['sample_count'] = len(sessions['sessions'])
+                        report['checks'].append('session/list')
+                        report['process_reused'] = True
+                    cfg_file = Path.home() / '.copilot' / 'config.json'
+                    has_auth = bool(
+                        env.get('COPILOT_GITHUB_TOKEN') or env.get('GH_TOKEN') or env.get('GITHUB_TOKEN')
+                        or (cfg_file.is_file() and cfg_file.stat().st_size > 2)
+                    )
+                    report['auth_state'] = 'authenticated' if has_auth else 'login_required'
+                    if not has_auth:
+                        report['reason'] = 'LOGIN_REQUIRED'
+                except ProbeError as exc:
+                    if str(exc) in ('PROCESS_EXITED', 'PIPE_CLOSED', 'REQUEST_REJECTED'):
+                        report['auth_state'] = 'login_required'
+                        report['reason'] = 'LOGIN_REQUIRED'
+                    else:
+                        raise
             elif tool == 'claude':
                 code, raw = bounded_command([executable, 'auth', 'status', '--json'], work, env)
                 try:

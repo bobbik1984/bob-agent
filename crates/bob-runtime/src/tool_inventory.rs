@@ -23,7 +23,7 @@ pub fn refresh(data:&Path){
  let data=data.to_path_buf();std::thread::spawn(move||{
   let _=crate::agy_directory::ensure_local_grant_registered(&data,"local");
   let mut v=read(&data);let previous=v["tools"].as_array().cloned().unwrap_or_default();let mut tools=Vec::new();
-  for tool in ["dsh","codex","agy","claude","pi"]{
+  for tool in ["dsh","codex","agy","claude","pi","copilot"]{
    let old=previous.iter().find(|x|x["id"]==tool);let now=crate::now_millis();
    let row=if !crate::tool_policy::enabled(&data,"local",tool){
     let mut x=old.cloned().unwrap_or_else(||json!({"id":tool,"installed":executable(tool).is_some(),"observed_at":0}));

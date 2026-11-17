@@ -605,7 +605,7 @@
   "dshStop": "停止",
   "dshStopChecking": "正在核对停止状态…",
   "dshStopUnconfirmed": "未能确认任务已停止，请查看 DSH 原会话。",
-  "createAssistantCommandHelp": "可用 /new-dsh、/new-claude、/new-codex、/new-agy 或 /new-pi 打开表单，依次用 | 指定设备、工作区、项目和标题。",
+  "createAssistantCommandHelp": "可用 /new-dsh、/new-claude、/new-codex、/new-agy、/new-pi 或 /new-copilot 打开表单，依次用 | 指定设备、工作区、项目和标题。",
   "createAssistantDeviceMissing": "指令未匹配到唯一连接，请选择设备。",
   "createNoToolWorkspaces": "此设备未报告该工具可用的工作区。",
   "createFirstMessage": "第一条消息",

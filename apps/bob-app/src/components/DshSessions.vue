@@ -91,7 +91,7 @@ const activeTakeoverKeys=computed(()=>{
 function canReadOrResume(s){return Boolean(s&&(s.historyReadable!==false||s.resumable===true));}
 const isInterruptedCliSession=computed(()=>Boolean(selected.value?.harness==='agy'&&(selected.value?.cliInterrupted===true||history.value?.cli_interrupted===true||(selected.value?.historyReadable===false&&selected.value?.resumable===true))));
 const isDshNativeSession=computed(()=>Boolean(selected.value?.id&&String(selected.value.id).startsWith('session-')));
-const supportsApprovalMode=computed(()=>/^(claude-jsonl|agy|codex):|^session-/.test(selected.value?.id||''));
+const supportsApprovalMode=computed(()=>/^(claude-jsonl|agy|copilot|codex):|^session-/.test(selected.value?.id||''));
 function currentSessionKey(){return `${connection.value||''}:${selected.value?.id||''}`;}
 const effectiveApprovalMode=computed(()=>{
   const ov=sessionApprovalOverrides.value[currentSessionKey()];
@@ -101,7 +101,7 @@ const effectiveApprovalMode=computed(()=>{
   }
   return approvalMode.value;
 });
-const supportsTerminalHandoff=computed(()=>/^(claude-jsonl|codex|agy):/.test(selected.value?.id||''));
+const supportsTerminalHandoff=computed(()=>/^(claude-jsonl|codex|agy|copilot):/.test(selected.value?.id||''));
 function shellQuoteArg(v){
   const s=String(v||'').trim();
   if(!s)return '';
@@ -114,6 +114,7 @@ function buildCliResumeCommand(s,h){
   if(sid.startsWith('claude-jsonl:'))return `${prefix}claude --resume ${shellQuoteArg(sid.slice('claude-jsonl:'.length))}`;
   if(sid.startsWith('codex:'))return `${prefix}codex resume ${shellQuoteArg(sid.slice('codex:'.length))}`;
   if(sid.startsWith('agy:'))return `${prefix}agy`;
+  if(sid.startsWith('copilot:'))return `${prefix}copilot --resume ${shellQuoteArg(sid.slice('copilot:'.length))}`;
   return '';
 }
 const cliResumeCommand=computed(()=>buildCliResumeCommand(selected.value,history.value));
@@ -644,7 +645,7 @@ async function refreshActivity(g,id){
  }catch{if(g===generation)nodeActivity.value=null}
 }
 const activityLabel=computed(()=>stripDots(dshQuestionBlocking.value?t('dshQuestionWaiting'):sending.value?t('dshSendingWaitReceipt'):waitingNativeApproval(nativeDrafts.value)?t('nativeApprovalPending'):isExternalCodexWaitingApproval.value?t('codexExternalWaitingApproval'):isExternalCodexRunning.value&&!awaitingReply.value?t('codexExternalActiveBadge'):replying.value?t('dshReplying'):nodeActivity.value?.running===true?t('dshNodeProcessing'):awaitingReply.value?t('dshAwaitingReply'):''));
-const agentLabel=computed(()=>{const h=selected.value?.harness||history.value?.harness||'';if(h==='agy'||selected.value?.id?.startsWith('agy:'))return t('agyAgent');if(h==='claude'||selected.value?.toolLabel==='Claude')return t('claudeAgent');if(h==='pi'||selected.value?.toolLabel==='Pi')return 'Pi';if(h==='codex'||selected.value?.toolLabel==='Codex')return 'Codex';return t('dshAgent');});
+const agentLabel=computed(()=>{const h=selected.value?.harness||history.value?.harness||'';if(h==='agy'||selected.value?.id?.startsWith('agy:'))return t('agyAgent');if(h==='copilot'||selected.value?.id?.startsWith('copilot:'))return 'Copilot';if(h==='claude'||selected.value?.toolLabel==='Claude')return t('claudeAgent');if(h==='pi'||selected.value?.toolLabel==='Pi')return 'Pi';if(h==='codex'||selected.value?.toolLabel==='Codex')return 'Codex';return t('dshAgent');});
 function formatMessageTime(ts){
  if(ts===null||ts===undefined||ts===''||typeof ts==='boolean')return '';
  const raw=typeof ts==='number'?ts:Number(ts);

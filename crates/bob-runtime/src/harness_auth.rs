@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
-pub const SUPPORTED_TOOLS: [&str; 7] = [
+pub const SUPPORTED_TOOLS: [&str; 8] = [
     "dsh",
     "agy",
     "codex",
@@ -26,6 +26,7 @@ pub const SUPPORTED_TOOLS: [&str; 7] = [
     "pi",
     "hermes",
     "openclaw",
+    "copilot",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -100,6 +101,7 @@ fn capabilities_for(tool: &str) -> Value {
         "pi" => "stdio_rpc",
         "hermes" => "http_sse",
         "openclaw" => "native_gateway",
+        "copilot" => "acp_stdio",
         _ => "unknown",
     };
     json!({
@@ -162,6 +164,7 @@ fn official_login_hint(tool: &str, profile: Option<&str>) -> String {
             profile.unwrap_or("default")
         ),
         "openclaw" => "Complete OpenClaw gateway device pairing and approve `operator.read` / `operator.write` scopes on the gateway host.".to_owned(),
+        "copilot" => "Run `copilot login` on the node under the target OS user to authenticate with GitHub Copilot; Bob communicates via `copilot --acp --stdio`.".to_owned(),
         _ => "Unsupported tool".to_owned(),
     }
 }
@@ -174,7 +177,7 @@ pub fn discover_tool(
     if !SUPPORTED_TOOLS.contains(&tool) {
         return Err("HARNESS_TOOL_UNSUPPORTED");
     }
-    if ["pi", "codex", "claude", "agy"].contains(&tool) {
+    if ["pi", "codex", "claude", "agy", "copilot"].contains(&tool) {
         return Ok(native_report(data_dir, connection_id, tool, true));
     }
     let cfg = find_config(data_dir, connection_id, tool);
@@ -210,7 +213,7 @@ pub fn check_auth(
     if !SUPPORTED_TOOLS.contains(&tool) {
         return Err("HARNESS_TOOL_UNSUPPORTED");
     }
-    if ["pi", "codex", "claude", "agy"].contains(&tool) {
+    if ["pi", "codex", "claude", "agy", "copilot"].contains(&tool) {
         return Ok(native_report(data_dir, connection_id, tool, false));
     }
     let cfg = find_config(data_dir, connection_id, tool);

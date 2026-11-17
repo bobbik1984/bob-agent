@@ -7,6 +7,7 @@ const icon=computed(()=>{
  if(name.includes('claude'))return 'claude.png';
  if(name.includes('codex'))return 'codex.png';
  if(name.includes('antigravity')||name.includes('agy'))return 'antigravity.png';
+ if(name.includes('copilot'))return 'Copilot.png';
  if(name==='pi'||name.startsWith('pi:')||name.startsWith('pi_'))return 'pi.svg';
  return 'deepseek.png';
 });

@@ -5,7 +5,7 @@ import {kernelBridge} from './native-bridge.mjs';
 const props=defineProps({paths:{type:Array,default:()=>[]},global:{type:Boolean,default:false}});
 const {t}=useI18n();
 const rows=ref([]),busy=ref(false),message=ref('');
-const names={dsh:'DSH',codex:'Codex',agy:'Antigravity',claude:'Claude Code',pi:'Pi'};
+const names={dsh:'DSH',codex:'Codex',agy:'Antigravity',claude:'Claude Code',pi:'Pi',copilot:'Copilot'};
 async function load(){
  busy.value=true;message.value='';
  try { const snapshot=await kernelBridge.dshInventory(props.global?'local':props.paths[0]?.id||'local');

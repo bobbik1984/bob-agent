@@ -98,7 +98,7 @@ const newItemTitle = ref('');
 const creationMode = ref('local');
 const firstSessionMessage = ref('');
 const nativeSetupReply = ref('');
-const remoteHarnesses = {dsh:'DSH',claude:'Claude Code',codex:'Codex',agy:'AGY',pi:'Pi'};
+const remoteHarnesses = {dsh:'DSH',claude:'Claude Code',codex:'Codex',agy:'AGY',pi:'Pi',copilot:'Copilot'};
 let nativeSetupTimer;
 const creationConnectionId = ref('');
 const creationDeviceId = ref('');
@@ -112,7 +112,7 @@ const creationError = ref('');
 const remoteCreation = ref(null);
 const directoryCreationRevision = ref(0);
 const creationJournalKey = 'bob-dsh-create-v1';
-const creationToolOrder = ['dsh', 'claude', 'codex', 'agy', 'pi'];
+const creationToolOrder = ['dsh', 'claude', 'codex', 'agy', 'pi', 'copilot'];
 const creationNodes = computed(() => (ctx.modelHub.value?.state?.remote_nodes || []).filter(node => node.enabled !== false));
 const pairedCreationOwners = computed(() => browserClient ? [] : creationNodes.value.filter(node =>
   node.remark === 'web_host' || node.selectedProjectId === 'web_host'));
@@ -1361,7 +1361,7 @@ async function startup() {
 
 async function openAssistantSessionDraft(text) {
   const [command, ...fields] = text.split('|').map(part => part.trim());
-  const natural = /^新建\s*(DSH|Claude(?: Code)?|Codex|AGY|Pi)\s*(?:会话|对话)$/i.exec(command);
+  const natural = /^新建\s*(DSH|Claude(?: Code)?|Codex|AGY|Pi|Copilot)\s*(?:会话|对话)$/i.exec(command);
   const tool = natural ? natural[1].split(' ')[0].toLowerCase() : command.startsWith('/new-') ? command.slice(5) : '';
   if (!Object.hasOwn(remoteHarnesses,tool)) return false;
   startCreateConversation();
@@ -1397,7 +1397,7 @@ async function openAssistantSessionDraft(text) {
 
 async function send() {
   if (sessionId.value && sessionId.value === assistantConversationId.value && !composerAttachments.value.length
-      && /^(?:\/new-(?:dsh|claude|codex|agy|pi)|新建\s*(?:DSH|Claude(?: Code)?|Codex|AGY|Pi)\s*(?:会话|对话))(?:\s*\||$)/i.test(draft.value.trim())
+      && /^(?:\/new-(?:dsh|claude|codex|agy|pi|copilot)|新建\s*(?:DSH|Claude(?: Code)?|Codex|AGY|Pi|Copilot)\s*(?:会话|对话))(?:\s*\||$)/i.test(draft.value.trim())
       && await openAssistantSessionDraft(draft.value.trim())) return;
   if (!canSend.value) return;
   const attBlock = formatComposerAttachments(composerAttachments.value);
