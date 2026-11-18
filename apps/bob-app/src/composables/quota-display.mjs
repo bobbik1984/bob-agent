@@ -4,7 +4,7 @@ export function compactQuota(data, now, windowId = 'weekly') {
   // A short window must never silently replace the selected weekly allowance.
   const w = windows.find(w => w.id === windowId);
   if (!w) return null;
-  const duration = {weekly:604800, five_hour:18000, 'gemini-weekly':604800, 'gemini-5h':18000, '3p-weekly':604800, '3p-5h':18000}[w.id];
+  const duration = {weekly:604800, five_hour:18000, 'gemini-weekly':604800, 'gemini-5h':18000, '3p-weekly':604800, '3p-5h':18000, monthly:2592000}[w.id];
   const seconds = w.resets_at ? Math.max(0, w.resets_at-now) : null;
   const mins = seconds === null ? null : Math.ceil(seconds / 60);
   const days = Math.floor(mins / 1440), hours = Math.floor((mins % 1440) / 60);

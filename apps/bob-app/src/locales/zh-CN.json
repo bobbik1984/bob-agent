@@ -791,6 +791,7 @@
   "quotaWindowExpired": "窗口已到期",
   "quotaSourceNote": "来自已登录工具的官方额度。后台定期更新；过期记录保留标记，不推算新额度。",
   "quotaWeekly": "本周",
+  "quotaMonthly": "本月",
   "quotaFiveHour": "五小时",
   "quotaPrimary": "主窗口",
   "quotaSecondary": "次窗口",

@@ -720,13 +720,14 @@ onUnmounted(() => clearInterval(quotaClock));
 const subscriptionQuotas = computed(() => [
   { id: 'codex', label: 'Codex · ChatGPT', logo: '/logos/codex.png' },
   { id: 'antigravity', label: 'Antigravity', logo: '/logos/antigravity.png' },
-  { id: 'claude', label: 'Claude Code', logo: '/logos/claude.png' },
+  { id: 'copilot', label: 'GitHub Copilot', logo: '/logos/Copilot.png' },
 ].map(item => {
   const data = modelHub.value.state.subscription_quotas?.[item.id];
   const known = ['available', 'stale'].includes(data?.status);
   const windowLabels = {weekly:'quotaWeekly', five_hour:'quotaFiveHour', primary:'quotaPrimary', secondary:'quotaSecondary',
-    'gemini-5h':'quotaGeminiFiveHour', 'gemini-weekly':'quotaGeminiWeekly', '3p-5h':'quotaThirdPartyFiveHour', '3p-weekly':'quotaThirdPartyWeekly'};
-  const compact = compactQuota(data, quotaNow.value, item.id === 'antigravity' ? 'gemini-weekly' : 'weekly');
+    'gemini-5h':'quotaGeminiFiveHour', 'gemini-weekly':'quotaGeminiWeekly', '3p-5h':'quotaThirdPartyFiveHour', '3p-weekly':'quotaThirdPartyWeekly',
+    monthly:'quotaMonthly'};
+  const compact = compactQuota(data, quotaNow.value, item.id === 'antigravity' ? 'gemini-weekly' : item.id === 'copilot' ? 'monthly' : 'weekly');
   return {...item, compact, status: known ? data.status : 'unavailable', source: data?.source_node || '',
     updated: known && data.observed_at ? new Date(data.observed_at * 1000).toLocaleString() : '',
     windows: known ? (data.windows || []).map(w => ({...w, label: windowLabels[w.id] ? t(windowLabels[w.id]) : w.id,

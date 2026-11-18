@@ -10,7 +10,7 @@ pub fn read(data_dir: &Path) -> Value {
         .and_then(|b| serde_json::from_slice::<Value>(&b).ok()).unwrap_or(Value::Null);
     let mut result=sanitize(&snapshot,now);
     if let Ok(policy)=crate::tool_policy::read(data_dir){
-        for (provider,tool) in [("claude","claude"),("codex","codex"),("antigravity","agy")]{
+        for (provider,tool) in [("copilot","copilot"),("codex","codex"),("antigravity","agy")]{
             if policy["tools"][tool]==false && !policy["devices"].as_object().is_some_and(|ds|ds.values().any(|d|d[tool]==true)){
                 result[provider]=json!({"status":"disabled","reason":"TOOL_DISABLED","windows":[]});
             }
@@ -24,7 +24,7 @@ pub fn read(data_dir: &Path) -> Value {
 pub fn from_paired_view(view: &Value) -> Value {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
     let mut providers = view.clone();
-    for provider in ["codex", "antigravity", "claude"] {
+    for provider in ["codex", "antigravity", "copilot"] {
         if providers[provider]["status"] == "stale" {
             providers[provider]["last_error"] = json!("source_stale");
         }
@@ -34,7 +34,7 @@ pub fn from_paired_view(view: &Value) -> Value {
 
 fn sanitize(snapshot: &Value, now: u64) -> Value {
     let mut result = json!({});
-    for provider in ["codex", "antigravity", "claude"] {
+    for provider in ["codex", "antigravity", "copilot"] {
         let unavailable = json!({"status":"unavailable", "reason":"PROVIDER_QUOTA_NOT_CONNECTED", "windows":[]});
         if snapshot["version"] != 1 { result[provider] = unavailable; continue; }
         let item = &snapshot["providers"][provider];
@@ -42,7 +42,7 @@ fn sanitize(snapshot: &Value, now: u64) -> Value {
             result[provider] = unavailable; continue;
         };
         let kind = item["source_kind"].as_str().unwrap_or("");
-        if !matches!((provider, kind), ("codex", "codex_app_server") | ("antigravity", "official_statusline") | ("claude", "official_statusline")) {
+        if !matches!((provider, kind), ("codex", "codex_app_server") | ("antigravity", "official_statusline") | ("copilot", "github_billing_api")) {
             result[provider] = unavailable; continue;
         }
         let windows: Vec<Value> = item["windows"].as_array().into_iter().flatten().take(12).filter_map(|w| {

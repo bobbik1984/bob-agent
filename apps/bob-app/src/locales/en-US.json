@@ -791,6 +791,7 @@
   "quotaWindowExpired": "Window expired",
   "quotaSourceNote": "Official quotas from signed-in tools. Refreshed in the background; expired readings remain marked, never estimated.",
   "quotaWeekly": "Weekly",
+  "quotaMonthly": "Monthly",
   "quotaFiveHour": "Five hours",
   "quotaPrimary": "Primary window",
   "quotaSecondary": "Secondary window",
