@@ -545,7 +545,12 @@ def _consolidate(events, limit=60):
             cts = ts or cts
     flush()
     now_ms = _now()
-    return [{'sequence': i, 'role': r, 'text': t[:32000], 'timestamp': ts or now_ms} for i, (r, t, ts) in enumerate(out[-limit:], 1)]
+    res = []
+    for i, (r, t, ts) in enumerate(out[-limit:], 1):
+        full_refs = sorted(_native_file_references({'role': r, 'text': t}))
+        clipped = t if len(t) <= 32000 else (t[:12000] + '\n...\n' + t[-19900:])
+        res.append({'sequence': i, 'role': r, 'text': clipped, 'timestamp': ts or now_ms, 'file_references': full_refs})
+    return res
 
 def _rpath():
     return Path.home() / '.bob_remote_receipts.json'
@@ -897,7 +902,9 @@ def read_session_page(cfg, sid):
         else:
             msgs = [{'sequence': 1, 'role': 'assistant', 'text': f'Session `{sid}` loaded (`{ws or "default"}`).', 'timestamp': _now()}]
     for message in msgs:
-        message['file_references']=sorted(_native_file_references(message))
+        merged_refs = set(message.get('file_references') or [])
+        merged_refs.update(_native_file_references(message))
+        message['file_references'] = sorted(merged_refs)
     out = {'harness': h, 'workspace': ws, 'messages': msgs, 'cli_interrupted': cli_interrupted,
            'request_results': [{'request_id': r['request_id'], 'status': r.get('execution_status', 'completed'), 'error_code':r.get('error_code'), 'observed_at':r.get('ended_at') or r.get('started_at')} for r in recs if r.get('request_id')] + native_results}
     if cfg.get('mode') == 'page':
@@ -1050,6 +1057,7 @@ def preview_native_file(cfg):
         raise ValueError('DSH_FILE_TYPE_UNSUPPORTED')
     refs=set()
     for message in page.get('messages',[]):
+        refs.update(message.get('file_references') or [])
         refs.update(_native_file_references(message))
     if requested not in refs and relative.as_posix() not in refs and str(root/relative) not in refs:
         raise ValueError('DSH_FILE_NOT_REFERENCED')
