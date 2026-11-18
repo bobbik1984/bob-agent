@@ -1163,6 +1163,24 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
             let batch = ctx.app.close_triage_batch(id, status, at).map_err(|_| "TRIAGE_CLOSE_REJECTED")?;
             serde_json::to_value(batch).map_err(|_| "TRIAGE_CLOSE_REJECTED")
         }
+        "app_inbox_resolution_set" => {
+            let capture_id = args.get("captureId").and_then(Value::as_str).ok_or("INBOX_RESOLUTION_REJECTED")?;
+            let status = args.get("resolutionStatus").and_then(Value::as_str).ok_or("INBOX_RESOLUTION_REJECTED")?;
+            let note = args.get("resolutionNote").and_then(Value::as_str);
+            let triage = ctx
+                .app
+                .set_inbox_resolution(capture_id, status, note, at)
+                .map_err(|_| "INBOX_RESOLUTION_REJECTED")?;
+            serde_json::to_value(triage).map_err(|_| "INBOX_RESOLUTION_REJECTED")
+        }
+        "app_inbox_update_content" => {
+            let capture_id = args.get("captureId").and_then(Value::as_str).ok_or("INBOX_UPDATE_REJECTED")?;
+            let content = args.get("content").and_then(Value::as_str).ok_or("INBOX_UPDATE_REJECTED")?;
+            ctx.app
+                .update_inbox_content(capture_id, content)
+                .map_err(|_| "INBOX_UPDATE_REJECTED")?;
+            Ok(json!({ "ok": true, "capture_id": capture_id }))
+        }
         "app_memory_state" => {
             let id = args.get("id").and_then(Value::as_str).ok_or("MEMORY_UPDATE_FAILED")?;
             let new_state = args
@@ -3938,6 +3956,13 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
         if command.trim() == "app_inbox_triage_draft" {
             drop(guard);
             let result = inbox_triage::draft(&state, &args);
+            let (status,value)=match result {Ok(result)=>(200,json!({"ok":true,"result":result})),Err(e)=>(400,json!({"ok":false,"error":e}))};
+            write_json_response(&mut stream,status,&value.to_string());
+            return;
+        }
+        if command.trim() == "app_inbox_check_implemented" {
+            drop(guard);
+            let result = inbox_triage::check_implemented(&state, &args);
             let (status,value)=match result {Ok(result)=>(200,json!({"ok":true,"result":result})),Err(e)=>(400,json!({"ok":false,"error":e}))};
             write_json_response(&mut stream,status,&value.to_string());
             return;

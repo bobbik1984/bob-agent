@@ -11,6 +11,8 @@ const unsortedCount = computed(() => inbox?.unsortedCount?.value ?? 0);
 const sortedCount = computed(() => inbox?.sortedCount?.value ?? 0);
 const laterCount = computed(() => inbox?.laterCount?.value ?? 0);
 const filteredItems = computed(() => inbox?.filteredItems?.value || []);
+const sortedProjectGroups = computed(() => inbox?.sortedProjectGroups?.value || []);
+const checkingImplemented = computed(() => inbox?.checkingImplemented?.value || false);
 const triageDraft = computed(() => inbox?.triageDraft?.value || null);
 const triageDraftBusy = computed(() => inbox?.triageDraftBusy?.value || false);
 const triageStatusNotice = computed(() => inbox?.triageStatusNotice?.value || '');
@@ -54,6 +56,80 @@ const creatingProjectForItemId = ref(null);
 const creatingProjectSuggIndex = ref(-1);
 const newProjectTitleInput = ref('');
 const creatingProjectBusy = ref(false);
+const editingContentId = ref(null);
+const editingContentText = ref('');
+const editingContentBusy = ref(false);
+const collapsedGroups = ref({});
+
+const displayGroups = computed(() => {
+  if (inboxFilter.value === 'sorted') {
+    return sortedProjectGroups.value.map(g => ({ ...g, showHeader: true }));
+  }
+  return filteredItems.value.length
+    ? [{ key: '__flat__', showHeader: false, items: filteredItems.value }]
+    : [];
+});
+
+function toggleGroupCollapse(key) {
+  collapsedGroups.value = {
+    ...collapsedGroups.value,
+    [key]: !collapsedGroups.value[key],
+  };
+}
+
+function startEditContent(item) {
+  editingContentId.value = item.id;
+  editingContentText.value = getSparkText(item);
+}
+
+function cancelEditContent() {
+  editingContentId.value = null;
+  editingContentText.value = '';
+}
+
+async function saveEditContent(item) {
+  const text = editingContentText.value.trim();
+  if (!text || editingContentBusy.value || !inbox?.updateItemContent) return;
+  editingContentBusy.value = true;
+  try {
+    const ok = await inbox.updateItemContent(item.id, text);
+    if (ok) cancelEditContent();
+  } finally {
+    editingContentBusy.value = false;
+  }
+}
+
+function toggleItemResolution(item) {
+  if (!inbox?.setItemResolution) return;
+  const next = item.resolution_status === 'implemented' ? 'pending' : 'implemented';
+  inbox.setItemResolution(item.id, next, item.resolution_note || null);
+}
+
+function checkGroupImplemented(group) {
+  if (!inbox?.checkImplemented || checkingImplemented.value) return;
+  if (group.projectId) {
+    inbox.checkImplemented({ projectId: group.projectId });
+  } else {
+    inbox.checkImplemented({ captureIds: group.items.map(i => i.id) });
+  }
+}
+
+function checkSingleImplemented(item) {
+  if (!inbox?.checkImplemented || checkingImplemented.value) return;
+  inbox.checkImplemented({ captureIds: [item.id] });
+}
+
+function getResolutionLabel(status) {
+  if (status === 'implemented') return t('inboxImplemented');
+  if (status === 'wont_do') return t('inboxWontDo');
+  return t('inboxPendingImpl');
+}
+
+function getResolutionChipClass(status) {
+  if (status === 'implemented') return 'chip green';
+  if (status === 'wont_do') return 'chip gray';
+  return 'chip blue';
+}
 
 function getSparkText(item) {
   return item.content || item.content_ref || item.contentRef || '';
@@ -413,10 +489,10 @@ onMounted(() => {
         </div>
       </section>
 
-      <!-- Unified Sparks List (Each item displayed only once) -->
-      <section class="spark-list" aria-label="Sparks List">
+      <!-- Unified Sparks List (Grouped by project in Sorted tab) -->
+      <section class="spark-groups-wrap" aria-label="Sparks List">
         <!-- Empty State -->
-        <div v-if="!filteredItems.length" class="card empty inbox-empty-state">
+        <div v-if="!displayGroups.length" class="card empty inbox-empty-state">
           <div class="inbox-empty-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12" /><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg>
           </div>
@@ -426,41 +502,112 @@ onMounted(() => {
           </p>
         </div>
 
-        <!-- Spark Item Cards -->
-        <article
-          v-for="item in filteredItems"
-          :key="item.id"
-          class="spark-card"
-          :class="{
-            'is-sorted': item.triage_status === 'sorted',
-            'has-suggestion': getSuggestionForItem(item.id) && !getSuggestionForItem(item.id).suggestion._applied && item.triage_status !== 'sorted'
-          }"
+        <div
+          v-for="group in displayGroups"
+          :key="group.key"
+          :class="group.showHeader ? 'inbox-project-group' : ''"
         >
-          <!-- Top Row: Spark Title + Destination Tag -->
-          <div class="spark-card-header">
-            <strong class="spark-card-title">{{ getSparkTitle(item) }}</strong>
-
-            <div class="spark-card-tag-wrap">
-              <!-- Sorted: Confirmed Tag -->
-              <span v-if="item.triage_status === 'sorted'" :class="getChipClass(item.destination_kind)">
-                {{ getDestBadgeLabel(item) }}
+          <header v-if="group.showHeader" class="inbox-project-group-header">
+            <button
+              type="button"
+              class="inbox-project-group-toggle"
+              @click="toggleGroupCollapse(group.key)"
+            >
+              <span class="inbox-group-chevron" :class="{ collapsed: collapsedGroups[group.key] }">▾</span>
+              <strong class="inbox-project-group-title">{{ group.title }}</strong>
+              <span class="inbox-project-group-summary">
+                {{ t('inboxProjectGroupSummary', { total: group.items.length, done: group.implementedCount, pending: group.pendingCount }) }}
               </span>
+            </button>
+            <button
+              v-if="!group.isOther"
+              type="button"
+              class="btn ghost tiny"
+              :disabled="checkingImplemented"
+              @click="checkGroupImplemented(group)"
+            >
+              {{ checkingImplemented ? t('inboxCheckingImplemented') : t('inboxCheckImplementedBtn') }}
+            </button>
+          </header>
 
-              <!-- Has unapplied AI suggestion -->
-              <span
-                v-else-if="getSuggestionForItem(item.id) && !getSuggestionForItem(item.id).suggestion._applied"
-                :class="getChipClass(getSuggestionForItem(item.id).suggestion.destination)"
-              >
-                {{ getDestBadgeLabel(getSuggestionForItem(item.id).suggestion) }}
-              </span>
+          <div v-show="!group.showHeader || !collapsedGroups[group.key]" class="spark-list">
+            <!-- Spark Item Cards -->
+            <article
+              v-for="item in group.items"
+              :key="item.id"
+              class="spark-card"
+              :class="{
+                'is-sorted': item.triage_status === 'sorted',
+                'is-implemented': item.triage_status === 'sorted' && item.resolution_status === 'implemented',
+                'has-suggestion': getSuggestionForItem(item.id) && !getSuggestionForItem(item.id).suggestion._applied && item.triage_status !== 'sorted'
+              }"
+            >
+              <!-- Top Row: Spark Title + Destination/Resolution Tags -->
+              <div class="spark-card-header">
+                <strong class="spark-card-title">{{ getSparkTitle(item) }}</strong>
 
-              <!-- Unsorted without suggestion -->
-              <span v-else class="chip gray">{{ t('inboxStatusUnsorted') }}</span>
-            </div>
-          </div>
+                <div class="spark-card-tag-wrap">
+                  <span
+                    v-if="item.triage_status === 'sorted' && item.destination_kind !== 'keep'"
+                    :class="getResolutionChipClass(item.resolution_status)"
+                  >
+                    {{ getResolutionLabel(item.resolution_status) }}
+                  </span>
 
-          <!-- Full Width Spark Body -->
-          <p v-if="getSparkBody(item)" class="spark-card-body">{{ getSparkBody(item) }}</p>
+                  <!-- Sorted: Confirmed Tag -->
+                  <span v-if="item.triage_status === 'sorted'" :class="getChipClass(item.destination_kind)">
+                    {{ getDestBadgeLabel(item) }}
+                  </span>
+
+                  <!-- Has unapplied AI suggestion -->
+                  <span
+                    v-else-if="getSuggestionForItem(item.id) && !getSuggestionForItem(item.id).suggestion._applied"
+                    :class="getChipClass(getSuggestionForItem(item.id).suggestion.destination)"
+                  >
+                    {{ getDestBadgeLabel(getSuggestionForItem(item.id).suggestion) }}
+                  </span>
+
+                  <!-- Unsorted without suggestion -->
+                  <span v-else class="chip gray">{{ t('inboxStatusUnsorted') }}</span>
+                </div>
+              </div>
+
+              <!-- Inline Content Edit Form -->
+              <div v-if="editingContentId === item.id" class="spark-content-edit-box">
+                <textarea
+                  v-model="editingContentText"
+                  class="inbox-capture-input"
+                  rows="3"
+                  :placeholder="t('inboxEditContentPlaceholder')"
+                  :disabled="editingContentBusy"
+                ></textarea>
+                <div class="sugg-actions-row">
+                  <button
+                    type="button"
+                    class="btn primary tiny"
+                    :disabled="!editingContentText.trim() || editingContentBusy"
+                    @click="saveEditContent(item)"
+                  >
+                    {{ t('save') }}
+                  </button>
+                  <button
+                    type="button"
+                    class="btn ghost tiny"
+                    :disabled="editingContentBusy"
+                    @click="cancelEditContent"
+                  >
+                    {{ t('cancel') }}
+                  </button>
+                </div>
+              </div>
+
+              <!-- Full Width Spark Body -->
+              <p v-else-if="getSparkBody(item)" class="spark-card-body">{{ getSparkBody(item) }}</p>
+
+              <!-- Resolution Evidence Note (when checked) -->
+              <div v-if="item.triage_status === 'sorted' && item.resolution_note" class="spark-resolution-note">
+                {{ item.resolution_note }}
+              </div>
 
           <!-- AI Reasoning Sentence (if suggested and not yet applied) -->
           <div
@@ -578,6 +725,29 @@ onMounted(() => {
               <button
                 type="button"
                 class="btn ghost tiny"
+                @click="toggleItemResolution(item)"
+              >
+                {{ item.resolution_status === 'implemented' ? t('inboxMarkPending') : t('inboxMarkImplemented') }}
+              </button>
+              <button
+                v-if="item.destination_kind === 'project_todo'"
+                type="button"
+                class="btn ghost tiny"
+                :disabled="checkingImplemented"
+                @click="checkSingleImplemented(item)"
+              >
+                {{ t('inboxCheckImplementedBtn') }}
+              </button>
+              <button
+                type="button"
+                class="btn ghost tiny"
+                @click="startEditContent(item)"
+              >
+                {{ t('inboxEditContentBtn') }}
+              </button>
+              <button
+                type="button"
+                class="btn ghost tiny"
                 @click="handleReopenItem(item)"
               >
                 {{ t('inboxReopenBtn') }}
@@ -626,13 +796,104 @@ onMounted(() => {
               </div>
             </div>
           </div>
-        </article>
+            </article>
+          </div>
+        </div>
       </section>
     </div>
   </div>
 </template>
 
 <style scoped>
+.spark-groups-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.inbox-project-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--bg-secondary);
+}
+
+.inbox-project-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.inbox-project-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.inbox-group-chevron {
+  display: inline-block;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  transition: transform 0.15s ease;
+}
+
+.inbox-group-chevron.collapsed {
+  transform: rotate(-90deg);
+}
+
+.inbox-project-group-title {
+  font-size: var(--text-md);
+  color: var(--text-primary);
+}
+
+.inbox-project-group-summary {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.spark-card-tag-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.spark-meta-right {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.spark-resolution-note {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border-left: 2px solid var(--user-accent);
+  padding: 0.35rem 0.6rem;
+  border-radius: var(--radius-sm);
+}
+
+.spark-content-edit-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.spark-card.is-implemented {
+  opacity: 0.85;
+}
 .inbox-empty-state {
   text-align: center;
   padding: 3rem 1.5rem;

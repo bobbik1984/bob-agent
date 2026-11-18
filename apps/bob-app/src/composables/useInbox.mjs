@@ -18,6 +18,7 @@ export function useInbox(ctx = {}) {
   const captureInput = ref('');
   const captureMediaId = ref(null);
   const captureBusy = ref(false);
+  const checkingImplemented = ref(false);
 
   const unsortedCount = computed(() => {
     return inboxItems.value.filter(
@@ -55,6 +56,50 @@ export function useInbox(ctx = {}) {
       return list.filter(
         item => item.triage_status === 'sorted' && item.destination_kind !== 'keep',
       );
+    }
+    return list;
+  });
+
+  const sortedProjectGroups = computed(() => {
+    const sorted = filteredItems.value.filter(
+      item => item.triage_status === 'sorted' && item.destination_kind !== 'keep',
+    );
+    const groups = new Map();
+    const otherItems = [];
+    for (const item of sorted) {
+      if (item.destination_kind === 'project_todo') {
+        const key = item.destination_ref_id || item.destination_label || '__project__';
+        const title = item.destination_label || item.destination_ref_id || key;
+        if (!groups.has(key)) {
+          groups.set(key, {
+            key,
+            projectId: item.destination_ref_id || null,
+            title,
+            isOther: false,
+            items: [],
+            implementedCount: 0,
+            pendingCount: 0,
+          });
+        }
+        const g = groups.get(key);
+        g.items.push(item);
+        if (item.resolution_status === 'implemented') g.implementedCount += 1;
+        else if (item.resolution_status !== 'wont_do') g.pendingCount += 1;
+      } else {
+        otherItems.push(item);
+      }
+    }
+    const list = [...groups.values()].sort((a, b) => b.items.length - a.items.length || a.title.localeCompare(b.title));
+    if (otherItems.length) {
+      list.push({
+        key: '__other__',
+        projectId: null,
+        title: t('inboxOtherDest'),
+        isOther: true,
+        items: otherItems,
+        implementedCount: otherItems.filter(i => i.resolution_status === 'implemented').length,
+        pendingCount: otherItems.filter(i => i.resolution_status !== 'implemented' && i.resolution_status !== 'wont_do').length,
+      });
     }
     return list;
   });
@@ -295,6 +340,51 @@ export function useInbox(ctx = {}) {
     return { id: finalId, title: finalTitle };
   }
 
+  async function setItemResolution(captureId, resolutionStatus, resolutionNote = null) {
+    if (!available || !kernelBridge.inboxResolutionSet) return;
+    inboxBusy.value = true;
+    try {
+      await kernelBridge.inboxResolutionSet({ captureId, resolutionStatus, resolutionNote });
+      await loadInbox();
+    } catch (err) {
+      console.error('Failed to update inbox resolution:', err);
+    } finally {
+      inboxBusy.value = false;
+    }
+  }
+
+  async function updateItemContent(captureId, content) {
+    if (!available || !kernelBridge.inboxUpdateContent) return false;
+    const trimmed = String(content || '').trim();
+    if (!trimmed) return false;
+    inboxBusy.value = true;
+    try {
+      await kernelBridge.inboxUpdateContent({ captureId, content: trimmed });
+      await loadInbox();
+      return true;
+    } catch (err) {
+      console.error('Failed to update inbox content:', err);
+      return false;
+    } finally {
+      inboxBusy.value = false;
+    }
+  }
+
+  async function checkImplemented({ projectId = null, captureIds = null } = {}) {
+    if (!available || !kernelBridge.inboxCheckImplemented) return null;
+    checkingImplemented.value = true;
+    try {
+      const res = await kernelBridge.inboxCheckImplemented({ projectId, captureIds });
+      await loadInbox();
+      return res;
+    } catch (err) {
+      console.error('Failed to check implemented status:', err);
+      return null;
+    } finally {
+      checkingImplemented.value = false;
+    }
+  }
+
   return {
     inboxItems,
     inboxBusy,
@@ -303,6 +393,7 @@ export function useInbox(ctx = {}) {
     sortedCount,
     laterCount,
     filteredItems,
+    sortedProjectGroups,
     triageDraft,
     triageDraftBusy,
     triageDraftError,
@@ -310,6 +401,7 @@ export function useInbox(ctx = {}) {
     captureInput,
     captureMediaId,
     captureBusy,
+    checkingImplemented,
     loadInbox,
     loadTriageDraft,
     dismissTriageDraft,
@@ -318,5 +410,8 @@ export function useInbox(ctx = {}) {
     submitZeroDecisionCapture,
     manuallySetItemDestination,
     createAndAssignProject,
+    setItemResolution,
+    updateItemContent,
+    checkImplemented,
   };
 }

@@ -335,6 +335,19 @@ export function createKernelBridge(invoke, isAvailable) {
       call('app_inbox_triage_draft', { regenerate: Boolean(regenerate) }),
     inboxTriageClose: ({ batchId, status }) =>
       call('app_inbox_triage_close', { batchId, status }),
+    inboxResolutionSet: ({ captureId, resolutionStatus, resolutionNote = null }) =>
+      call('app_inbox_resolution_set', {
+        captureId,
+        resolutionStatus,
+        resolutionNote: resolutionNote || null,
+      }),
+    inboxUpdateContent: ({ captureId, content }) =>
+      call('app_inbox_update_content', { captureId, content }),
+    inboxCheckImplemented: ({ projectId = null, captureIds = null } = {}) =>
+      call('app_inbox_check_implemented', {
+        projectId: projectId || null,
+        captureIds: Array.isArray(captureIds) ? captureIds : null,
+      }),
     memoryState: (id, newState) => call('app_memory_state', { id, newState }),
     decisionRecord: ({
       id,

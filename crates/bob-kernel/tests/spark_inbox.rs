@@ -316,3 +316,24 @@ fn daily_review_drafts_supersede_close_and_survive_reopen() {
     let app = LocalApp::open(&db).unwrap();
     assert_eq!(app.latest_triage_draft().unwrap().unwrap().id, "tb-3");
 }
+
+#[test]
+fn resolution_status_and_content_edit_persist() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = LocalApp::open(&dir.path().join("inbox-res.db")).unwrap();
+    app.capture_with_image("r1", None, "old spark text", None, None, None, 10).unwrap();
+    app.set_capture_triage("r1", Some(&dest("project_todo", "proj-bob", "Bob")), None, 0, 20).unwrap();
+
+    let updated = app.set_inbox_resolution("r1", "implemented", Some("命中 commit abc123"), 30).unwrap();
+    assert_eq!(updated.resolution_status, "implemented");
+    assert_eq!(updated.resolution_note.as_deref(), Some("命中 commit abc123"));
+    assert_eq!(updated.resolved_at, Some(30));
+
+    app.update_inbox_content("r1", "new edited spark text").unwrap();
+    let list = app.list_inbox(Some("sorted")).unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].capture.content_ref, "new edited spark text");
+    assert_eq!(list[0].resolution_status, "implemented");
+    assert_eq!(list[0].resolution_note.as_deref(), Some("命中 commit abc123"));
+    assert!(app.set_inbox_resolution("r1", "invalid_status", None, 40).is_err());
+}

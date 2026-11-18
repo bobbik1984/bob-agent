@@ -15,10 +15,19 @@ use serde::{Deserialize, Serialize};
 
 const SCHEMA: &str = include_str!("../migrations/0011.sql");
 const SCHEMA_0012: &str = include_str!("../migrations/0012.sql");
+const SCHEMA_0015: &str = include_str!("../migrations/0015.sql");
 
 pub const TRIAGE_UNSORTED: &str = "unsorted";
 pub const TRIAGE_SORTED: &str = "sorted";
 pub const DESTINATION_KINDS: [&str; 4] = ["project_todo", "calendar", "note", "merged"];
+pub const RESOLUTION_PENDING: &str = "pending";
+pub const RESOLUTION_IMPLEMENTED: &str = "implemented";
+pub const RESOLUTION_WONT_DO: &str = "wont_do";
+pub const RESOLUTION_STATUSES: [&str; 3] = [RESOLUTION_PENDING, RESOLUTION_IMPLEMENTED, RESOLUTION_WONT_DO];
+
+fn default_resolution_status() -> String {
+    RESOLUTION_PENDING.to_owned()
+}
 
 const MAX_REF_LEN: usize = 512;
 const MAX_LABEL_LEN: usize = 256;
@@ -50,7 +59,8 @@ fn apply_versioned(tx: &Transaction<'_>, version: i64, sql: &str, now: i64) -> R
 
 pub(crate) fn migrate(tx: &Transaction<'_>, now: i64) -> Result<()> {
     apply_versioned(tx, 11, SCHEMA, now)?;
-    apply_versioned(tx, 12, SCHEMA_0012, now)
+    apply_versioned(tx, 12, SCHEMA_0012, now)?;
+    apply_versioned(tx, 15, SCHEMA_0015, now)
 }
 
 /// A persisted Daily Review draft (BOB-D-014 Step 2). `payload_json` is produced and
@@ -103,6 +113,12 @@ pub struct CaptureTriage {
     pub destination_ref_id: Option<String>,
     pub destination_label: Option<String>,
     pub triage_batch_id: Option<String>,
+    #[serde(default = "default_resolution_status")]
+    pub resolution_status: String,
+    #[serde(default)]
+    pub resolution_note: Option<String>,
+    #[serde(default)]
+    pub resolved_at: Option<i64>,
     pub version: i64,
     pub updated_at: i64,
 }
@@ -114,6 +130,8 @@ impl CaptureTriage {
             && self.destination_ref_id == other.destination_ref_id
             && self.destination_label == other.destination_label
             && self.triage_batch_id == other.triage_batch_id
+            && self.resolution_status == other.resolution_status
+            && self.resolution_note == other.resolution_note
     }
 
     /// Shape and vocabulary check shared by local writes, Home receive and bundle merge.
@@ -135,12 +153,14 @@ impl CaptureTriage {
             _ => false,
         };
         if !status_ok
+            || !RESOLUTION_STATUSES.contains(&self.resolution_status.as_str())
             || self.capture_id.trim().is_empty()
             || self.capture_id.len() > 128
             || self.version < 1
             || !bounded(&self.destination_ref_id, MAX_REF_LEN)
             || !bounded(&self.destination_label, MAX_LABEL_LEN)
             || !bounded(&self.triage_batch_id, MAX_BATCH_LEN)
+            || !bounded(&self.resolution_note, 1024)
         {
             return Err(Error::InvalidTransition);
         }
@@ -159,13 +179,16 @@ pub struct InboxItem {
     pub destination_ref_id: Option<String>,
     pub destination_label: Option<String>,
     pub triage_batch_id: Option<String>,
+    pub resolution_status: String,
+    pub resolution_note: Option<String>,
+    pub resolved_at: Option<i64>,
     pub triage_version: i64,
 }
 
 pub(crate) fn read_triage(db: &rusqlite::Connection, capture_id: &str) -> Result<Option<CaptureTriage>> {
     db.query_row(
         "SELECT capture_id,triage_status,destination_kind,destination_ref_id,destination_label,
-                triage_batch_id,version,updated_at
+                triage_batch_id,resolution_status,resolution_note,resolved_at,version,updated_at
          FROM capture_triage WHERE capture_id=?1",
         [capture_id],
         |r| {
@@ -176,8 +199,11 @@ pub(crate) fn read_triage(db: &rusqlite::Connection, capture_id: &str) -> Result
                 destination_ref_id: r.get(3)?,
                 destination_label: r.get(4)?,
                 triage_batch_id: r.get(5)?,
-                version: r.get(6)?,
-                updated_at: r.get(7)?,
+                resolution_status: r.get(6)?,
+                resolution_note: r.get(7)?,
+                resolved_at: r.get(8)?,
+                version: r.get(9)?,
+                updated_at: r.get(10)?,
             })
         },
     )
@@ -188,7 +214,7 @@ pub(crate) fn read_triage(db: &rusqlite::Connection, capture_id: &str) -> Result
 pub(crate) fn list_all_triage(db: &rusqlite::Connection) -> Result<Vec<CaptureTriage>> {
     let mut stmt = db.prepare(
         "SELECT capture_id,triage_status,destination_kind,destination_ref_id,destination_label,
-                triage_batch_id,version,updated_at
+                triage_batch_id,resolution_status,resolution_note,resolved_at,version,updated_at
          FROM capture_triage ORDER BY capture_id",
     )?;
     let rows = stmt.query_map([], |r| {
@@ -199,8 +225,11 @@ pub(crate) fn list_all_triage(db: &rusqlite::Connection) -> Result<Vec<CaptureTr
             destination_ref_id: r.get(3)?,
             destination_label: r.get(4)?,
             triage_batch_id: r.get(5)?,
-            version: r.get(6)?,
-            updated_at: r.get(7)?,
+            resolution_status: r.get(6)?,
+            resolution_note: r.get(7)?,
+            resolved_at: r.get(8)?,
+            version: r.get(9)?,
+            updated_at: r.get(10)?,
         })
     })?;
     rows.collect::<std::result::Result<Vec<_>, _>>()
@@ -210,12 +239,15 @@ pub(crate) fn list_all_triage(db: &rusqlite::Connection) -> Result<Vec<CaptureTr
 fn write_triage(tx: &Transaction<'_>, t: &CaptureTriage) -> Result<()> {
     tx.execute(
         "INSERT INTO capture_triage(capture_id,triage_status,destination_kind,destination_ref_id,
-                                    destination_label,triage_batch_id,version,updated_at)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8)
+                                    destination_label,triage_batch_id,resolution_status,resolution_note,
+                                    resolved_at,version,updated_at)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
          ON CONFLICT(capture_id) DO UPDATE SET
            triage_status=excluded.triage_status, destination_kind=excluded.destination_kind,
            destination_ref_id=excluded.destination_ref_id, destination_label=excluded.destination_label,
-           triage_batch_id=excluded.triage_batch_id, version=excluded.version, updated_at=excluded.updated_at",
+           triage_batch_id=excluded.triage_batch_id, resolution_status=excluded.resolution_status,
+           resolution_note=excluded.resolution_note, resolved_at=excluded.resolved_at,
+           version=excluded.version, updated_at=excluded.updated_at",
         params![
             t.capture_id,
             t.triage_status,
@@ -223,6 +255,9 @@ fn write_triage(tx: &Transaction<'_>, t: &CaptureTriage) -> Result<()> {
             t.destination_ref_id,
             t.destination_label,
             t.triage_batch_id,
+            t.resolution_status,
+            t.resolution_note,
+            t.resolved_at,
             t.version,
             t.updated_at
         ],
@@ -293,7 +328,8 @@ impl LocalApp {
         let mut stmt = self.store.db.prepare(
             "SELECT c.id,c.origin_device_id,c.source_message_id,c.content_ref,c.content_sha256,c.created_at,
                     COALESCE(t.triage_status,'unsorted'),t.destination_kind,t.destination_ref_id,
-                    t.destination_label,t.triage_batch_id,COALESCE(t.version,0)
+                    t.destination_label,t.triage_batch_id,COALESCE(t.resolution_status,'pending'),
+                    t.resolution_note,t.resolved_at,COALESCE(t.version,0)
              FROM captures c LEFT JOIN capture_triage t ON t.capture_id=c.id
              WHERE ?1 IS NULL OR COALESCE(t.triage_status,'unsorted')=?1
              ORDER BY c.created_at DESC, c.rowid DESC",
@@ -313,7 +349,10 @@ impl LocalApp {
                 destination_ref_id: r.get(8)?,
                 destination_label: r.get(9)?,
                 triage_batch_id: r.get(10)?,
-                triage_version: r.get(11)?,
+                resolution_status: r.get(11)?,
+                resolution_note: r.get(12)?,
+                resolved_at: r.get(13)?,
+                triage_version: r.get(14)?,
             })
         })?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
@@ -346,6 +385,9 @@ impl LocalApp {
             destination_ref_id: destination.and_then(|d| trimmed(d.ref_id.as_deref())),
             destination_label: destination.and_then(|d| trimmed(d.label.as_deref())),
             triage_batch_id: trimmed(batch_id),
+            resolution_status: RESOLUTION_PENDING.to_owned(),
+            resolution_note: None,
+            resolved_at: None,
             version: expected_version.max(0) + 1,
             updated_at: now,
         };
@@ -389,6 +431,81 @@ impl LocalApp {
         }
         tx.commit()?;
         Ok(applied)
+    }
+
+    /// Update the implementation/resolution status of a sorted inbox item.
+    pub fn set_inbox_resolution(
+        &mut self,
+        capture_id: &str,
+        resolution_status: &str,
+        resolution_note: Option<&str>,
+        now: i64,
+    ) -> Result<CaptureTriage> {
+        let status = resolution_status.trim();
+        if !RESOLUTION_STATUSES.contains(&status) {
+            return Err(Error::InvalidTransition);
+        }
+        let note = resolution_note
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.chars().take(1000).collect::<String>());
+        let home = self.paired_home()?;
+        let origin = self.origin.clone();
+        let tx = self
+            .store
+            .db
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = read_triage(&tx, capture_id.trim())?.ok_or(Error::InvalidTransition)?;
+        let resolved_at = if status == RESOLUTION_IMPLEMENTED || status == RESOLUTION_WONT_DO {
+            Some(now)
+        } else {
+            None
+        };
+        let applied = CaptureTriage {
+            resolution_status: status.to_owned(),
+            resolution_note: note,
+            resolved_at,
+            version: current.version + 1,
+            updated_at: now,
+            ..current.clone()
+        };
+        applied.validate()?;
+        write_triage(&tx, &applied)?;
+        if let Some((home_id, home_epoch, _)) = home {
+            crate::personal_ops::insert_personal_sync(
+                &tx,
+                &origin,
+                (&home_id, home_epoch),
+                ("capture_triage", &applied.capture_id, "upsert"),
+                current.version,
+                &serde_json::to_string(&applied)?,
+                now,
+            )?;
+        }
+        tx.commit()?;
+        Ok(applied)
+    }
+
+    /// Edit the text content of an existing inbox spark.
+    pub fn update_inbox_content(
+        &mut self,
+        capture_id: &str,
+        content: &str,
+    ) -> Result<()> {
+        let id = capture_id.trim();
+        let trimmed = content.trim();
+        if id.is_empty() || trimmed.is_empty() {
+            return Err(Error::InvalidTransition);
+        }
+        let sha = digest(trimmed.as_bytes());
+        let changed = self.store.db.execute(
+            "UPDATE captures SET content_ref=?1, content_sha256=?2 WHERE id=?3",
+            params![trimmed, sha, id],
+        )?;
+        if changed == 0 {
+            return Err(Error::InvalidTransition);
+        }
+        Ok(())
     }
 }
 
