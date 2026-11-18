@@ -1413,6 +1413,23 @@ def request_native_cancel(cfg):
             except OSError:
                 pass
         return {'session_id': sid, 'request_id': rid, 'status': 'released', 'released': True}
+    if rid == '__bob_ack_unknown__':
+        if not sid.startswith(('codex:', 'pi:', 'agy:', 'copilot:', 'claude-jsonl:')):
+            raise ValueError('HARNESS_CANCEL_UNSUPPORTED')
+        _stream_records(sid)
+        cleared = 0
+        now_ts = _now()
+        with closing(_stream_db()) as db, db:
+            db.execute('BEGIN IMMEDIATE')
+            for req_id, raw_body in db.execute('SELECT id, body FROM requests WHERE session=?', (sid,)).fetchall():
+                record = json.loads(raw_body)
+                if record.get('execution_status') == 'unknown':
+                    code = record.get('error_code') or 'HARNESS_UNKNOWN_ACKNOWLEDGED'
+                    record.update(execution_status='error', error_code=code, acknowledged_at=now_ts, ended_at=record.get('ended_at') or now_ts)
+                    db.execute('UPDATE requests SET body=? WHERE id=?', (json.dumps(record, ensure_ascii=False), req_id))
+                    db.execute('INSERT INTO events(request,session,kind,payload,at) VALUES(?,?,?,?,?)', (req_id, sid, 'error', json.dumps({'code': code}), now_ts))
+                    cleared += 1
+        return {'session_id': sid, 'request_id': rid, 'status': 'acknowledged', 'cleared': cleared}
     with closing(_stream_db()) as db, db:
         db.execute('BEGIN IMMEDIATE')
         row=db.execute('SELECT body FROM requests WHERE id=? AND session=?',(rid,sid)).fetchone()

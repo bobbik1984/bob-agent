@@ -515,20 +515,26 @@ const nativeDrafts=ref({});
 const acknowledgedUnknownIds=ref({});
 function ackUnknownStorageKey(){const cid=connection.value||'',sid=selected.value?.id||'';return cid&&sid?`bob.ackUnknown:${cid}:${sid}`:'';}
 function loadAckUnknownIds(){acknowledgedUnknownIds.value={};try{const k=ackUnknownStorageKey();if(!k||typeof localStorage==='undefined')return;const raw=localStorage.getItem(k);if(raw){const arr=JSON.parse(raw);if(Array.isArray(arr)){const m={};for(const id of arr)m[id]=true;acknowledgedUnknownIds.value=m;}}}catch{}}
-function dismissNativeUnresolved(){
+async function dismissNativeUnresolved(){
   const next={...acknowledgedUnknownIds.value};
   for(const [k,v] of Object.entries(nativeDrafts.value)){if(v?.status==='unknown')next[k]=true;}
   for(const v of (history.value?.request_results||[])){if(v?.status==='unknown'&&v.request_id)next[v.request_id]=true;}
   acknowledgedUnknownIds.value=next;
   try{const k=ackUnknownStorageKey();if(k&&typeof localStorage!=='undefined')localStorage.setItem(k,JSON.stringify(Object.keys(next)));}catch{}
+  if(connection.value&&selected.value?.id&&typeof kernelBridge.nativeAcknowledgeUnknown==='function'){
+    try{await kernelBridge.nativeAcknowledgeUnknown(connection.value,selected.value.id);}catch{}
+    void refresh();void refreshNativeEvents();
+  }
 }
 const nativeFailureText=computed(()=>{const rows=history.value?.request_results||[];const latest=[...rows].sort((a,b)=>(b.observed_at||0)-(a.observed_at||0))[0];if(!latest||!['error','not_accepted'].includes(latest.status))return '';const code=latest.error_code||'HARNESS_FAILED';return t(code==='HARNESS_SESSION_BUSY'?'nativeSessionWriterBusy':code==='HARNESS_STREAM_DISCONNECTED'?'nativeStreamDisconnected':'nativeExecutionFailed')+' · '+code;});
 const nativeUnresolved=computed(()=>{
   const ack=acknowledgedUnknownIds.value;
-  const draftUnknown=Object.entries(nativeDrafts.value).some(([k,v])=>!k.startsWith('external-codex-')&&v.status==='unknown'&&!ack[k]);
-  if(draftUnknown)return true;
   const rows=history.value?.request_results||[];
-  const latestSettledAt=rows.filter(v=>['completed','cancelled','error'].includes(v.status)).reduce((m,v)=>Math.max(m,v.observed_at||0),0);
+  const latestRowSettled=rows.filter(v=>['completed','cancelled','error'].includes(v.status)).reduce((m,v)=>Math.max(m,v.observed_at||0),0);
+  const latestDraftSettled=Object.values(nativeDrafts.value).filter(v=>v?.terminal).reduce((m,v)=>Math.max(m,v.timestamp||0),0);
+  const latestSettledAt=Math.max(latestRowSettled,latestDraftSettled);
+  const draftUnknown=Object.entries(nativeDrafts.value).some(([k,v])=>!k.startsWith('external-codex-')&&v.status==='unknown'&&!ack[k]&&(v.timestamp||0)>=latestSettledAt);
+  if(draftUnknown)return true;
   return rows.some(v=>v.status==='unknown'&&!ack[v.request_id]&&(v.observed_at||0)>=latestSettledAt);
 });const isExternalCodexWaitingApproval=computed(()=>Object.entries(nativeDrafts.value).some(([k,v])=>k.startsWith('external-codex-')&&(v.activity?.approvals||[]).some(a=>a.status==='pending')));const isExternalCodexRunning=computed(()=>Object.entries(nativeDrafts.value).some(([k,v])=>k.startsWith('external-codex-')&&v.active));let nativeCursor=0,nativeEpoch='',nativeTimer,nativeMore=false;
 async function refreshNativeEvents(){
@@ -1151,7 +1157,7 @@ async function checkReceipt(){
  }else{notice.value=t('dshReceiptStillUnknown');}
  }catch(e){if(g===generation)error.value=fault(e)}finally{sending.value=false;if(g===generation&&!busy.value)refresh()}
 }
-function dismissPending(){if(!pending.value||sending.value)return;if(!draft.value.trim()&&pending.value.text)draft.value=pending.value.text;pending.value=null;notice.value='';error.value='';persist();}
+function dismissPending(){if(!pending.value||sending.value)return;if(!draft.value.trim()&&pending.value.text)draft.value=pending.value.text;pending.value=null;notice.value='';error.value='';persist();void dismissNativeUnresolved();}
 function sendResumePrompt(){if(!draft.value.trim())draft.value=t('agyResumeDefaultPrompt');void send();}
 async function fillResumePrompt(){if(!draft.value.trim())draft.value=t('agyResumeDefaultPrompt');await nextTick();composerInput.value?.focus?.();}
 async function send(opts={}){

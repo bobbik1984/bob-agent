@@ -783,7 +783,7 @@ pub fn native_cancel(data: &Path, connection: &str, session: &str, request: &str
     require_native_harness_grant(grant, session)?;
     let bytes=run_ssh_python(&grant.ssh_target,&json!({"mode":"cancel","sessionId":session,"requestId":request}).to_string(),15)?;
     let res: Value = serde_json::from_slice(&bytes).map_err(|_|"HARNESS_CANCEL_UNCONFIRMED")?;
-    if request == "__bob_release_holder__" {
+    if request == "__bob_release_holder__" || request == "__bob_ack_unknown__" {
         let mut hash=Sha256::new();
         hash.update(connection.as_bytes());
         hash.update(b":");

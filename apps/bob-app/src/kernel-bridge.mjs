@@ -15,6 +15,7 @@ export function createKernelBridge(invoke, isAvailable) {
     nativePermission: (connectionId,sessionId,requestId,permissionId,optionId) => call('app_native_permission',{connectionId,sessionId,requestId,permissionId,optionId}),
     nativeCancel: (connectionId,sessionId,requestId) => call('app_native_cancel',{connectionId,sessionId,requestId}),
     nativeRelease: (connectionId,sessionId) => call('app_native_cancel',{connectionId,sessionId,requestId:'__bob_release_holder__'}),
+    nativeAcknowledgeUnknown: (connectionId,sessionId) => call('app_native_cancel',{connectionId,sessionId,requestId:'__bob_ack_unknown__'}),
     nativeEvents: (connectionId,sessionId,after=0,epoch='') => call('app_native_events',{connectionId,sessionId,after,epoch}),
     dshReceipt: (connectionId,sessionId,text,requestId) => call('app_dsh_receipt',{connectionId,sessionId,text,requestId}),
     dshPreview: (connectionId,sessionId,path,known=null,messageSequence=null) => call('app_dsh_preview',{connectionId,sessionId,path,known,messageSequence}),
