@@ -32,6 +32,10 @@ export function createKernelBridge(invoke, isAvailable) {
     dshPage: (connectionId,sessionId,before=null,through=null,after=null) => call('app_dsh_page',{connectionId,sessionId,before,through,after}),
     dshHistory: (connectionId,sessionId) => call('app_dsh_history',{connectionId,sessionId}),
     dshPrompt: (connectionId,sessionId,text,requestId,attachments=null,options=null) => call('app_dsh_prompt',{connectionId,sessionId,text,requestId,...(attachments?.length?{attachments}:{}),...(options?.takeover?{takeover:true}:{}),...(options?.approvalMode?{approvalMode:options.approvalMode}:{}),...(options?.workspace?{workspace:options.workspace}:{})}),
+    attachmentUploadChunk: ({ connectionId, uploadId, chunkIndex, totalChunks, totalSize, name, type, dataBase64 }) =>
+      call('app_attachment_upload_chunk', { connectionId, uploadId, chunkIndex, totalChunks, totalSize, name, type, dataBase64 }),
+    attachmentFinalize: ({ connectionId, uploadId, totalChunks, name, type, expectedSha256 = null }) =>
+      call('app_attachment_finalize', { connectionId, uploadId, totalChunks, name, type, ...(expectedSha256 ? { expectedSha256 } : {}) }),
     claudeCapabilities: (connectionId=null) => call('app_claude_capabilities',{connectionId}),
     claudeSessions: (connectionId=null) => call('app_claude_sessions',{connectionId}),
     claudeHistory: (connectionId,sessionId) => call('app_claude_history',{connectionId,sessionId}),

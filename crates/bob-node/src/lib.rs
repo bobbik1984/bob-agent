@@ -1896,6 +1896,22 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?,
                 args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?)
         }
+        "app_attachment_upload_chunk" | "app_attachment_finalize" => {
+            let connection = args.get("connectionId").and_then(Value::as_str).unwrap_or("local");
+            if connection != "local" {
+                return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                    &ctx.runtime,
+                    connection,
+                    command,
+                    args,
+                );
+            }
+            if command == "app_attachment_upload_chunk" {
+                bob_runtime::dsh_transport::stage_attachment_chunk(&ctx.runtime.data_dir, args)
+            } else {
+                bob_runtime::dsh_transport::finalize_attachment_staging(&ctx.runtime.data_dir, args, at)
+            }
+        }
         "app_dsh_create" | "app_dsh_cancel" | "app_dsh_answer" | "app_dsh_permission_set" | "app_dsh_live" | "app_dsh_page" | "app_dsh_preview" | "app_dsh_list" | "app_dsh_history" | "app_dsh_prompt" => {
             let connection=args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
             if connection == "local" {
@@ -3142,6 +3158,23 @@ fn execute_unlocked_harness_rpc_inner(
                 args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?,
             )
         }
+        "app_attachment_upload_chunk" | "app_attachment_finalize" => {
+            let connection = args.get("connectionId").and_then(Value::as_str).unwrap_or("local");
+            if connection != "local" {
+                let runtime = ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
+                return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                    &runtime,
+                    connection,
+                    command,
+                    args,
+                );
+            }
+            if command == "app_attachment_upload_chunk" {
+                bob_runtime::dsh_transport::stage_attachment_chunk(data_dir, args)
+            } else {
+                bob_runtime::dsh_transport::finalize_attachment_staging(data_dir, args, now_millis())
+            }
+        }
         "app_dsh_create" | "app_dsh_cancel" | "app_dsh_answer" | "app_dsh_permission_set" | "app_dsh_live" | "app_dsh_page" | "app_dsh_preview" | "app_dsh_list" | "app_dsh_history" | "app_dsh_prompt" => {
             let connection = args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
             if connection == "local" {
@@ -3631,7 +3664,7 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
             let allowed=match scope {
                 Ok(ref role) if role=="owner" => !path.starts_with("/api/client/v1/"),
                 Ok(_) => path == "/api/ws/browser-takeover" || path.starts_with("/api/f/") || path.strip_prefix("/api/rpc/").is_some_and(|cmd|matches!(cmd,
-                    "app_dsh_tool_policy_apply"|"app_dsh_tool_policy_set"|"app_dsh_inventory"|"app_dsh_workspace_grant"|"app_dsh_live"|"app_dsh_create"|"app_dsh_cancel"|"app_dsh_answer"|"app_dsh_permission_set"|"app_native_setup"|"app_native_events"|"app_native_cancel"|"app_native_permission"|"app_dsh_list"|"app_dsh_page"|"app_dsh_history"|"app_dsh_preview"|"app_dsh_prompt"|"app_dsh_receipt"|
+                    "app_dsh_tool_policy_apply"|"app_dsh_tool_policy_set"|"app_dsh_inventory"|"app_dsh_workspace_grant"|"app_dsh_live"|"app_dsh_create"|"app_dsh_cancel"|"app_dsh_answer"|"app_dsh_permission_set"|"app_native_setup"|"app_native_events"|"app_native_cancel"|"app_native_permission"|"app_dsh_list"|"app_dsh_page"|"app_dsh_history"|"app_dsh_preview"|"app_dsh_prompt"|"app_dsh_receipt"|"app_attachment_upload_chunk"|"app_attachment_finalize"|
                     "app_harness_discover"|"app_harness_check_auth"|"app_harness_verify_capabilities"|
                     "app_jarvis_chat"|"app_jarvis_approve"|"app_jarvis_reject"|"app_jarvis_approvals_list"|"app_jarvis_budget_get"|"app_jarvis_budget_set"|"app_jarvis_worker_tasks"|"app_jarvis_worker_cancel"|"app_chief_orders_list"|"app_chief_order_complete"|"app_model_presets_list"|
                     "app_features_list"|"app_feature_keep"|"app_feature_rollback"|"app_feature_toggle"|"app_feature_call"|"app_feature_storage_save"|"app_feature_report_error"|
@@ -4017,6 +4050,8 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
                 | "app_dsh_list"
                 | "app_dsh_history"
                 | "app_dsh_prompt"
+                | "app_attachment_upload_chunk"
+                | "app_attachment_finalize"
                 | "app_context_list"
                 | "app_context_read"
                 | "app_context_refresh"

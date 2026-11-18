@@ -1117,6 +1117,160 @@ fn find_remote_ssh_target_for_connection(data_dir: &std::path::Path, connection:
  None
 }
 
+pub const MAX_STAGED_ATTACHMENT_BYTES: usize = 50 * 1024 * 1024;
+pub const MAX_ATTACHMENT_CHUNK_BYTES: usize = 2 * 1024 * 1024;
+const ATTACHMENT_STAGING_TTL_MS: i64 = 24 * 60 * 60 * 1000;
+
+fn sanitize_upload_id(raw: &str) -> Result<String, &'static str> {
+ let trimmed = raw.trim();
+ if trimmed.len() < 8
+  || trimmed.len() > 96
+  || !trimmed
+   .chars()
+   .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+ {
+  return Err("ATTACHMENT_UPLOAD_ID_INVALID");
+ }
+ Ok(trimmed.to_owned())
+}
+
+fn sweep_expired_attachment_staging(staging_root: &std::path::Path, now_ms: i64) {
+ let Ok(entries) = std::fs::read_dir(staging_root) else {
+  return;
+ };
+ for entry in entries.flatten() {
+  let path = entry.path();
+  if !path.is_dir() {
+   continue;
+  }
+  let meta_path = path.join("meta.json");
+  let expired = std::fs::read_to_string(&meta_path)
+   .ok()
+   .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+   .and_then(|v| v.get("created_at_ms").and_then(Value::as_i64))
+   .is_some_and(|created| now_ms.saturating_sub(created) > ATTACHMENT_STAGING_TTL_MS);
+  let old_dir = !meta_path.exists()
+   && std::fs::metadata(&path)
+    .and_then(|m| m.modified())
+    .ok()
+    .and_then(|t| t.elapsed().ok())
+    .is_some_and(|e| e.as_secs() > 24 * 3600);
+  if expired || old_dir {
+   let _ = std::fs::remove_dir_all(&path);
+  }
+ }
+}
+
+pub fn stage_attachment_chunk(data_dir: &std::path::Path, args: &Value) -> Result<Value, &'static str> {
+ use base64::Engine;
+ let upload_id = sanitize_upload_id(
+  args.get("uploadId").and_then(Value::as_str).ok_or("ATTACHMENT_UPLOAD_ID_INVALID")?,
+ )?;
+ let chunk_index = args.get("chunkIndex").and_then(Value::as_u64).ok_or("ATTACHMENT_CHUNK_INVALID")?;
+ let total_chunks = args.get("totalChunks").and_then(Value::as_u64).ok_or("ATTACHMENT_CHUNK_INVALID")?;
+ let total_size = args.get("totalSize").and_then(Value::as_u64).unwrap_or(0);
+ if total_chunks == 0 || total_chunks > 128 || chunk_index >= total_chunks {
+  return Err("ATTACHMENT_CHUNK_INVALID");
+ }
+ if total_size as usize > MAX_STAGED_ATTACHMENT_BYTES {
+  return Err("ATTACHMENT_TOO_LARGE");
+ }
+ let b64 = args
+  .get("dataBase64")
+  .and_then(Value::as_str)
+  .map(str::trim)
+  .filter(|s| !s.is_empty())
+  .ok_or("ATTACHMENT_CHUNK_EMPTY")?;
+ let bytes = base64::engine::general_purpose::STANDARD
+  .decode(b64)
+  .map_err(|_| "ATTACHMENT_CHUNK_INVALID")?;
+ if bytes.is_empty() || bytes.len() > MAX_ATTACHMENT_CHUNK_BYTES {
+  return Err("ATTACHMENT_CHUNK_TOO_LARGE");
+ }
+ let dir = data_dir.join("attachment_staging").join(&upload_id);
+ std::fs::create_dir_all(&dir).map_err(|_| "ATTACHMENT_STAGE_IO")?;
+ let part_path = dir.join(format!("part.{chunk_index}"));
+ std::fs::write(&part_path, &bytes).map_err(|_| "ATTACHMENT_STAGE_IO")?;
+ Ok(json!({
+  "ok": true,
+  "upload_id": upload_id,
+  "chunk_index": chunk_index,
+  "bytes": bytes.len()
+ }))
+}
+
+pub fn finalize_attachment_staging(
+ data_dir: &std::path::Path,
+ args: &Value,
+ now_ms: i64,
+) -> Result<Value, &'static str> {
+ use sha2::{Digest, Sha256};
+ let upload_id = sanitize_upload_id(
+  args.get("uploadId").and_then(Value::as_str).ok_or("ATTACHMENT_UPLOAD_ID_INVALID")?,
+ )?;
+ let total_chunks = args.get("totalChunks").and_then(Value::as_u64).ok_or("ATTACHMENT_CHUNK_INVALID")?;
+ if total_chunks == 0 || total_chunks > 128 {
+  return Err("ATTACHMENT_CHUNK_INVALID");
+ }
+ let raw_name = args.get("name").and_then(Value::as_str).unwrap_or("attachment.bin");
+ let safe_name = sanitize_attachment_name(raw_name);
+ let staging_root = data_dir.join("attachment_staging");
+ let dir = staging_root.join(&upload_id);
+ if !dir.is_dir() {
+  return Err("ATTACHMENT_NOT_FOUND");
+ }
+ let mut combined = Vec::new();
+ for idx in 0..total_chunks {
+  let part_path = dir.join(format!("part.{idx}"));
+  let part = std::fs::read(&part_path).map_err(|_| "ATTACHMENT_CHUNK_MISSING")?;
+  if combined.len().saturating_add(part.len()) > MAX_STAGED_ATTACHMENT_BYTES {
+   return Err("ATTACHMENT_TOO_LARGE");
+  }
+  combined.extend_from_slice(&part);
+ }
+ if combined.is_empty() {
+  return Err("ATTACHMENT_CHUNK_EMPTY");
+ }
+ let sha256_hex = format!("{:x}", Sha256::digest(&combined));
+ if let Some(expected) = args
+  .get("expectedSha256")
+  .and_then(Value::as_str)
+  .map(str::trim)
+  .filter(|s| !s.is_empty())
+ {
+  if !expected.eq_ignore_ascii_case(&sha256_hex) {
+   return Err("ATTACHMENT_CHECKSUM_MISMATCH");
+  }
+ }
+ let staged_path = dir.join("staged.bin");
+ std::fs::write(&staged_path, &combined).map_err(|_| "ATTACHMENT_STAGE_IO")?;
+ #[cfg(unix)]
+ {
+  use std::os::unix::fs::PermissionsExt;
+  let _ = std::fs::set_permissions(&staged_path, std::fs::Permissions::from_mode(0o600));
+ }
+ let meta = json!({
+  "upload_id": upload_id,
+  "name": safe_name,
+  "type": args.get("type").and_then(Value::as_str).unwrap_or("application/octet-stream"),
+  "size": combined.len(),
+  "sha256": sha256_hex,
+  "created_at_ms": now_ms,
+ });
+ let _ = std::fs::write(dir.join("meta.json"), meta.to_string());
+ for idx in 0..total_chunks {
+  let _ = std::fs::remove_file(dir.join(format!("part.{idx}")));
+ }
+ sweep_expired_attachment_staging(&staging_root, now_ms);
+ Ok(json!({
+  "ok": true,
+  "upload_id": upload_id,
+  "name": safe_name,
+  "size": combined.len(),
+  "sha256": sha256_hex
+ }))
+}
+
 pub fn stage_attachments_for_prompt(
  data_dir: &std::path::Path,
  connection: &str,
@@ -1144,9 +1298,18 @@ pub fn stage_attachments_for_prompt(
  let mut updated = text.to_owned();
  for item in arr.iter().take(8) {
   let Some(raw_name) = item.get("name").and_then(Value::as_str) else { continue };
-  let Some(b64) = item.get("base64").and_then(Value::as_str).filter(|s| !s.is_empty()) else { continue };
-  let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64.trim()) else { continue };
-  if bytes.is_empty() || bytes.len() > 10 * 1024 * 1024 { continue; }
+  let bytes: Vec<u8> = if let Some(uid) = item.get("uploadId").and_then(Value::as_str).filter(|s| !s.trim().is_empty()) {
+   let Ok(safe_uid) = sanitize_upload_id(uid) else { continue };
+   let staged_path = data_dir.join("attachment_staging").join(safe_uid).join("staged.bin");
+   let Ok(b) = std::fs::read(&staged_path) else { continue };
+   if b.is_empty() || b.len() > MAX_STAGED_ATTACHMENT_BYTES { continue; }
+   b
+  } else {
+   let Some(b64) = item.get("base64").and_then(Value::as_str).filter(|s| !s.is_empty()) else { continue };
+   let Ok(b) = base64::engine::general_purpose::STANDARD.decode(b64.trim()) else { continue };
+   if b.is_empty() || b.len() > 10 * 1024 * 1024 { continue; }
+   b
+  };
   let safe_name = sanitize_attachment_name(raw_name);
   let target_dir = format!("{}/.bob_attachments", workspace.trim_end_matches(['/', '\\']));
   let target_file = format!("{target_dir}/{safe_name}");
@@ -1538,5 +1701,65 @@ mod question_answer_tests {
   assert_eq!(updated["approval_mode"], "full_auto");
   assert_eq!(updated["permission_preset"], "danger-full-access");
   assert_eq!(updated["command_id"], "cmd-1");
+ }
+
+ #[test]
+ fn chunked_attachment_staging_and_prompt_resolution() {
+  use base64::Engine;
+  let tmp = tempfile::tempdir().unwrap();
+  let data_dir = tmp.path().join("data");
+  let ws_dir = tmp.path().join("ws");
+  std::fs::create_dir_all(&data_dir).unwrap();
+  std::fs::create_dir_all(&ws_dir).unwrap();
+
+  let part0 = b"hello-part0-";
+  let part1 = b"world-part1";
+  let mut full = Vec::new();
+  full.extend_from_slice(part0);
+  full.extend_from_slice(part1);
+
+  let uid = "up_test_chunk_01";
+  let r0 = stage_attachment_chunk(&data_dir, &json!({
+   "uploadId": uid,
+   "chunkIndex": 0,
+   "totalChunks": 2,
+   "totalSize": full.len(),
+   "dataBase64": base64::engine::general_purpose::STANDARD.encode(part0),
+  })).unwrap();
+  assert_eq!(r0["ok"], true);
+
+  let r1 = stage_attachment_chunk(&data_dir, &json!({
+   "uploadId": uid,
+   "chunkIndex": 1,
+   "totalChunks": 2,
+   "totalSize": full.len(),
+   "dataBase64": base64::engine::general_purpose::STANDARD.encode(part1),
+  })).unwrap();
+  assert_eq!(r1["ok"], true);
+
+  let fin = finalize_attachment_staging(&data_dir, &json!({
+   "uploadId": uid,
+   "totalChunks": 2,
+   "name": "big.bin",
+   "type": "application/octet-stream",
+  }), 1_700_000_000_000i64).unwrap();
+  assert_eq!(fin["size"], full.len());
+
+  let attachments = json!([{
+   "name": "big.bin",
+   "type": "application/octet-stream",
+   "size": full.len(),
+   "uploadId": uid,
+  }]);
+  let prompt = stage_attachments_for_prompt(
+   &data_dir,
+   "local",
+   "sess-1",
+   Some(ws_dir.to_str().unwrap()),
+   "check file",
+   Some(&attachments),
+  );
+  assert!(prompt.contains("big.bin"));
+  assert_eq!(std::fs::read(ws_dir.join(".bob_attachments/big.bin")).unwrap(), full);
  }
 }

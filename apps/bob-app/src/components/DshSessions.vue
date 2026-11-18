@@ -927,17 +927,82 @@ function onReaderWheel(e){if(!selected.value||!(e?.deltaY>24))return;const el=re
 function openFilePicker(){fileInput.value?.click?.();}
 function isTextAttachment(f){const m=String(f?.type||'').toLowerCase(),n=String(f?.name||'').toLowerCase();if(m.startsWith('image/')||m.startsWith('audio/')||m.startsWith('video/')||m==='application/pdf'||m==='application/zip')return false;if(m.startsWith('text/')||m.includes('json')||m.includes('yaml')||m.includes('xml')||m.includes('javascript'))return true;return /\.(txt|md|json|ya?ml|csv|tsv|py|rs|js|mjs|cjs|ts|tsx|jsx|vue|html|css|scss|sh|bat|ps1|toml|ini|cfg|log|sql|gd|tscn)$/i.test(n);}
 function bytesToBase64(bytes){let bin='';const chunk=0x8000;for(let i=0;i<bytes.length;i+=chunk){bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+chunk));}return btoa(bin);}
+const CHUNK_UPLOAD_THRESHOLD = 256 * 1024;
+const CHUNK_UPLOAD_BYTES = 1024 * 1024;
+const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+
+function updateAttachmentItem(id, patch) {
+  attachments.value = attachments.value.map(a => (a.id === id ? { ...a, ...patch } : a));
+}
+
+async function uploadAttachmentToNode(attId, file, name, type) {
+  if (!file || !connection.value || !kernelBridge.attachmentUploadChunk || !kernelBridge.attachmentFinalize) return;
+  const totalSize = file.size || 0;
+  if (totalSize <= 0 || totalSize > MAX_ATTACHMENT_BYTES) {
+    updateAttachmentItem(attId, { status: 'error' });
+    return;
+  }
+  const uploadId = `up_${crypto.randomUUID().replace(/-/g, '')}`;
+  const totalChunks = Math.max(1, Math.ceil(totalSize / CHUNK_UPLOAD_BYTES));
+  updateAttachmentItem(attId, { status: 'uploading', progress: 0, uploadId: '' });
+  try {
+    const ab = await file.arrayBuffer();
+    const bytes = new Uint8Array(ab);
+    for (let idx = 0; idx < totalChunks; idx++) {
+      const start = idx * CHUNK_UPLOAD_BYTES;
+      const slice = bytes.subarray(start, Math.min(bytes.length, start + CHUNK_UPLOAD_BYTES));
+      await kernelBridge.attachmentUploadChunk({
+        connectionId: connection.value,
+        uploadId,
+        chunkIndex: idx,
+        totalChunks,
+        totalSize: bytes.length,
+        name,
+        type,
+        dataBase64: bytesToBase64(slice),
+      });
+      updateAttachmentItem(attId, { progress: Math.round(((idx + 1) / totalChunks) * 100) });
+    }
+    const fin = await kernelBridge.attachmentFinalize({
+      connectionId: connection.value,
+      uploadId,
+      totalChunks,
+      name,
+      type,
+    });
+    updateAttachmentItem(attId, {
+      status: 'staged',
+      progress: 100,
+      uploadId: fin?.upload_id || uploadId,
+      sha256: fin?.sha256 || '',
+      base64: '',
+    });
+  } catch {
+    updateAttachmentItem(attId, { status: 'error' });
+  }
+}
+
+function retryAttachmentUpload(att) {
+  if (att?.file) void uploadAttachmentToNode(att.id, att.file, att.name, att.type);
+}
+
 async function readAttachmentBase64(f){if(!f||(f.size||0)>8*1024*1024)return '';try{if(String(f.type||'').startsWith('image/')&&(f.size||0)>1024*1024&&typeof createImageBitmap==='function'&&typeof document!=='undefined'){const bmp=await createImageBitmap(f);const maxSide=Math.max(bmp.width||1,bmp.height||1);const scale=maxSide>1920?1920/maxSide:1;const w=Math.max(1,Math.round(bmp.width*scale)),h=Math.max(1,Math.round(bmp.height*scale));const c=document.createElement('canvas');c.width=w;c.height=h;const ctx2d=c.getContext('2d');if(ctx2d){ctx2d.drawImage(bmp,0,0,w,h);const outMime=f.type==='image/png'?'image/png':'image/jpeg';const dataUrl=c.toDataURL(outMime,0.86);const idx=dataUrl.indexOf(',');if(idx>0)return dataUrl.slice(idx+1);}}if(typeof f.arrayBuffer==='function'){const ab=await f.arrayBuffer();return bytesToBase64(new Uint8Array(ab));}}catch{}return '';}
 async function appendFilesToAttachments(fileList){
   const files=Array.from(fileList||[]);
   for(const f of files){
+    if((f.size||0)>MAX_ATTACHMENT_BYTES)continue;
     let content='',base64='';
+    const name=f.name||`attachment_${Date.now()}`;
+    const type=f.type||'';
+    const useChunked=Boolean(connection.value && kernelBridge.attachmentUploadChunk && kernelBridge.attachmentFinalize && (f.size||0)>CHUNK_UPLOAD_THRESHOLD);
+    const thumbUrl=type.startsWith('image/')&&typeof URL!=='undefined'&&typeof URL.createObjectURL==='function'?URL.createObjectURL(f):'';
     try{
       if(isTextAttachment(f)&&typeof f.text==='function'&&(f.size||0)<=256*1024)content=await f.text();
-      base64=await readAttachmentBase64(f);
+      if(!useChunked)base64=await readAttachmentBase64(f);
     }catch{}
-    const name=f.name||`attachment_${Date.now()}`;
-    attachments.value.push({id:crypto.randomUUID(),name,size:f.size||0,type:f.type||'',content,base64});
+    const id=crypto.randomUUID();
+    attachments.value.push({id,name,size:f.size||0,type,content,base64,thumbUrl,file:f,status:useChunked?'uploading':'ready',progress:useChunked?0:100,uploadId:'',sha256:''});
+    if(useChunked)void uploadAttachmentToNode(id,f,name,type);
   }
 }
 async function onFilesSelected(e){await appendFilesToAttachments(e?.target?.files);if(e?.target)e.target.value='';}
@@ -987,7 +1052,7 @@ async function send(opts={}){
     return;
   }
   const g=generation, address={connection:connection.value,session:selected.value.id};
-  const attPayload=attachments.value.filter(a=>a.base64).map(a=>({name:a.name,type:a.type,size:a.size,base64:a.base64}));
+  const attPayload=attachments.value.filter(a=>a.uploadId||a.base64).map(a=>a.uploadId?{name:a.name,type:a.type,size:a.size,uploadId:a.uploadId,sha256:a.sha256}:{name:a.name,type:a.type,size:a.size,base64:a.base64});
   pending.value={id:crypto.randomUUID(),text};
   if(!persist()){pending.value=null;return;}
   sending.value=true;error.value='';
@@ -1218,7 +1283,7 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
    <div class="dsh-compose-box">
     <p v-if="history?.execution_enabled===false || selected?.execution_enabled===false" role="status">{{t('toolPolicyDisabled')}}</p>
     <textarea ref="composerInput" v-model="draft" :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl" :placeholder="t(isClaudeRemoteControl ? 'claudeRemoteControlTitle' : 'dshPrompt')" :aria-label="t('dshPrompt')" rows="2" @keydown="onComposeKeydown" @paste="onComposerPaste" @dragover.prevent @drop.prevent="onComposerDrop"></textarea>
-    <div v-if="attachments.length" class="composer-attachments"><span v-for="att in attachments" :key="att.id" class="composer-attachment-chip"><img v-if="att.base64 && att.type?.startsWith('image/')" :src="'data:' + att.type + ';base64,' + att.base64" alt="" class="chip-thumb" /><span class="chip-file-name">{{ att.name }}</span><button type="button" class="chip-remove-btn" :aria-label="t('removeAttachment')" @click="removeAttachment(att.id)">×</button></span></div>
+    <div v-if="attachments.length" class="composer-attachments"><span v-for="att in attachments" :key="att.id" class="composer-attachment-chip"><img v-if="(att.thumbUrl || att.base64) && att.type?.startsWith('image/')" :src="att.thumbUrl || ('data:' + att.type + ';base64,' + att.base64)" alt="" class="chip-thumb" /><span class="chip-file-name">{{ att.name }}</span><span v-if="att.status==='uploading'" class="chip-upload-status">{{ t('attachmentUploading', { pct: att.progress || 0 }) }}</span><span v-else-if="att.status==='staged'" class="chip-upload-status staged">{{ t('attachmentStaged') }}</span><template v-else-if="att.status==='error'"><span class="chip-upload-status error">{{ t('attachmentUploadFailed') }}</span><button type="button" class="chip-retry-btn" @click="retryAttachmentUpload(att)">{{ t('attachmentRetry') }}</button></template><button type="button" class="chip-remove-btn" :aria-label="t('removeAttachment')" @click="removeAttachment(att.id)">×</button></span></div>
     <div class="dsh-compose-toolbar">
      <div class="dsh-compose-left-tools">
       <input ref="fileInput" type="file" multiple class="visually-hidden" @change="onFilesSelected" />
@@ -1238,7 +1303,7 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
      </div>
      <button v-if="canStopDsh" type="button" class="composer-submit-btn" :disabled="!!dshStop || sending" @click="stopDsh">{{ t(dshStop ? 'dshStopChecking' : 'dshStop') }}</button>
      <button v-else-if="cancellableRequest" type="button" class="composer-submit-btn" :disabled="cancelBusy || cancelRequest===cancellableRequest" @click="cancelNative">{{ t(cancelRequest===cancellableRequest?'nativeCancelPending':'nativeCancel') }}</button>
-      <button v-else type="submit" class="composer-submit-btn" :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl || !!pending || nativeUnresolved || dshQuestionBlocking || (!draft.trim() && !attachments.length) || (!history && !selected?.resumable)">{{ t(sending?'dshSending':'send') }}</button>
+      <button v-else type="submit" class="composer-submit-btn" :disabled="sending || attachments.some(a=>a.status==='uploading') || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl || !!pending || nativeUnresolved || dshQuestionBlocking || (!draft.trim() && !attachments.length) || (!history && !selected?.resumable)">{{ t(sending?'dshSending':'send') }}</button>
     </div>
    </div>
    <p v-if="pending && !sending" role="status">{{ t('dshUncertain') }} <button type="button" @click="checkReceipt">{{ t('dshCheckReceipt') }}</button> <button type="button" @click="dismissPending">{{ t('dshUnlockEdit') }}</button></p>
