@@ -137,5 +137,41 @@ class IndexTests(unittest.TestCase):
             self.assertIn(f'agy:{sid_dev_ql}', ids)
             self.assertIn(f'agy:{sid_bob_opt}', ids)
 
+    def test_make_image_preview_resizes_and_compresses_and_original_bypasses(self):
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest('Pillow not installed')
+        import base64, io, random
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ws = root / 'ws'
+            ws.mkdir()
+            img_path = ws / 'big.png'
+            rng = random.Random(42)
+            raw_rgb = bytes(rng.getrandbits(8) for _ in range(1600 * 1200 * 3))
+            Image.frombytes('RGB', (1600, 1200), raw_rgb).save(img_path, format='PNG')
+            raw_bytes = img_path.read_bytes()
+            self.assertGreater(len(raw_bytes), 1024 * 1024)
+
+            preview_bytes, meta = probe._make_image_preview(raw_bytes, 'png')
+            self.assertIsNotNone(meta)
+            self.assertTrue(meta['preview_compressed'])
+            self.assertLessEqual(len(preview_bytes), 1024 * 1024)
+            self.assertLessEqual(max(meta['preview_width'], meta['preview_height']), 1000)
+            self.assertEqual(meta['original_width'], 1600)
+            self.assertEqual(meta['original_height'], 1200)
+            self.assertEqual(meta['original_bytes'], len(raw_bytes))
+
+            with Image.open(io.BytesIO(preview_bytes)) as pimg:
+                self.assertLessEqual(max(pimg.size), 1000)
+
+            small_buf = io.BytesIO()
+            Image.new('RGB', (640, 480), (10, 20, 30)).save(small_buf, format='PNG')
+            small_bytes = small_buf.getvalue()
+            untouched, untouched_meta = probe._make_image_preview(small_bytes, 'png')
+            self.assertIsNone(untouched_meta)
+            self.assertEqual(untouched, small_bytes)
+
 if __name__ == '__main__':
     unittest.main()

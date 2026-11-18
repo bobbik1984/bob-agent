@@ -1037,6 +1037,56 @@ def _document_preview(data, extension, budget=2*1024*1024):
         return {'pages':pages,'page_count':count,'renderer':'local-pdf-pages-v1'}
 
 
+def _make_image_preview(data, ext, max_dim=1000, max_bytes=1024 * 1024):
+    import io
+    try:
+        from PIL import Image
+        resample = Image.Resampling.LANCZOS if hasattr(Image, 'Resampling') else Image.LANCZOS
+        with Image.open(io.BytesIO(data)) as img:
+            orig_w, orig_h = img.size
+            needs_resize = max(orig_w, orig_h) > max_dim
+            needs_compress = len(data) > max_bytes
+            if not needs_resize and not needs_compress:
+                return data, None
+            work = img.copy()
+            if needs_resize:
+                work.thumbnail((max_dim, max_dim), resample)
+            if work.mode not in ('RGB', 'RGBA', 'L'):
+                work = work.convert('RGBA' if 'A' in work.getbands() else 'RGB')
+            out = None
+            mime = 'image/webp'
+            for fmt, fmt_mime in (('WEBP', 'image/webp'), ('JPEG', 'image/jpeg')):
+                try:
+                    target = work.convert('RGB') if fmt == 'JPEG' and work.mode != 'RGB' else work
+                    for q in (85, 72, 58, 45, 32):
+                        buf = io.BytesIO()
+                        save_kw = {'format': fmt, 'quality': q}
+                        if fmt == 'WEBP':
+                            save_kw['method'] = 4
+                        target.save(buf, **save_kw)
+                        candidate = buf.getvalue()
+                        out = candidate
+                        mime = fmt_mime
+                        if len(candidate) <= max_bytes:
+                            break
+                    if out is not None:
+                        break
+                except Exception:
+                    out = None
+            if not out or (not needs_resize and len(out) >= len(data)):
+                return data, None
+            return out, {
+                'preview_compressed': True,
+                'preview_mime': mime,
+                'preview_width': work.size[0],
+                'preview_height': work.size[1],
+                'original_bytes': len(data),
+                'original_width': orig_w,
+                'original_height': orig_h,
+            }
+    except Exception:
+        return data, None
+
 def preview_native_file(cfg):
     sid, requested = cfg.get('sessionId', ''), cfg.get('path', '')
     if not re.fullmatch(r'(codex|claude-jsonl|agy|pi|copilot):[A-Za-z0-9_-]{8,128}', sid):
@@ -1065,11 +1115,19 @@ def preview_native_file(cfg):
     data = _read_artifact_bytes(root, relative, limit=byte_limit)
     digest=hashlib.sha256(data).hexdigest()
     result={'path':requested,'session_id':sid,'extension':ext,'bytes':len(data),'version':digest,'sha256':digest,'source':'current_workspace'}
+    known=cfg.get('known') or {}
+    want_original = bool(cfg.get('original') or known.get('original'))
+    if ext in ('png', 'jpg', 'jpeg', 'webp') and not want_original:
+        preview_data, preview_meta = _make_image_preview(data, ext)
+        if preview_meta:
+            result.update(preview_meta)
+            result['bytes'] = len(preview_data)
+            result['version'] = hashlib.sha256((digest + ':preview-v1').encode()).hexdigest()
+            data = preview_data
     if ext=='html':
         resources,omitted=_html_resource_bundle(root,relative,data.decode('utf-8'),2*1024*1024-len(data))
         result['resources']=resources;result['resources_unavailable']=omitted
         result['version']=hashlib.sha256((digest+json.dumps([(x['url'],x['source_sha256']) for x in resources])+json.dumps(omitted)).encode()).hexdigest()
-    known=cfg.get('known') or {}
     if ext in ('pdf','docx','xlsx','pptx','doc','xls','ppt','odt','ods','odp'):
         result['version']=hashlib.sha256((digest+':local-pdf-pages-v1').encode()).hexdigest()
         if known.get('version')==result['version'] and known.get('bytes')==len(data):

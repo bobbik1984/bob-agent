@@ -21,7 +21,7 @@ const getFile = inject('dshPreviewGet', a => kernelBridge.dshPreview(a.connectio
 
 // State
 const dialog = ref(null), busy = ref(true), error = ref(''), file = ref(null), url = ref(''), text = ref('');
-const zoomed = ref(false);
+const zoomed = ref(false), downloadingOriginal = ref(false), originalError = ref('');
 let alive = true, pushedStates = 0, ignoringPop = false, closingFromPop = false;
 const origin = globalThis.document?.activeElement || null;
 
@@ -174,7 +174,7 @@ onMounted(async () => {
       if (bytes.length !== f.bytes) throw Error('DSH_FILE_CHANGED');
       if (url.value) URL.revokeObjectURL(url.value);
       file.value = f;
-      url.value = URL.createObjectURL(new Blob([bytes], {type: imageTypes[f.extension] || documentTypes[f.extension] || 'text/plain;charset=utf-8'}));
+      url.value = URL.createObjectURL(new Blob([bytes], {type: f.preview_mime || imageTypes[f.extension] || documentTypes[f.extension] || 'text/plain;charset=utf-8'}));
       if (!imageTypes[f.extension] && !documentTypes[f.extension]) {
         text.value = new TextDecoder('utf-8', {fatal: true}).decode(bytes);
       }
@@ -197,6 +197,34 @@ onUnmounted(() => {
   if (url.value) URL.revokeObjectURL(url.value);
   origin?.focus?.({preventScroll: true});
 });
+
+async function downloadOriginal() {
+  if (downloadingOriginal.value || !props.address) return;
+  downloadingOriginal.value = true;
+  originalError.value = '';
+  try {
+    const a = props.address;
+    const orig = await kernelBridge.dshPreview(a.connectionId, a.sessionId, a.path, { original: true }, a.messageSequence);
+    if (!alive) return;
+    if (orig.path !== a.path || orig.session_id !== a.sessionId || orig.connection_id !== a.connectionId) {
+      throw Error('DSH_IDENTITY_MISMATCH');
+    }
+    const bytes = Uint8Array.from(atob(orig.data), c => c.charCodeAt(0));
+    if (bytes.length !== orig.bytes) throw Error('DSH_FILE_CHANGED');
+    const blobUrl = URL.createObjectURL(new Blob([bytes], { type: imageTypes[orig.extension] || 'application/octet-stream' }));
+    const link = globalThis.document.createElement('a');
+    link.href = blobUrl;
+    link.download = a.path.split('/').pop() || `original.${orig.extension || 'png'}`;
+    globalThis.document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+  } catch (e) {
+    originalError.value = String(e.message || e).match(/DSH_[A-Z_]+/)?.[0] || 'DSH_PREVIEW_UNAVAILABLE';
+  } finally {
+    downloadingOriginal.value = false;
+  }
+}
 </script>
 
 <template>
@@ -246,6 +274,12 @@ onUnmounted(() => {
     </div>
     <div v-if="imgNatural.width > 0" class="toolbar-group">
       <span class="toolbar-spec-pill">{{ imgNatural.width }} × {{ imgNatural.height }} px</span>
+    </div>
+    <div v-if="file?.preview_compressed" class="toolbar-group">
+      <span class="toolbar-spec-pill">{{ t('filePreviewCompressedNote', { width: file.original_width, height: file.original_height, size: Math.ceil((file.original_bytes || 0) / 1024) }) }}</span>
+      <button type="button" class="toolbar-btn" :disabled="downloadingOriginal" @click="downloadOriginal">
+        <span>{{ downloadingOriginal ? t('filePreviewDownloadingOriginal') : t('filePreviewDownloadOriginal') }}</span>
+      </button>
     </div>
     <div class="toolbar-group">
       <button type="button" class="toolbar-btn quote-feedback-btn" :title="t('quoteFeedbackBtn')" @click="quoteForFeedback">
@@ -301,9 +335,13 @@ onUnmounted(() => {
 
     <footer class="dsh-preview-footer">
       <button type="button" class="footer-quote-btn" @click="quoteForFeedback">{{ t('quoteFeedbackBtn') }}</button>
-      <a :href="url" :download="address.path.split('/').pop()">{{ t('filePreviewDownload') }}</a>
+      <button v-if="file?.preview_compressed" type="button" class="footer-quote-btn" :disabled="downloadingOriginal" @click="downloadOriginal">
+        {{ downloadingOriginal ? t('filePreviewDownloadingOriginal') : t('filePreviewDownloadOriginal') }}
+      </button>
+      <a v-else :href="url" :download="address.path.split('/').pop()">{{ t('filePreviewDownload') }}</a>
       <span v-if="imgNatural.width > 0 && imageTypes[file.extension]" class="footer-spec">{{ imgNatural.width }} × {{ imgNatural.height }} px · </span>
       <small :title="file.version">{{ Math.ceil(file.bytes / 1024) }} KB</small>
+      <span v-if="originalError" class="error">{{ t(previewErrorKey(originalError)) }}</span>
     </footer>
   </template>
 </dialog>
