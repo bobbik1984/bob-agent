@@ -1440,7 +1440,7 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
       <button v-else type="submit" class="composer-submit-btn" :title="sendDisabledReason || t('send')" :disabled="sending || attachments.some(a=>a.status==='uploading') || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl || !!pending || nativeUnresolved || dshQuestionBlocking || (!draft.trim() && !attachments.length) || !isSessionResumable">{{ t(sending?'dshSending':'send') }}</button>
     </div>
    </div>
-   <p v-if="sendDisabledReason && (draft.trim() || attachments.length) && !sending" class="dsh-send-blocked-hint" role="status">{{ sendDisabledReason }} <button v-if="nativeUnresolved" type="button" @click="dismissNativeUnresolved">{{ t('dshUnlockEdit') }}</button></p>
+   <p v-if="sendDisabledReason && !pending && (draft.trim() || attachments.length) && !sending" class="dsh-send-blocked-hint" role="status">{{ sendDisabledReason }} <button v-if="nativeUnresolved" type="button" @click="dismissNativeUnresolved">{{ t('dshUnlockEdit') }}</button></p>
    <p v-if="pending && !sending" role="status">{{ t('dshUncertain') }} <button type="button" @click="checkReceipt">{{ t('dshCheckReceipt') }}</button> <button type="button" @click="dismissPending">{{ t('dshUnlockEdit') }}</button></p>
   </form>
  </section>
