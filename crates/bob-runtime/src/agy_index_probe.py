@@ -1061,7 +1061,8 @@ def preview_native_file(cfg):
         refs.update(_native_file_references(message))
     if requested not in refs and relative.as_posix() not in refs and str(root/relative) not in refs:
         raise ValueError('DSH_FILE_NOT_REFERENCED')
-    data=_read_artifact_bytes(root,relative)
+    byte_limit = 8 * 1024 * 1024 if ext in ('png', 'jpg', 'jpeg', 'webp') else 2 * 1024 * 1024
+    data = _read_artifact_bytes(root, relative, limit=byte_limit)
     digest=hashlib.sha256(data).hexdigest()
     result={'path':requested,'session_id':sid,'extension':ext,'bytes':len(data),'version':digest,'sha256':digest,'source':'current_workspace'}
     if ext=='html':
