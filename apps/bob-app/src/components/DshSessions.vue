@@ -210,6 +210,103 @@ function onSelectApprovalMode(nextMode){
   }
   void applyDshPermissionMode(nextMode,false);
 }
+
+const selectedModel = ref('');
+const selectedEffort = ref('');
+
+function sessionPrefsStorageKey() {
+  const cid = connection.value || '';
+  const sid = selected.value?.id || '';
+  return cid && sid ? `bob.sessionModelPrefs:${cid}:${sid}` : '';
+}
+
+function loadSessionModelPrefs() {
+  selectedModel.value = '';
+  selectedEffort.value = '';
+  try {
+    const key = sessionPrefsStorageKey();
+    if (!key || typeof localStorage === 'undefined') return;
+    const raw = localStorage.getItem(key);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.model === 'string') selectedModel.value = parsed.model;
+    if (typeof parsed?.effort === 'string') selectedEffort.value = parsed.effort;
+  } catch {}
+}
+
+function saveSessionModelPrefs() {
+  try {
+    const key = sessionPrefsStorageKey();
+    if (!key || typeof localStorage === 'undefined') return;
+    localStorage.setItem(key, JSON.stringify({ model: selectedModel.value, effort: selectedEffort.value }));
+  } catch {}
+}
+
+const sessionHarnessKind = computed(() => {
+  const sid = String(selected.value?.id || '');
+  if (sid.startsWith('codex:')) return 'codex';
+  if (sid.startsWith('claude-jsonl:')) return 'claude';
+  if (sid.startsWith('copilot:')) return 'copilot';
+  if (sid.startsWith('pi:')) return 'pi';
+  if (sid.startsWith('agy:')) return 'agy';
+  if (sid) return 'dsh';
+  return '';
+});
+
+const supportsModelOverride = computed(() => ['codex', 'claude', 'copilot', 'pi', 'dsh'].includes(sessionHarnessKind.value));
+const supportsEffortOverride = computed(() => ['codex', 'claude', 'pi', 'dsh'].includes(sessionHarnessKind.value));
+
+const modelOptions = computed(() => {
+  const def = [{ value: '', label: t('modelNodeDefault') }];
+  switch (sessionHarnessKind.value) {
+    case 'codex':
+      return [...def, { value: 'gpt-5.4', label: 'gpt-5.4' }, { value: 'gpt-5.3-codex', label: 'gpt-5.3-codex' }, { value: 'gpt-5.2-codex', label: 'gpt-5.2-codex' }, { value: 'o3', label: 'o3' }];
+    case 'claude':
+      return [...def, { value: 'sonnet', label: 'Claude Sonnet' }, { value: 'opus', label: 'Claude Opus' }, { value: 'haiku', label: 'Claude Haiku' }];
+    case 'copilot':
+      return [...def, { value: 'claude-sonnet-4.5', label: 'Claude Sonnet 4.5' }, { value: 'gpt-5', label: 'GPT-5' }, { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' }];
+    case 'pi':
+    case 'dsh':
+      return [...def, { value: 'deepseek-chat', label: 'deepseek-chat' }, { value: 'deepseek-reasoner', label: 'deepseek-reasoner' }];
+    default:
+      return def;
+  }
+});
+
+const effortOptions = computed(() => [
+  { value: '', label: t('effortNodeDefault') },
+  { value: 'low', label: t('effortLow') },
+  { value: 'medium', label: t('effortMedium') },
+  { value: 'high', label: t('effortHigh') },
+]);
+
+function onSelectSessionModel(val) {
+  selectedModel.value = String(val || '');
+  saveSessionModelPrefs();
+}
+
+function onSelectSessionEffort(val) {
+  selectedEffort.value = String(val || '');
+  saveSessionModelPrefs();
+}
+
+const isSessionResumable = computed(() => Boolean(
+  history.value ||
+  selected.value?.resumable ||
+  /^(codex|claude-jsonl|copilot|pi|agy|dsh):/.test(String(selected.value?.id || ''))
+));
+
+const sendDisabledReason = computed(() => {
+  if (sending.value) return t('dshSending');
+  if (attachments.value.some(a => a.status === 'uploading')) return t('sendDisabledUploading');
+  if (history.value?.execution_enabled === false || selected.value?.execution_enabled === false) return t('toolPolicyDisabled');
+  if (isClaudeRemoteControl.value) return t('claudeRemoteControlTitle');
+  if (pending.value) return t('sendDisabledPending');
+  if (nativeUnresolved.value) return t('nativeExecutionUnconfirmed');
+  if (dshQuestionBlocking.value) return t('dshQuestionWaiting');
+  if (!isSessionResumable.value) return t('sendDisabledLoadingHistory');
+  return '';
+});
 async function confirmPermissionElevation(){
   if(!selected.value||switchingPermissionMode.value)return;
   if(isDshNativeSession.value){
@@ -1024,7 +1121,7 @@ function removeAttachment(id){attachments.value=attachments.value.filter(a=>a.id
 function formatAttachmentBlock(list){if(!list?.length)return '';return list.map(a=>a.content?`[Attachment: ${a.name}]\n\`\`\`\n${String(a.content).slice(0,16384)}\n\`\`\``:`[Attachment: ${a.name} (${a.size||0} bytes)]`).join('\n\n');}
 function onComposeKeydown(e){if(e?.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();void send();}}
 globalThis.__bobForceRefreshDsh=forceRefresh;
-async function open(s){resetDshStop();checkedDshQuestions=false;dshQuestionView.value=null;answeredDshCallIds.value={};dshQuestionDrafts.value={};dshQuestionBusy.value={};dshQuestionErrors.value={};inSessionSearchOpen.value=false;inSessionSearchQuery.value='';approvalErrors.value={};pendingDecision.value=null;pendingPermissionElevation.value=null;switchingPermissionMode.value=false;cancelRequest.value=null;cancelBusy.value=false;takeoverPrompt.value=null;terminalHolderOverride.value=null;bobHolderOverride.value=null;handoffCardOpen.value=false;releasingHolder.value=false;copiedCliCmd.value=false;chatScroll.reset();clearTimeout(dshLiveTimer);dshLiveState.value=null;dshReadCursor=-1;clearTimeout(nativeTimer);nativeCursor=0;nativeEpoch='';nativeDrafts.value={};nodeActivity.value=null;awaitingReply.value=null;replying.value=false;hasNewMessages.value=false;streamSeq.value=null;syncStatus.value='';pullUpDistance.value=0;attachments.value=[];clearTimeout(syncTimer);activityChecked=0;olderRequested=false;artifactQueue=[];artifactCount=0;persist();++generation;clearTimeout(timer);busy.value=false;loadingOlder.value=false;lastTop=0;selected.value=s;history.value=null;notice.value='';const saved=readState();restoring=true;draft.value=saved.draft||'';pending.value=saved.pending||null;restoring=false;if(pending.value)notice.value=t('dshUncertain');const g=generation;const cached=await readingCache.get(historyKey());if(g!==generation||disposed)return;if(cached){try{validatePage(cached,s.id);history.value=cached;syncStatus.value='checking';await nextTick();if(reader.value)reader.value.scrollTop=reader.value.scrollHeight;lastTop=reader.value?.scrollTop||0;}catch{}}if(!canReadOrResume(s)){error.value=t(s.historyReason==='AGY_HISTORY_NOT_LOCAL'?'agyHistoryNotLocal':'agyHistoryPending');return;}await refresh();void refreshNativeEvents();void refreshDshLive()}
+async function open(s){resetDshStop();checkedDshQuestions=false;dshQuestionView.value=null;answeredDshCallIds.value={};dshQuestionDrafts.value={};dshQuestionBusy.value={};dshQuestionErrors.value={};inSessionSearchOpen.value=false;inSessionSearchQuery.value='';approvalErrors.value={};pendingDecision.value=null;pendingPermissionElevation.value=null;switchingPermissionMode.value=false;cancelRequest.value=null;cancelBusy.value=false;takeoverPrompt.value=null;terminalHolderOverride.value=null;bobHolderOverride.value=null;handoffCardOpen.value=false;releasingHolder.value=false;copiedCliCmd.value=false;chatScroll.reset();clearTimeout(dshLiveTimer);dshLiveState.value=null;dshReadCursor=-1;clearTimeout(nativeTimer);nativeCursor=0;nativeEpoch='';nativeDrafts.value={};nodeActivity.value=null;awaitingReply.value=null;replying.value=false;hasNewMessages.value=false;streamSeq.value=null;syncStatus.value='';pullUpDistance.value=0;attachments.value=[];clearTimeout(syncTimer);activityChecked=0;olderRequested=false;artifactQueue=[];artifactCount=0;persist();++generation;clearTimeout(timer);busy.value=false;loadingOlder.value=false;lastTop=0;selected.value=s;history.value=null;notice.value='';loadSessionModelPrefs();const saved=readState();restoring=true;draft.value=saved.draft||'';pending.value=saved.pending||null;restoring=false;if(pending.value)notice.value=t('dshUncertain');const g=generation;const cached=await readingCache.get(historyKey());if(g!==generation||disposed)return;if(cached){try{validatePage(cached,s.id);history.value=cached;syncStatus.value='checking';await nextTick();if(reader.value)reader.value.scrollTop=reader.value.scrollHeight;lastTop=reader.value?.scrollTop||0;}catch{}}if(!canReadOrResume(s)){error.value=t(s.historyReason==='AGY_HISTORY_NOT_LOCAL'?'agyHistoryNotLocal':'agyHistoryPending');return;}await refresh();void refreshNativeEvents();void refreshDshLive()}
 function back(){resetDshStop();dshQuestionView.value=null;answeredDshCallIds.value={};dshQuestionDrafts.value={};dshQuestionBusy.value={};dshQuestionErrors.value={};inSessionSearchOpen.value=false;inSessionSearchQuery.value='';pendingPermissionElevation.value=null;switchingPermissionMode.value=false;takeoverPrompt.value=null;terminalHolderOverride.value=null;bobHolderOverride.value=null;handoffCardOpen.value=false;releasingHolder.value=false;copiedCliCmd.value=false;clearTimeout(dshLiveTimer);dshLiveState.value=null;clearTimeout(nativeTimer);persist();++generation;clearTimeout(timer);clearTimeout(syncTimer);busy.value=false;selected.value=null;history.value=null;syncStatus.value='';hasNewMessages.value=false;notice.value='';load()}
 async function checkReceipt(){
  if(!pending.value || sending.value)return;
@@ -1058,7 +1155,7 @@ async function send(opts={}){
   sending.value=true;error.value='';
   try{
     const requestId=pending.value.id;
-    const receipt=await kernelBridge.dshPrompt(address.connection,address.session,text,requestId,attPayload,{takeover,approvalMode:supportsApprovalMode.value?effectiveApprovalMode.value:null,workspace:selected.value?.workspace||history.value?.workspace||null});
+    const receipt=await kernelBridge.dshPrompt(address.connection,address.session,text,requestId,attPayload,{takeover,approvalMode:supportsApprovalMode.value?effectiveApprovalMode.value:null,workspace:selected.value?.workspace||history.value?.workspace||null,model:selectedModel.value||null,reasoningEffort:selectedEffort.value||null});
     if(isNotAcceptedReceipt(receipt,address.session,requestId)){
       if(g===generation){
         pending.value=null;persist();
@@ -1299,13 +1396,34 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
         :title="t('permissionModeLabel')"
         @update:model-value="onSelectApprovalMode"
       />
+      <CustomSelect
+        v-if="supportsModelOverride"
+        :model-value="selectedModel"
+        class="dsh-permission-mode-select"
+        :options="modelOptions"
+        :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl"
+        :aria-label="t('sessionModelLabel')"
+        :title="t('sessionModelLabel')"
+        @update:model-value="onSelectSessionModel"
+      />
+      <CustomSelect
+        v-if="supportsEffortOverride"
+        :model-value="selectedEffort"
+        class="dsh-permission-mode-select"
+        :options="effortOptions"
+        :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl"
+        :aria-label="t('sessionEffortLabel')"
+        :title="t('sessionEffortLabel')"
+        @update:model-value="onSelectSessionEffort"
+      />
       <span v-if="syncStatus==='offline_cached' && syncStatusLabel" class="dsh-sync-pill" :class="{active:syncStatus==='checking'||syncStatus==='syncing'}"><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ syncStatusLabel }}</span><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span>
      </div>
      <button v-if="canStopDsh" type="button" class="composer-submit-btn" :disabled="!!dshStop || sending" @click="stopDsh">{{ t(dshStop ? 'dshStopChecking' : 'dshStop') }}</button>
      <button v-else-if="cancellableRequest" type="button" class="composer-submit-btn" :disabled="cancelBusy || cancelRequest===cancellableRequest" @click="cancelNative">{{ t(cancelRequest===cancellableRequest?'nativeCancelPending':'nativeCancel') }}</button>
-      <button v-else type="submit" class="composer-submit-btn" :disabled="sending || attachments.some(a=>a.status==='uploading') || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl || !!pending || nativeUnresolved || dshQuestionBlocking || (!draft.trim() && !attachments.length) || (!history && !selected?.resumable)">{{ t(sending?'dshSending':'send') }}</button>
+      <button v-else type="submit" class="composer-submit-btn" :title="sendDisabledReason || t('send')" :disabled="sending || attachments.some(a=>a.status==='uploading') || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl || !!pending || nativeUnresolved || dshQuestionBlocking || (!draft.trim() && !attachments.length) || !isSessionResumable">{{ t(sending?'dshSending':'send') }}</button>
     </div>
    </div>
+   <p v-if="sendDisabledReason && (draft.trim() || attachments.length) && !sending" class="dsh-send-blocked-hint" role="status">{{ sendDisabledReason }}</p>
    <p v-if="pending && !sending" role="status">{{ t('dshUncertain') }} <button type="button" @click="checkReceipt">{{ t('dshCheckReceipt') }}</button> <button type="button" @click="dismissPending">{{ t('dshUnlockEdit') }}</button></p>
   </form>
  </section>

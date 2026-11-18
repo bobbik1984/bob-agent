@@ -31,7 +31,7 @@ export function createKernelBridge(invoke, isAvailable) {
     pairedSessionSetup: (ownerId,command,args={}) => call('app_paired_session_setup',{ownerId,command,args}),
     dshPage: (connectionId,sessionId,before=null,through=null,after=null) => call('app_dsh_page',{connectionId,sessionId,before,through,after}),
     dshHistory: (connectionId,sessionId) => call('app_dsh_history',{connectionId,sessionId}),
-    dshPrompt: (connectionId,sessionId,text,requestId,attachments=null,options=null) => call('app_dsh_prompt',{connectionId,sessionId,text,requestId,...(attachments?.length?{attachments}:{}),...(options?.takeover?{takeover:true}:{}),...(options?.approvalMode?{approvalMode:options.approvalMode}:{}),...(options?.workspace?{workspace:options.workspace}:{})}),
+    dshPrompt: (connectionId,sessionId,text,requestId,attachments=null,options=null) => call('app_dsh_prompt',{connectionId,sessionId,text,requestId,...(attachments?.length?{attachments}:{}),...(options?.takeover?{takeover:true}:{}),...(options?.approvalMode?{approvalMode:options.approvalMode}:{}),...(options?.workspace?{workspace:options.workspace}:{}),...(options?.model?{model:options.model}:{}),...(options?.reasoningEffort?{reasoningEffort:options.reasoningEffort}:{})}),
     attachmentUploadChunk: ({ connectionId, uploadId, chunkIndex, totalChunks, totalSize, name, type, dataBase64 }) =>
       call('app_attachment_upload_chunk', { connectionId, uploadId, chunkIndex, totalChunks, totalSize, name, type, dataBase64 }),
     attachmentFinalize: ({ connectionId, uploadId, totalChunks, name, type, expectedSha256 = null }) =>

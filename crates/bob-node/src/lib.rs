@@ -2012,7 +2012,9 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                         text,
                         args.get("attachments"),
                     );
-                    match bob_runtime::agy_directory::prompt_session_with_details(&ctx.runtime.data_dir, connection, sid, &staged_text, request, takeover, approval_mode, args.get("attachments")) {
+                    let model_override = args.get("model").and_then(Value::as_str);
+                    let reasoning_effort = args.get("reasoningEffort").or_else(|| args.get("reasoning_effort")).and_then(Value::as_str);
+                    match bob_runtime::agy_directory::prompt_session_with_model_options(&ctx.runtime.data_dir, connection, sid, &staged_text, request, takeover, approval_mode, args.get("attachments"), model_override, reasoning_effort) {
                         Ok(v) => return Ok(v),
                         Err("DSH_CONNECTION_REQUIRED") if connection != "local" => {
                             return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
@@ -3300,7 +3302,9 @@ fn execute_unlocked_harness_rpc_inner(
                         text,
                         args.get("attachments"),
                     );
-                    match bob_runtime::agy_directory::prompt_session_with_details(
+                    let model_override = args.get("model").and_then(Value::as_str);
+                    let reasoning_effort = args.get("reasoningEffort").or_else(|| args.get("reasoning_effort")).and_then(Value::as_str);
+                    match bob_runtime::agy_directory::prompt_session_with_model_options(
                         data_dir,
                         connection,
                         sid,
@@ -3309,6 +3313,8 @@ fn execute_unlocked_harness_rpc_inner(
                         takeover,
                         approval_mode,
                         args.get("attachments"),
+                        model_override,
+                        reasoning_effort,
                     ) {
                         Ok(v) => return Ok(v),
                         Err("DSH_CONNECTION_REQUIRED") if connection != "local" => {

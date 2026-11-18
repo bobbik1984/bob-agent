@@ -2822,6 +2822,8 @@ def _native_worker(cfg):
                 cfg.get('approval_mode'), bool(creating)
             )
             params = {'cwd':cwd, 'approvalPolicy':codex_approval_policy, 'sandbox':codex_sandbox}
+            if cfg.get('model_override'):
+                params['model'] = cfg['model_override']
             if not creating:
                 params['threadId'] = raw
             pipe.send({'id':2, 'method':'thread/start' if creating else 'thread/resume', 'params':params})
@@ -2831,8 +2833,13 @@ def _native_worker(cfg):
                     _release_claude_terminal_holder(exe,raw,env)
                 _ensure_claude_session_available(exe,raw,env)
             session_flag = '--session-id' if creating else '--resume'
+            claude_extra = []
+            if cfg.get('model_override'):
+                claude_extra.extend(['--model', cfg['model_override']])
+            if cfg.get('reasoning_effort') in ('low', 'medium', 'high'):
+                claude_extra.extend(['--effort', cfg['reasoning_effort']])
             pipe = _claude_durable_pipe([exe,session_flag,raw,'-p','--input-format','stream-json','--output-format','stream-json','--verbose',
-                '--include-partial-messages']+_claude_tool_arguments(cfg),cwd,env,sid,rid)
+                '--include-partial-messages',*claude_extra]+_claude_tool_arguments(cfg),cwd,env,sid,rid)
             _claude_initialize(pipe,raw,text)
             if _cancel_requested(rid):
                 _stream_update(rid,execution_status='cancelled',ended_at=_now(),cancel_confirmed_by='not_dispatched')
@@ -2849,13 +2856,25 @@ def _native_worker(cfg):
                 settings=json.loads(profile.read_text(encoding='utf-8'))
                 env['PI_CODING_AGENT_DIR']=str(profile.parent/'pi')
                 env['BOB_PI_API_KEY']=settings['api_key']
-                model_args=['--provider',settings['provider'],'--model',settings['model'],'--thinking','off']
+                thinking_mode = cfg.get('reasoning_effort') if cfg.get('reasoning_effort') in ('low', 'medium', 'high') else 'off'
+                pi_model = cfg.get('model_override') or settings['model']
+                model_args=['--provider',settings['provider'],'--model',pi_model,'--thinking',thinking_mode]
+            elif cfg.get('model_override') or cfg.get('reasoning_effort') in ('low', 'medium', 'high'):
+                if cfg.get('model_override'):
+                    model_args.extend(['--model', cfg['model_override']])
+                if cfg.get('reasoning_effort') in ('low', 'medium', 'high'):
+                    model_args.extend(['--thinking', cfg['reasoning_effort']])
             session_args = ['--session-dir',cfg['pi_session_dir']] if creating else ['--session',cfg['jsonl_path']]
             pipe = NativePipe([exe,*model_args,'--mode','rpc',*session_args,'--no-tools',
                 '--no-extensions','--no-skills','--no-prompt-templates','--no-themes'],cwd,env)
             pipe.send({'id':'identity','type':'get_state'})
         elif tool in ('agy', 'copilot'):
-            acp_cmd = [exe, '--acp', '--stdio'] if tool == 'copilot' else [exe, 'acp', '--stdio']
+            if tool == 'copilot':
+                acp_cmd = [exe, '--acp', '--stdio']
+                if cfg.get('model_override'):
+                    acp_cmd.extend(['--model', cfg['model_override']])
+            else:
+                acp_cmd = [exe, 'acp', '--stdio']
             pipe = AgyAcpSession(exe, None if creating else raw, cwd, env, acp_cmd=acp_cmd)
             if creating:
                 _stream_update(rid,native_session_id=pipe.raw)
@@ -2948,9 +2967,14 @@ def _native_worker(cfg):
                     _, turn_approval_policy, _, turn_sandbox_policy = _codex_turn_policies(
                         cfg.get('approval_mode'), bool(creating)
                     )
-                    pipe.send({'id':3,'method':'turn/start','params':{'threadId':raw,'input':[{'type':'text','text':text}],
+                    turn_params = {'threadId':raw,'input':[{'type':'text','text':text}],
                         'approvalPolicy':turn_approval_policy,
-                        'sandboxPolicy':turn_sandbox_policy}})
+                        'sandboxPolicy':turn_sandbox_policy}
+                    if cfg.get('model_override'):
+                        turn_params['model'] = cfg['model_override']
+                    if cfg.get('reasoning_effort') in ('low', 'medium', 'high'):
+                        turn_params['effort'] = cfg['reasoning_effort']
+                    pipe.send({'id':3,'method':'turn/start','params':turn_params})
                 if frame.get('id')==3:
                     _stream_update(rid,turn_start_response_received=True)
                     if 'error' in frame: raise ValueError('HARNESS_SEND_REJECTED')
@@ -3322,6 +3346,8 @@ def _resolve_codex_work_cwd(rollout_path, workspace_hint=None):
 
 def prompt_session(cfg):
     policy_path = cfg.get("policyPath")
+    model_override = str(cfg.get('model') or '').strip()
+    effort_override = str(cfg.get('reasoningEffort') or '').strip().lower()
     sid, text, rid = (cfg.get('sessionId') or '').strip(), (cfg.get('text') or '').strip(), (cfg.get('requestId') or '').strip()
     if not sid or not text or not rid:
         raise ValueError('DSH_REQUEST_REQUIRED')
@@ -3503,6 +3529,10 @@ def prompt_session(cfg):
     cfg = {'session_id':sid,'request_id':rid,'text':text,'project_cwd':pcwd,'work_cwd':wcwd,'jsonl_path':jpath,'policy_path':policy_path}
     cfg['approval_mode'] = approval_mode
     cfg['claude_tools'] = claude_tools
+    if model_override:
+        cfg['model_override'] = model_override
+    if effort_override in ('low', 'medium', 'high'):
+        cfg['reasoning_effort'] = effort_override
     if takeover:
         cfg['takeover'] = True
     source = globals().get('__BOB_PROBE_SRC__') or Path(__file__).read_text(encoding='utf-8')

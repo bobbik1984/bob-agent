@@ -644,6 +644,32 @@ pub fn prompt_session_with_details(
     approval_mode_override: Option<&str>,
     attachments: Option<&Value>,
 ) -> Result<Value, &'static str> {
+    prompt_session_with_model_options(
+        data,
+        connection,
+        session_id,
+        text,
+        request_id,
+        takeover,
+        approval_mode_override,
+        attachments,
+        None,
+        None,
+    )
+}
+
+pub fn prompt_session_with_model_options(
+    data: &Path,
+    connection: &str,
+    session_id: &str,
+    text: &str,
+    request_id: &str,
+    takeover: bool,
+    approval_mode_override: Option<&str>,
+    attachments: Option<&Value>,
+    model_override: Option<&str>,
+    reasoning_effort: Option<&str>,
+) -> Result<Value, &'static str> {
     use sha2::{Sha256,Digest};
     crate::tool_policy::require(data,connection,crate::tool_policy::session_tool(session_id))?;
     if !owns_readable_session(session_id) {
@@ -673,6 +699,8 @@ pub fn prompt_session_with_details(
         "text": text,
         "requestId": request_id,
         "attachments": attachments,
+        "model": model_override.map(str::trim).filter(|s| !s.is_empty()),
+        "reasoningEffort": reasoning_effort.map(str::trim).filter(|s| !s.is_empty()),
         "agyDataDir": g.agy_data_dir,
         "claudeDataDir": g.claude_data_dir,
         "piDataDir": g.pi_data_dir,
