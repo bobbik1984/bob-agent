@@ -327,6 +327,37 @@ impl BobNativeHarness {
 
         prompt.push_str(crate::assistant_context::CONTINUITY_PROMPT);
 
+        if let Some(dir) = self.effective_data_dir() {
+            if let Ok(skill_store) = crate::features::SkillStore::open(dir) {
+                let active_skills = skill_store.list_active();
+                if !active_skills.is_empty() {
+                    let mut index_text = String::new();
+                    let mut index_chars = 0usize;
+                    for s in active_skills {
+                        let triggers = if s.triggers.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" [triggers: {}]", s.triggers.join(", "))
+                        };
+                        let entry = format!("- Skill '{}' ({}){}\n", s.title, s.name, triggers);
+                        let entry_chars = entry.chars().count();
+                        if index_chars + entry_chars > crate::features::CLERK_SKILLS_INDEX_BUDGET_CHARS {
+                            break;
+                        }
+                        index_text.push_str(&entry);
+                        index_chars += entry_chars;
+                    }
+                    if !index_text.is_empty() {
+                        prompt.push_str(
+                            "\n[Available Custom Skills (SOP index)]\n\
+                             Factor these capabilities into planning; when a request matches a skill and requires execution, call `dispatch_background_task` referencing the skill name so the Maker Worker runs the full SOP.\n",
+                        );
+                        prompt.push_str(&index_text);
+                    }
+                }
+            }
+        }
+
         prompt.push_str("\n[Bob platform contract]\nYou are the main assistant inside Bob. The web host serves the shared personal calendar, todos, inbox and projects; paired phones use this same data. A node is an execution device; a harness is a tool on that device; a project groups work across devices. Historical conversations do not prove a tool is enabled or executable. Never infer node execution permission from read access.\nUse platform_overview for configured nodes and projects (configuration is not proof of online availability). Use schedule_list to read the real shared calendar, including todo deadlines, date-only timing and notes. A todo need not belong to a project, and start/deadline are independently optional. Before adding an item check for an existing match. If the user asks to supplement, consolidate or correct an existing item, read its ID/version and use schedule_update; preserve unrelated fields and never create a substitute event. Organizing supplied report text into an existing todo is a direct edit, not a background research task. Only claim saved/completed after tool success. Task dispatch is not completion; report failed/cancelled states honestly and do not automatically retry side effects.\n");
         self.append_persona_and_soul(&mut prompt);
         prompt
@@ -354,12 +385,15 @@ impl BobNativeHarness {
                 let active_skills = skill_store.list_active();
                 if !active_skills.is_empty() {
                     let mut skills_text = String::new();
+                    let mut skills_chars = 0usize;
                     for s in active_skills {
                         let entry = format!("- Skill '{}' ({}): {}\n", s.title, s.name, s.instructions);
-                        if skills_text.len() + entry.len() > crate::features::SYSTEM_PROMPT_SKILLS_BUDGET_CHARS {
+                        let entry_chars = entry.chars().count();
+                        if skills_chars + entry_chars > crate::features::SYSTEM_PROMPT_SKILLS_BUDGET_CHARS {
                             break;
                         }
                         skills_text.push_str(&entry);
+                        skills_chars += entry_chars;
                     }
                     if !skills_text.is_empty() {
                         prompt.push_str("\n[Custom Skills & User SOPs]\n");
@@ -3256,5 +3290,74 @@ mod tests {
             .steps
             .iter()
             .any(|s| s.kind == "followup_batched" && s.detail.as_ref().and_then(|d| d["count"].as_u64()) == Some(3)));
+    }
+
+    #[test]
+    fn test_clerk_prompt_indexes_skills_and_worker_prompt_respects_utf8_char_budget() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data_dir = tmp.path().to_path_buf();
+
+        // Create a Chinese skill whose UTF-8 byte length (> 1800 bytes) exceeds the old byte cap
+        // while staying comfortably within the character budget (< 4000 chars).
+        let long_cn_sop = format!(
+            "优先探活 bobbik-pc，离线或超显存再唤醒 bob-vm-02-gpu，完成后必须 stop 关机。{}",
+            "逐帧落盘并核验状态。".repeat(65)
+        );
+        assert!(long_cn_sop.len() > 1800);
+        assert!(long_cn_sop.chars().count() < 1000);
+
+        let mut skill_store = crate::features::SkillStore::open(&data_dir).unwrap();
+        skill_store
+            .create_or_update(
+                "gpu-compute-dispatch",
+                "GPU 算力路由与渲染调度",
+                &long_cn_sop,
+                vec!["渲染".to_string(), "Blender".to_string(), "GPU".to_string()],
+                1_795_000_000_000,
+            )
+            .unwrap();
+
+        let app = create_test_app(&data_dir);
+        let budget_store = MonthlyBudgetStore::open(&data_dir).unwrap();
+        let tool_bus = BobToolBus::with_approval_store(&data_dir).unwrap();
+        let profile = DirectProviderProfile {
+            id: "test-profile".to_string(),
+            provider_kind: "openai_compatible".to_string(),
+            label: "Test".to_string(),
+            base_url: "http://127.0.0.1:1/v1".to_string(),
+            model_id: "test-model".to_string(),
+            api_key_slot: "provider-key-test".to_string(),
+            api_key_configured: true,
+            enabled: true,
+            last_check_status: "ok".to_string(),
+            last_check_reason: String::new(),
+            last_checked_at: None,
+            updated_at: 0,
+        };
+
+        let clerk = NativeToolLoopHarness::new_clerk(
+            profile,
+            "mock-key".to_string(),
+            budget_store,
+            tool_bus,
+            app,
+            data_dir.clone(),
+            "maker-model".to_string(),
+        );
+
+        let clerk_prompt = clerk.build_clerk_system_prompt();
+        assert!(clerk_prompt.contains("[Available Custom Skills (SOP index)]"));
+        assert!(clerk_prompt.contains("GPU 算力路由与渲染调度"));
+        assert!(clerk_prompt.contains("(gpu-compute-dispatch)"));
+        assert!(clerk_prompt.contains("[triggers: 渲染, Blender, GPU]"));
+        assert!(
+            !clerk_prompt.contains("逐帧落盘并核验状态。逐帧落盘"),
+            "Clerk prompt must remain a compact index without dumping full SOP body"
+        );
+
+        let worker_prompt = clerk.build_system_prompt();
+        assert!(worker_prompt.contains("[Custom Skills & User SOPs]"));
+        assert!(worker_prompt.contains("gpu-compute-dispatch"));
+        assert!(worker_prompt.contains("优先探活 bobbik-pc"));
     }
 }

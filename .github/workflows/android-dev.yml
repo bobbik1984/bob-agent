@@ -45,6 +45,69 @@ jobs:
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
           echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+      - name: Restore Gradle dependency cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/bob-gradle/caches
+            ${{ runner.temp }}/bob-gradle/wrapper
+          key: bob-gradle-${{ runner.os }}-${{ hashFiles('apps/bob-app/src-tauri/Cargo.lock', 'apps/bob-app/package.json') }}
+          restore-keys: |
+            bob-gradle-${{ runner.os }}-
+      - name: Configure Gradle Maven Central mirror fallback
+        run: |
+          mkdir -p "$GRADLE_USER_HOME/init.d"
+          cat <<'EOF' > "$GRADLE_USER_HOME/init.d/maven-mirror.gradle"
+          import org.gradle.api.artifacts.repositories.MavenArtifactRepository
+
+          def gcsCentral = "https://maven-central.storage-download.googleapis.com/maven2"
+          def rewriteCentral = { repos ->
+              repos.all { repo ->
+                  if (repo instanceof MavenArtifactRepository && repo.url != null) {
+                      def u = repo.url.toString()
+                      if (u.startsWith("https://repo.maven.apache.org/maven2") || u.startsWith("https://repo1.maven.org/maven2")) {
+                          repo.setUrl(java.net.URI.create(gcsCentral))
+                      }
+                  }
+              }
+          }
+          def prependMirror = { repos ->
+              if (repos.findByName("GoogleMavenCentralMirror") == null) {
+                  def mirror = repos.maven {
+                      name = "GoogleMavenCentralMirror"
+                      url = java.net.URI.create(gcsCentral)
+                  }
+                  repos.remove(mirror)
+                  repos.addFirst(mirror)
+              }
+          }
+          gradle.settingsEvaluated { settings ->
+              def pmRepos = settings.pluginManagement.repositories
+              if (pmRepos.isEmpty()) {
+                  pmRepos.gradlePluginPortal()
+              }
+              rewriteCentral(pmRepos)
+              prependMirror(pmRepos)
+
+              def drmRepos = settings.dependencyResolutionManagement.repositories
+              rewriteCentral(drmRepos)
+              if (!drmRepos.isEmpty()) {
+                  prependMirror(drmRepos)
+              }
+          }
+          gradle.allprojects { project ->
+              rewriteCentral(project.buildscript.repositories)
+              rewriteCentral(project.repositories)
+              project.afterEvaluate {
+                  if (!project.buildscript.repositories.isEmpty()) {
+                      prependMirror(project.buildscript.repositories)
+                  }
+                  if (!project.repositories.isEmpty()) {
+                      prependMirror(project.repositories)
+                  }
+              }
+          }
+          EOF
       - name: Install locked frontend dependencies
         run: pnpm install --frozen-lockfile
       - name: Check controllers

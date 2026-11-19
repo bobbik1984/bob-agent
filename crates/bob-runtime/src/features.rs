@@ -22,7 +22,8 @@ pub const TRIAL_DURATION_MILLIS: i64 = 3 * 60 * 1000; // 3 minutes
 pub const MAX_FEATURE_VERSIONS: usize = 5;
 pub const MAX_ACTIVE_SKILLS: usize = 20;
 pub const MAX_SKILL_INSTRUCTION_CHARS: usize = 4000;
-pub const SYSTEM_PROMPT_SKILLS_BUDGET_CHARS: usize = 1500;
+pub const SYSTEM_PROMPT_SKILLS_BUDGET_CHARS: usize = 4000;
+pub const CLERK_SKILLS_INDEX_BUDGET_CHARS: usize = 1200;
 
 pub const WIDGET_SANDBOX_PROMPT_SPEC: &str = "\
 [Widget Sandbox Specification (feature_create)]\n\
