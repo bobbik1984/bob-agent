@@ -1564,9 +1564,9 @@ class NativePipe:
         def reader():
             try:
                 while True:
-                    line = self.p.stdout.readline(8*1024*1024+1)
+                    line = self.p.stdout.readline(64*1024*1024+1)
                     if not line: break
-                    if len(line)>8*1024*1024: raise ValueError()
+                    if len(line)>64*1024*1024: raise ValueError()
                     self.q.put(json.loads(line), timeout=10)
             except Exception:
                 pass
@@ -3061,7 +3061,7 @@ def _native_worker(cfg):
                         'sandboxPolicy':turn_sandbox_policy}
                     if cfg.get('model_override'):
                         turn_params['model'] = cfg['model_override']
-                    if cfg.get('reasoning_effort') in ('low', 'medium', 'high'):
+                    if cfg.get('reasoning_effort') in ('low', 'medium', 'high', 'xhigh', 'max', 'ultra'):
                         turn_params['effort'] = cfg['reasoning_effort']
                     pipe.send({'id':3,'method':'turn/start','params':turn_params})
                 if frame.get('id')==3:
@@ -3620,7 +3620,7 @@ def prompt_session(cfg):
     cfg['claude_tools'] = claude_tools
     if model_override:
         cfg['model_override'] = model_override
-    if effort_override in ('low', 'medium', 'high'):
+    if effort_override in ('low', 'medium', 'high', 'xhigh', 'max', 'ultra'):
         cfg['reasoning_effort'] = effort_override
     if takeover:
         cfg['takeover'] = True
@@ -3671,7 +3671,7 @@ class CodexControlSocket:
                 elif n==127 and len(self.buf)>=10:n=struct.unpack('!Q',self.buf[2:10])[0];offset=10
                 elif n>=126:n=None
                 if n is not None:
-                    if n>8*1024*1024: raise ValueError('HARNESS_OUTPUT_LIMIT')
+                    if n>64*1024*1024: raise ValueError('HARNESS_OUTPUT_LIMIT')
                     if len(self.buf)>=offset+n:
                         payload,self.buf=self.buf[offset:offset+n],self.buf[offset+n:];op=a&15
                         if op==8: raise ValueError('HARNESS_PROCESS_EXITED')
@@ -3679,7 +3679,7 @@ class CodexControlSocket:
                         if op==10:continue
                         if op not in (0,1):raise ValueError('HARNESS_CONTROL_FRAME')
                         self.fragment+=payload
-                        if len(self.fragment)>8*1024*1024:raise ValueError('HARNESS_OUTPUT_LIMIT')
+                        if len(self.fragment)>64*1024*1024:raise ValueError('HARNESS_OUTPUT_LIMIT')
                         if not a&128:continue
                         data,self.fragment=self.fragment,b''
                         return json.loads(data)
