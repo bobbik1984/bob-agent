@@ -100,14 +100,20 @@ jobs:
           KEYSTORE="$RUNNER_TEMP/bob-signing.p12"
           trap 'rm -f "$KEYSTORE"' EXIT
           printf '%s' "$SIGNING_KEY" | base64 --decode > "$KEYSTORE"
+          mkdir -p "$RUNNER_TEMP/bob-apk"
+          VERSION=$(node -p "require('./package.json').version")
           while IFS= read -r -d '' apk; do
-            "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign --ks "$KEYSTORE" --ks-type PKCS12 --ks-key-alias "$SIGNING_ALIAS" --ks-pass env:SIGNING_PASSWORD --key-pass env:SIGNING_PASSWORD "$apk"
-            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk"
+            base=$(basename "$apk" .apk)
+            clean_base=$(echo "$base" | sed 's/-unsigned$//')
+            aligned="$RUNNER_TEMP/bob-apk/${clean_base}-aligned.apk"
+            out="$RUNNER_TEMP/bob-apk/bob-${VERSION}-${clean_base}-signed.apk"
+            "$ANDROID_HOME/build-tools/36.0.0/zipalign" -f -P 16 4 "$apk" "$aligned"
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign --ks "$KEYSTORE" --ks-type PKCS12 --ks-key-alias "$SIGNING_ALIAS" --ks-pass env:SIGNING_PASSWORD --key-pass env:SIGNING_PASSWORD --out "$out" "$aligned"
+            rm -f "$aligned"
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$out"
           done < <(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' -print0)
       - name: Collect APK and provenance
         run: |
-          mkdir -p "$RUNNER_TEMP/bob-apk"
-          find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' -exec cp {} "$RUNNER_TEMP/bob-apk/" \;
           test -n "$(find "$RUNNER_TEMP/bob-apk" -name '*.apk' -print -quit)"
           for apk in "$RUNNER_TEMP/bob-apk/"*.apk; do
             python3 tests/check-apk-alignment.py "$apk"
@@ -115,10 +121,12 @@ jobs:
           done
           cd "$RUNNER_TEMP/bob-apk"
           sha256sum *.apk > SHA256SUMS
-          printf 'commit=%s\nrun=%s\npackage=org.bobagent.nextdev\nkind=debug-not-release\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > BUILD.txt
+          KIND="debug-not-release"
+          if [ "${{ github.ref_name }}" = "1.0.2" ]; then KIND="release"; fi
+          printf 'commit=%s\nrun=%s\npackage=org.bobagent.nextdev\nkind=%s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" "$KIND" > BUILD.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: bob-android-dev-${{ github.sha }}
+          name: bob-android-${{ github.ref_name }}-${{ github.sha }}
           path: ${{ runner.temp }}/bob-apk/
           if-no-files-found: error
           retention-days: 7

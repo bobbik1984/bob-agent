@@ -17,7 +17,17 @@ onMounted(()=>{if(!service||!supported)return;observer=new IntersectionObserver(
  }});},{root:element.value.closest('.dsh-reader'),rootMargin:'120px'});observer.observe(element.value);});
 onUnmounted(()=>{alive=false;observer?.disconnect();if(url.value.startsWith('blob:'))URL.revokeObjectURL(url.value)});
 </script>
-<template><button ref="element" type="button" class="artifact-link" :class="{image,loading:state==='loading'}" @click="open(path,messageSequence)"><img v-if="url" :src="url" :alt="label" @load="imageReady"/><span>{{ label }}</span><small v-if="supported">{{ t(state==='loading'?'artifactPreparing':state==='ready'?'artifactReady':state==='failed'?'artifactRetry':'artifactOpen') }}</small></button></template>
+<template><button ref="element" type="button" class="artifact-link" :class="{image,loading:state==='loading'}" @click="open(path,messageSequence)"><img v-if="url" :src="url" :alt="label" @load="imageReady"/><span class="artifact-meta"><span class="artifact-label">{{ label }}</span><small v-if="supported">{{ t(state==='loading'?'artifactPreparing':state==='ready'?'artifactReady':state==='failed'?'artifactRetry':'artifactOpen') }}</small></span></button></template>
 <style scoped>
-.artifact-link{display:inline-flex;align-items:center;gap:8px;max-width:100%;text-align:left;background:color-mix(in srgb,var(--accent-primary) 7%,var(--bg-primary));border:1px solid var(--accent-primary);border-radius:3px;padding:2px 6px;color:var(--accent-primary);overflow-wrap:anywhere;position:relative}.artifact-link.image{display:flex;flex-direction:column;align-items:flex-start;width:min(100%,420px);min-height:80px}.artifact-link img{width:100%;max-height:260px;object-fit:contain;border-radius:6px}.artifact-link small{color:var(--text-secondary);font-size:.75rem}.artifact-link.loading{background:var(--bg-tertiary)}
+.artifact-link{display:inline-flex;align-items:center;gap:8px;max-width:100%;text-align:left;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-sm);padding:3px 8px;color:var(--accent-primary);overflow-wrap:anywhere;position:relative;cursor:pointer;transition:border-color .15s ease}
+.artifact-link:hover{border-color:var(--accent-primary)}
+.artifact-meta{display:flex;flex-direction:column;gap:2px;min-width:0}
+.artifact-label{color:var(--text-primary);font-size:var(--text-xs);font-weight:500;overflow-wrap:anywhere}
+.artifact-link:not(.image) .artifact-meta{flex-direction:row;align-items:center;gap:6px}
+.artifact-link:not(.image) .artifact-label{color:var(--accent-primary)}
+.artifact-link.image{display:flex;flex-direction:column;align-items:stretch;width:min(100%,420px);padding:0;gap:0;border-radius:var(--radius-card);overflow:hidden;border:1px solid var(--border-color);background:var(--bg-secondary)}
+.artifact-link.image .artifact-meta{padding:8px 12px}
+.artifact-link img{display:block;width:100%;max-height:280px;object-fit:cover;border-radius:0}
+.artifact-link small{color:var(--text-secondary);font-size:var(--text-2xs)}
+.artifact-link.loading{background:var(--bg-tertiary)}
 </style>

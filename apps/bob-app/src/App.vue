@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, provide, watch } from 'vue';
+import { onMounted, onUnmounted, provide, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import ScheduleView from './views/ScheduleView.vue';
 import WorkView from './views/WorkView.vue';
@@ -76,6 +76,12 @@ shell.catalog = catalog;
 shell.projectList = projectList;
 shell.assistantConversationId = assistantConversationId;
 shell.messages = messages;
+
+const remoteSessionConfigOpen = ref(false), remoteSessionTitleOverride = ref(''), remoteSessionSubtitle = ref('');
+provide('remoteSessionConfigOpen', remoteSessionConfigOpen);
+provide('remoteSessionTitleOverride', remoteSessionTitleOverride);
+provide('remoteSessionSubtitle', remoteSessionSubtitle);
+watch(() => remoteConversation.value?.session?.id, () => { remoteSessionConfigOpen.value = false; remoteSessionTitleOverride.value = ''; remoteSessionSubtitle.value = ''; });
 
 const {
   onlineState,
@@ -236,7 +242,11 @@ onUnmounted(() => {
         <svg class="topbar-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
         <span v-if="totalUnreadCount > 0" class="unread-dot" aria-hidden="true"></span>
       </button>
-      <span class="page-name">
+      <button v-if="activeDrawer === 'chat' && !settingsOpen && remoteConversation" type="button" class="page-name page-name-trigger" :aria-expanded="remoteSessionConfigOpen" :title="t('sessionConfigTitle')" @click="remoteSessionConfigOpen = !remoteSessionConfigOpen">
+        <span class="page-name-trigger-row"><span class="page-name-main">{{ remoteSessionTitleOverride || remoteConversation.session.title }}</span><svg class="page-name-chevron" :class="{ open: remoteSessionConfigOpen }" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></span>
+        <small v-if="remoteSessionSubtitle" class="page-name-sub">{{ remoteSessionSubtitle }}</small>
+      </button>
+      <span v-else class="page-name">
         {{
           settingsOpen || activeDrawer === 'settings'
             ? t(settingsView === 'provider' ? 'directModelProvider' : settingsTab === 'connection' ? 'deviceAndConnection' : 'settings')
@@ -248,7 +258,7 @@ onUnmounted(() => {
                 ? t('workViewTitle')
                 : activeDrawer === 'knowledge'
                   ? t('knowledgeViewTitle')
-                  : (remoteConversation?.session.title || currentConversation)
+                  : currentConversation
         }}
       </span>
       <button v-if="activeDrawer === 'chat' && !settingsOpen && !remoteConversation && (messages?.length > 0)" type="button" class="mini-ghost-btn" :title="t('promoteToWorkBtn')" @click="promoteConversationToWork">

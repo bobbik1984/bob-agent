@@ -4414,6 +4414,161 @@ pub(crate) async fn app_dsh_prompt<R: Runtime>(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn app_attachment_upload_chunk<R: Runtime>(
+    host: AppHandle<R>,
+    connection_id: String,
+    upload_id: String,
+    chunk_index: u64,
+    total_chunks: u64,
+    total_size: u64,
+    name: String,
+    r#type: String,
+    data_base64: String,
+) -> Result<Value, &'static str> {
+    let args = json!({
+        "connectionId": connection_id,
+        "uploadId": upload_id,
+        "chunkIndex": chunk_index,
+        "totalChunks": total_chunks,
+        "totalSize": total_size,
+        "name": name,
+        "type": r#type,
+        "dataBase64": data_base64,
+    });
+    forward_attachment_rpc(host, connection_id, "app_attachment_upload_chunk", args).await
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn app_attachment_finalize<R: Runtime>(
+    host: AppHandle<R>,
+    connection_id: String,
+    upload_id: String,
+    total_chunks: u64,
+    name: String,
+    r#type: String,
+    expected_sha256: Option<String>,
+) -> Result<Value, &'static str> {
+    let mut args = json!({
+        "connectionId": connection_id,
+        "uploadId": upload_id,
+        "totalChunks": total_chunks,
+        "name": name,
+        "type": r#type,
+    });
+    if let Some(sha) = expected_sha256 {
+        args["expectedSha256"] = json!(sha);
+    }
+    forward_attachment_rpc(host, connection_id, "app_attachment_finalize", args).await
+}
+
+async fn forward_attachment_rpc<R: Runtime>(
+    host: AppHandle<R>,
+    connection_id: String,
+    command: &'static str,
+    args: Value,
+) -> Result<Value, &'static str> {
+    let dir = host
+        .path()
+        .app_data_dir()
+        .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
+    if connection_id == "local" {
+        return tauri::async_runtime::spawn_blocking(move || {
+            if command == "app_attachment_upload_chunk" {
+                bob_runtime::dsh_transport::stage_attachment_chunk(&dir, &args)
+            } else {
+                bob_runtime::dsh_transport::finalize_attachment_staging(&dir, &args, bob_runtime::now_millis())
+            }
+        })
+        .await
+        .map_err(|_| "DSH_UNAVAILABLE")?;
+    }
+    let hub = load_hub_state(&dir);
+    let nodes = hub["remoteNodes"]
+        .as_array()
+        .ok_or("DSH_CONNECTION_NOT_FOUND")?;
+    let node = nodes
+        .iter()
+        .find(|n| {
+            n["id"] == connection_id
+                && n.get("enabled").and_then(Value::as_bool).unwrap_or(true)
+        })
+        .ok_or("DSH_CONNECTION_NOT_FOUND")?;
+    let endpoint = node["baseUrl"]
+        .as_str()
+        .or_else(|| node["url"].as_str())
+        .map(str::to_owned)
+        .ok_or("DSH_CONNECTION_NOT_FOUND")?;
+    let token = read_api_key(&host, &remote_node_token_slot(&connection_id))
+        .await
+        .unwrap_or_default();
+    let mut relay_peers: Vec<(String, Option<String>, bool)> = Vec::new();
+    for peer in nodes {
+        if !peer.get("enabled").and_then(Value::as_bool).unwrap_or(true) {
+            continue;
+        }
+        let Some(pid) = peer.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        if pid == connection_id {
+            continue;
+        }
+        let Some(purl) = peer
+            .get("baseUrl")
+            .or_else(|| peer.get("url"))
+            .and_then(Value::as_str)
+            .filter(|u| !u.trim().is_empty())
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        let peer_is_web_host = peer.get("remark").and_then(Value::as_str) == Some("web_host")
+            || peer.get("selectedProjectId").and_then(Value::as_str) == Some("web_host")
+            || purl.contains("bob-online");
+        let ptok = read_api_key(&host, &remote_node_token_slot(pid))
+            .await
+            .ok()
+            .filter(|s| !s.trim().is_empty());
+        relay_peers.push((purl, ptok, peer_is_web_host));
+    }
+    relay_peers.sort_by_key(|(_, _, is_wh)| if *is_wh { 0 } else { 1 });
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let tok_opt = if token.trim().is_empty() {
+            None
+        } else {
+            Some(token.as_str())
+        };
+        if let Ok(res) = bob_runtime::node_pairing::forward_dsh_rpc_to_endpoint_with_target(
+            &endpoint,
+            tok_opt,
+            &connection_id,
+            "local",
+            command,
+            &args,
+        ) {
+            return Ok(res);
+        }
+        for (peer_url, peer_tok, _) in &relay_peers {
+            if let Ok(res) = bob_runtime::node_pairing::forward_dsh_rpc_to_endpoint_with_target(
+                peer_url,
+                peer_tok.as_deref(),
+                &connection_id,
+                &connection_id,
+                command,
+                &args,
+            ) {
+                return Ok(res);
+            }
+        }
+        Err("DSH_UNAVAILABLE")
+    })
+    .await
+    .map_err(|_| "DSH_UNAVAILABLE")?
+}
+
+#[tauri::command]
 pub(crate) async fn app_dsh_receipt<R: Runtime>(
     host: AppHandle<R>,
     connection_id: String,

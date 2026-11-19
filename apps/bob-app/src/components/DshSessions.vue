@@ -3,7 +3,7 @@ import {artifactPath} from '../artifact-path.mjs';
 import {isNotAcceptedReceipt} from '../native-receipt.mjs';
 import NativeActivity from './NativeActivity.vue';
 import {unconfirmActivity,settleNativeActivity,orderedNativeActivities,waitingNativeApproval} from '../native-activity.mjs';
-import { computed, ref, watch, onUnmounted, nextTick, provide } from 'vue';
+import { computed, ref, watch, onUnmounted, nextTick, provide, inject } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { kernelBridge } from '../native-bridge.mjs';
 import MessageContent from './MessageContent.vue';
@@ -213,6 +213,40 @@ function onSelectApprovalMode(nextMode){
 
 const selectedModel = ref('');
 const selectedEffort = ref('');
+const safeInject = (key, fallback) => (typeof inject === 'function' ? inject(key, fallback) : fallback);
+const sessionConfigOpen = safeInject('remoteSessionConfigOpen', ref(false));
+const remoteSessionTitleOverride = safeInject('remoteSessionTitleOverride', ref(''));
+const remoteSessionSubtitle = safeInject('remoteSessionSubtitle', ref(''));
+const customSessionTitle = ref('');
+
+function sessionTitleStorageKey() {
+  const cid = connection.value || '';
+  const sid = selected.value?.id || '';
+  return cid && sid ? `bob.sessionTitle:${cid}:${sid}` : '';
+}
+
+function loadCustomSessionTitle() {
+  customSessionTitle.value = '';
+  try {
+    const key = sessionTitleStorageKey();
+    if (key && typeof localStorage !== 'undefined') {
+      const saved = localStorage.getItem(key);
+      if (saved && saved.trim()) customSessionTitle.value = saved.trim();
+    }
+  } catch {}
+  remoteSessionTitleOverride.value = customSessionTitle.value;
+}
+
+function saveCustomSessionTitle() {
+  const clean = customSessionTitle.value.trim();
+  remoteSessionTitleOverride.value = clean;
+  try {
+    const key = sessionTitleStorageKey();
+    if (!key || typeof localStorage === 'undefined') return;
+    if (clean) localStorage.setItem(key, clean);
+    else localStorage.removeItem(key);
+  } catch {}
+}
 
 function sessionPrefsStorageKey() {
   const cid = connection.value || '';
@@ -223,6 +257,7 @@ function sessionPrefsStorageKey() {
 function loadSessionModelPrefs() {
   selectedModel.value = '';
   selectedEffort.value = '';
+  loadCustomSessionTitle();
   try {
     const key = sessionPrefsStorageKey();
     if (!key || typeof localStorage === 'undefined') return;
@@ -354,6 +389,23 @@ function onSelectSessionEffort(val) {
   selectedEffort.value = String(val || '');
   saveSessionModelPrefs();
 }
+
+watch([selected, selectedModel, selectedEffort, () => modelOptions.value, () => effortOptions.value], () => {
+  if (!selected.value) {
+    remoteSessionSubtitle.value = '';
+    return;
+  }
+  const parts = [];
+  if (selectedModel.value) {
+    const m = modelOptions.value.find(o => o.value === selectedModel.value);
+    parts.push(m?.label || selectedModel.value);
+  }
+  if (selectedEffort.value) {
+    const e = effortOptions.value.find(o => o.value === selectedEffort.value);
+    parts.push((e?.label || selectedEffort.value).replace(/^(思考|Effort):\s*/i, ''));
+  }
+  remoteSessionSubtitle.value = parts.join(' · ');
+}, { immediate: true });
 
 const isSessionResumable = computed(() => Boolean(
   history.value ||
@@ -1323,6 +1375,59 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
    <details v-if="archivedList.length" class="dsh-archived-group" :open="!!search"><summary>{{ t('dshArchivedSessions') }} · {{ archivedList.length }}</summary><div v-for="s in archivedList" :key="s.id" class="dsh-session-item archived"><button class="dsh-session" @click="open(s)"><strong><HarnessIcon :session="s" class="session-card-icon" />{{ s.title }}</strong><small>{{ s.updated_at ? new Date(s.updated_at).toLocaleString() : t('sidebarTimeUnknown') }} · {{ t(s.running?'dshRunning':'dshIdle') }}</small><small v-if="searchMatches.has(s.id)" class="dsh-search-snippet">“{{ searchMatches.get(s.id) }}”</small></button><button type="button" class="dsh-session-unarchive-btn" :title="t('dshUnarchiveSession')" :aria-label="t('dshUnarchiveSession')" @click.stop="toggleArchiveSession(s.id, $event)">{{ t('dshUnarchiveSession') }}</button></div></details>
   </template>
   <template v-if="selected">
+   <div v-if="sessionConfigOpen" class="dsh-session-config-backdrop" @click.self="sessionConfigOpen = false">
+    <div class="dsh-session-config-popover" role="dialog" :aria-label="t('sessionConfigTitle')" @keydown.esc="sessionConfigOpen = false">
+     <div class="dsh-session-config-head">
+      <strong>{{ t('sessionConfigTitle') }}</strong>
+      <button type="button" class="dsh-session-config-done" @click="sessionConfigOpen = false">{{ t('sessionConfigDone') }}</button>
+     </div>
+     <div class="dsh-session-config-row">
+      <label class="dsh-session-config-label">{{ t('sessionRenameLabel') }}</label>
+      <input
+        v-model="customSessionTitle"
+        type="text"
+        class="dsh-session-config-input"
+        :placeholder="selected.title || t('sessionRenamePlaceholder')"
+        @change="saveCustomSessionTitle"
+        @blur="saveCustomSessionTitle"
+        @keydown.enter.prevent="saveCustomSessionTitle(); sessionConfigOpen = false"
+      />
+     </div>
+     <div v-if="supportsApprovalMode" class="dsh-session-config-row">
+      <label class="dsh-session-config-label">{{ t('permissionModeLabel') }}</label>
+      <CustomSelect
+        :model-value="effectiveApprovalMode"
+        class="dsh-permission-mode-select dsh-config-select"
+        :options="permissionModeOptions"
+        :disabled="sending || switchingPermissionMode || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl"
+        :aria-label="t('permissionModeLabel')"
+        @update:model-value="onSelectApprovalMode"
+      />
+     </div>
+     <div v-if="supportsModelOverride" class="dsh-session-config-row">
+      <label class="dsh-session-config-label">{{ t('sessionModelLabel') }}</label>
+      <CustomSelect
+        :model-value="selectedModel"
+        class="dsh-permission-mode-select dsh-config-select"
+        :options="modelOptions"
+        :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl"
+        :aria-label="t('sessionModelLabel')"
+        @update:model-value="onSelectSessionModel"
+      />
+     </div>
+     <div v-if="supportsEffortOverride" class="dsh-session-config-row">
+      <label class="dsh-session-config-label">{{ t('sessionEffortLabel') }}</label>
+      <CustomSelect
+        :model-value="selectedEffort"
+        class="dsh-permission-mode-select dsh-config-select"
+        :options="effortOptions"
+        :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl"
+        :aria-label="t('sessionEffortLabel')"
+        @update:model-value="onSelectSessionEffort"
+      />
+     </div>
+    </div>
+   </div>
    <div class="dsh-tools"><button v-if="!target" :disabled="sending" @click="back">{{ t('dshBack') }}</button><h4 v-if="!target"><HarnessIcon :session="selected" class="topbar-harness-icon" />{{ selected.title }}</h4><small v-else><HarnessIcon :session="selected" class="topbar-harness-icon" />{{ target.node.label || target.node.name }} · {{ agentLabel }}</small><span v-if="isExternalHolderBusy" class="dsh-holder-pill" role="status"><span>{{ t(holderBusyBadgeKey, {pid: activeTerminalHolder?.pid || '?'}) }}</span><button type="button" class="dsh-holder-takeover-btn" @click="takeoverPrompt = activeTerminalHolder">{{ t('claudeTakeoverBtn') }}</button></span><span v-if="isBobBackgroundIdleHeld" class="dsh-bob-holder-pill" role="status"><span>{{ t('bobHolderActiveBadge') }}</span><button type="button" class="dsh-bob-release-btn" :disabled="releasingHolder" @click="handoffToTerminal">{{ t('bobHolderReleaseBtn') }}</button></span><button v-if="supportsTerminalHandoff" type="button" class="dsh-terminal-cmd-btn" :class="{active: handoffCardOpen}" @click="handoffCardOpen = !handoffCardOpen">{{ t('terminalHandoffBtn') }}</button><button type="button" class="dsh-search-toggle-btn" :class="{active:inSessionSearchOpen}" :title="t('dshSearchInSession')" :aria-label="t('dshSearchInSession')" @click="toggleInSessionSearch"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></button><button v-if="sessionVisualAssets.length" type="button" class="dsh-visual-reel-toggle-btn" :class="{active: visualReelOpen}" :title="t('visualAssetsCount', {count: sessionVisualAssets.length})" :aria-label="t('visualAssets')" @click="visualReelOpen = !visualReelOpen"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg><span>{{ sessionVisualAssets.length }}</span></button>
     <span v-if="syncStatus==='offline_cached' && syncStatusLabel" class="dsh-sync-pill" :class="{active:syncStatus==='checking'||syncStatus==='syncing'}" role="status" aria-live="polite"><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ syncStatusLabel }}</span><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span></div>
    <div v-if="visualReelOpen && sessionVisualAssets.length" class="dsh-visual-reel-strip" role="region" :aria-label="t('visualAssets')">
@@ -1496,6 +1601,9 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
     </div>
    </section>
    <p v-if="activityLabel && !dshQuestionBlocking && !dshStop" class="dsh-activity" role="status" aria-live="polite"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span> <span>{{activityLabel}}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
+   <div v-if="syncStatus==='offline_cached' && syncStatusLabel" class="dsh-offline-strip" role="status" aria-live="polite">
+    <span>{{ syncStatusLabel }}</span>
+   </div>
    <div class="dsh-compose-box">
     <p v-if="history?.execution_enabled===false || selected?.execution_enabled===false" role="status">{{t('toolPolicyDisabled')}}</p>
     <textarea ref="composerInput" v-model="draft" :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl" :placeholder="t(isClaudeRemoteControl ? 'claudeRemoteControlTitle' : 'dshPrompt')" :aria-label="t('dshPrompt')" rows="2" @keydown="onComposeKeydown" @paste="onComposerPaste" @dragover.prevent @drop.prevent="onComposerDrop"></textarea>
@@ -1505,37 +1613,6 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
       <input ref="fileInput" type="file" multiple class="visually-hidden" @change="onFilesSelected" />
       <button type="button" class="composer-tool-btn" :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl" :title="t('attachFileBtn')" :aria-label="t('attachFileBtn')" @click="openFilePicker"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
       <button type="button" class="composer-tool-btn voice-btn" :class="{recording:isListening}" :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl" :title="t(isListening ? 'voiceInputListening' : 'voiceInputBtn')" :aria-label="t(isListening ? 'voiceInputListening' : 'voiceInputBtn')" @click="toggleVoiceInput"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg></button>
-      <CustomSelect
-        v-if="supportsApprovalMode"
-        :model-value="effectiveApprovalMode"
-        class="dsh-permission-mode-select"
-        :options="permissionModeOptions"
-        :disabled="sending || switchingPermissionMode || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl"
-        :aria-label="t('permissionModeLabel')"
-        :title="t('permissionModeLabel')"
-        @update:model-value="onSelectApprovalMode"
-      />
-      <CustomSelect
-        v-if="supportsModelOverride"
-        :model-value="selectedModel"
-        class="dsh-permission-mode-select"
-        :options="modelOptions"
-        :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl"
-        :aria-label="t('sessionModelLabel')"
-        :title="t('sessionModelLabel')"
-        @update:model-value="onSelectSessionModel"
-      />
-      <CustomSelect
-        v-if="supportsEffortOverride"
-        :model-value="selectedEffort"
-        class="dsh-permission-mode-select"
-        :options="effortOptions"
-        :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl"
-        :aria-label="t('sessionEffortLabel')"
-        :title="t('sessionEffortLabel')"
-        @update:model-value="onSelectSessionEffort"
-      />
-      <span v-if="syncStatus==='offline_cached' && syncStatusLabel" class="dsh-sync-pill" :class="{active:syncStatus==='checking'||syncStatus==='syncing'}"><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ syncStatusLabel }}</span><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span>
      </div>
      <button v-if="canStopDsh" type="button" class="composer-submit-btn" :disabled="!!dshStop || sending" @click="stopDsh">{{ t(dshStop ? 'dshStopChecking' : 'dshStop') }}</button>
      <button v-else-if="cancellableRequest" type="button" class="composer-submit-btn" :disabled="cancelBusy || cancelRequest===cancellableRequest" @click="cancelNative">{{ t(cancelRequest===cancellableRequest?'nativeCancelPending':'nativeCancel') }}</button>
@@ -1624,4 +1701,39 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
 .dsh-pending-approval-err{margin:0;font-size:.78rem;color:var(--color-error)}
 .dsh-pending-approval-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .dsh-pending-approval-actions .dsh-takeover-primary:disabled,.dsh-pending-approval-actions .dsh-takeover-secondary:disabled{opacity:.48;cursor:not-allowed}
+
+.dsh-sessions.embedded{position:relative}
+.dsh-session-config-backdrop{position:absolute;inset:0;z-index:20;background:color-mix(in srgb, var(--bg-root) 45%, transparent);display:flex;align-items:flex-start;justify-content:center;padding:8px 12px}
+.dsh-session-config-popover{width:min(100%, 26rem);background:var(--bg-primary);border:1px solid var(--border-color);border-radius:var(--radius-modal);padding:12px 14px;box-shadow:var(--shadow-lg);display:flex;flex-direction:column;gap:10px}
+.dsh-session-config-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-bottom:6px;border-bottom:1px solid var(--border-color)}
+.dsh-session-config-head strong{font-size:var(--text-sm);color:var(--text-primary)}
+.dsh-session-config-done{border:0;background:transparent;color:var(--accent-primary);font-size:var(--text-xs);font-weight:600;cursor:pointer;padding:2px 6px;min-height:0}
+.dsh-session-config-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.dsh-session-config-label{font-size:var(--text-xs);color:var(--text-secondary);white-space:nowrap;flex-shrink:0}
+.dsh-session-config-input{flex:1;min-width:0;padding:5px 8px;font-size:var(--text-xs);border-radius:var(--radius-btn);border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-primary)}
+.dsh-session-config-input:focus{outline:none;border-color:var(--accent-primary)}
+.dsh-config-select.custom-select-wrapper{flex:1;min-width:0;max-width:16rem}
+.dsh-config-select :deep(.custom-select-trigger){width:100%;justify-content:space-between;min-height:1.95rem;height:1.95rem;padding:0 9px;font-size:var(--text-xs)}
+
+.dsh-offline-strip{width:min(100%, 46rem);margin:0 auto;padding:4px 10px;border-radius:var(--radius-sm);background:var(--bg-secondary);border:1px solid var(--border-color);color:var(--warning-text);font-size:var(--text-2xs);display:flex;align-items:center;justify-content:space-between;box-sizing:border-box}
+
+.composer-attachments{display:flex;flex-wrap:wrap;gap:6px}
+.composer-attachment-chip{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:4px 8px;border-radius:999px;border:1px solid var(--border-color);background:var(--bg-primary);font-size:var(--text-xs);color:var(--text-primary)}
+.chip-file-name{max-width:9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip-upload-status{white-space:nowrap;flex-shrink:0;font-size:var(--text-2xs);color:var(--text-secondary)}
+.chip-upload-status.staged{color:var(--success-text)}
+.chip-upload-status.error{color:var(--error-text)}
+.chip-retry-btn{white-space:nowrap;flex-shrink:0;padding:2px 8px;min-height:0;border-radius:999px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--accent-primary);font-size:var(--text-2xs);font-weight:600;cursor:pointer}
+.chip-remove-btn{white-space:nowrap;flex-shrink:0;border:0;background:transparent;color:var(--text-secondary);cursor:pointer;padding:0 4px;min-height:0;font-size:var(--text-sm);line-height:1}
+
+@media (max-width: 768px){
+ .dsh-sessions.embedded .dsh-reader{scrollbar-gutter:auto;scrollbar-width:none;padding:10px 10px}
+ .dsh-sessions.embedded .dsh-reader::-webkit-scrollbar{width:0;height:0}
+ .dsh-sessions.embedded .dsh-reader [data-chat-content]{width:100%;padding:0}
+ .dsh-sessions.embedded .dsh-compose{padding:0;gap:0;background:var(--bg-primary)}
+ .dsh-sessions.embedded .dsh-compose-box{width:100%;margin:0;border:0;border-radius:0;padding:8px 12px;background:var(--bg-primary)}
+ .dsh-offline-strip{width:100%;border-radius:0;border-left:0;border-right:0;border-top:0;padding:4px 12px}
+ .dsh-session-config-backdrop{padding:6px 8px}
+ .dsh-session-config-popover{width:100%}
+}
 </style>

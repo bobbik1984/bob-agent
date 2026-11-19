@@ -1167,6 +1167,8 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             direct_llm::app_dsh_page,
             direct_llm::app_dsh_preview,
             direct_llm::app_dsh_prompt,
+            direct_llm::app_attachment_upload_chunk,
+            direct_llm::app_attachment_finalize,
             direct_llm::app_remote_node_save,
             direct_llm::app_remote_node_delete,
             direct_llm::app_node_discover,
