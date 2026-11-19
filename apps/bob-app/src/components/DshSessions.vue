@@ -256,11 +256,55 @@ const sessionHarnessKind = computed(() => {
 const supportsModelOverride = computed(() => ['codex', 'claude', 'copilot', 'pi', 'dsh'].includes(sessionHarnessKind.value));
 const supportsEffortOverride = computed(() => ['codex', 'claude', 'pi', 'dsh'].includes(sessionHarnessKind.value));
 
+const NODE_MODELS_TTL_MS = 24 * 60 * 60 * 1000;
+const nodeModelsByConnection = ref({});
+
+async function ensureNodeModels(cid) {
+  if (!cid || nodeModelsByConnection.value[cid]) return;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(`bob.nodeModels:${cid}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.fetchedAt && Date.now() - parsed.fetchedAt < NODE_MODELS_TTL_MS && parsed.tools && Object.keys(parsed.tools).length > 0) {
+          nodeModelsByConnection.value = { ...nodeModelsByConnection.value, [cid]: parsed.tools };
+          return;
+        }
+      }
+    }
+  } catch {}
+  try {
+    const inv = await kernelBridge.dshInventory(cid, false);
+    const tools = {};
+    for (const row of inv?.tools || []) {
+      if (row?.id && Array.isArray(row.models) && row.models.length > 0) {
+        tools[row.id] = row.models;
+      }
+    }
+    if (Object.keys(tools).length > 0) {
+      nodeModelsByConnection.value = { ...nodeModelsByConnection.value, [cid]: tools };
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(`bob.nodeModels:${cid}`, JSON.stringify({ fetchedAt: Date.now(), tools }));
+        }
+      } catch {}
+    }
+  } catch {}
+}
+
+watch([connection, supportsModelOverride], ([cid, ok]) => {
+  if (cid && ok) ensureNodeModels(cid);
+}, { immediate: true });
+
 const modelOptions = computed(() => {
   const def = [{ value: '', label: t('modelNodeDefault') }];
+  const dynamicList = nodeModelsByConnection.value[connection.value || '']?.[sessionHarnessKind.value];
+  if (Array.isArray(dynamicList) && dynamicList.length > 0) {
+    return [...def, ...dynamicList.map(m => ({ value: m.id, label: m.label || m.id }))];
+  }
   switch (sessionHarnessKind.value) {
     case 'codex':
-      return [...def, { value: 'gpt-5.4', label: 'gpt-5.4' }, { value: 'gpt-5.3-codex', label: 'gpt-5.3-codex' }, { value: 'gpt-5.2-codex', label: 'gpt-5.2-codex' }, { value: 'o3', label: 'o3' }];
+      return [...def, { value: 'gpt-6.2-sol', label: 'GPT-6.2-Sol' }, { value: 'gpt-6.2-astra', label: 'GPT-6.2-Astra' }, { value: 'gpt-6.1-sol', label: 'GPT-6.1-Sol' }, { value: 'gpt-6-sol', label: 'GPT-6-Sol' }];
     case 'claude':
       return [...def, { value: 'sonnet', label: 'Claude Sonnet' }, { value: 'opus', label: 'Claude Opus' }, { value: 'haiku', label: 'Claude Haiku' }];
     case 'copilot':
@@ -273,12 +317,33 @@ const modelOptions = computed(() => {
   }
 });
 
-const effortOptions = computed(() => [
-  { value: '', label: t('effortNodeDefault') },
-  { value: 'low', label: t('effortLow') },
-  { value: 'medium', label: t('effortMedium') },
-  { value: 'high', label: t('effortHigh') },
-]);
+const EFFORT_I18N_KEYS = {
+  low: 'effortLow',
+  medium: 'effortMedium',
+  high: 'effortHigh',
+  xhigh: 'effortXHigh',
+  max: 'effortMax',
+  ultra: 'effortUltra',
+};
+
+const effortOptions = computed(() => {
+  const def = { value: '', label: t('effortNodeDefault') };
+  const dynamicList = nodeModelsByConnection.value[connection.value || '']?.[sessionHarnessKind.value];
+  let efforts = ['low', 'medium', 'high'];
+  if (Array.isArray(dynamicList) && dynamicList.length > 0) {
+    const matched = dynamicList.find(m => m.id === selectedModel.value) || dynamicList[0];
+    if (Array.isArray(matched?.efforts) && matched.efforts.length > 0) {
+      efforts = matched.efforts;
+    }
+  }
+  return [
+    def,
+    ...efforts.map(e => ({
+      value: e,
+      label: EFFORT_I18N_KEYS[e] ? t(EFFORT_I18N_KEYS[e]) : e,
+    })),
+  ];
+});
 
 function onSelectSessionModel(val) {
   selectedModel.value = String(val || '');

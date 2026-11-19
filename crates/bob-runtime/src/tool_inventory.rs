@@ -15,6 +15,33 @@ pub fn executable(tool:&str)->Option<PathBuf>{
   #[cfg(not(unix))] {true}
  })
 }
+fn parse_codex_models_cache(bytes: &[u8]) -> Option<Vec<Value>> {
+ let parsed: Value = serde_json::from_slice(bytes).ok()?;
+ let mut items: Vec<(i64, Value)> = parsed["models"].as_array()?
+  .iter()
+  .filter(|m| m["visibility"].as_str() == Some("list"))
+  .filter_map(|m| {
+   let slug = m["slug"].as_str()?.trim();
+   if slug.is_empty() { return None; }
+   let label = m["display_name"].as_str().map(str::trim).filter(|s| !s.is_empty()).unwrap_or(slug);
+   let efforts: Vec<String> = m["supported_reasoning_levels"].as_array()
+    .map(|arr| arr.iter().filter_map(|r| r["effort"].as_str().map(str::to_owned)).collect())
+    .unwrap_or_default();
+   let priority = m["priority"].as_i64().unwrap_or(9999);
+   Some((priority, json!({"id": slug, "label": label, "efforts": efforts})))
+  })
+  .collect();
+ if items.is_empty() { return None; }
+ items.sort_by_key(|(p, _)| *p);
+ Some(items.into_iter().map(|(_, v)| v).collect())
+}
+fn read_codex_models() -> Option<Vec<Value>> {
+ let codex_home = std::env::var_os("CODEX_HOME").filter(|v| !v.is_empty()).map(PathBuf::from).or_else(|| {
+  std::env::var_os("BOB_LOCAL_HOME").or_else(|| std::env::var_os("HOME")).or_else(|| std::env::var_os("USERPROFILE")).map(|h| PathBuf::from(h).join(".codex"))
+ })?;
+ let bytes = std::fs::read(codex_home.join("models_cache.json")).ok()?;
+ parse_codex_models_cache(&bytes)
+}
 fn read(data:&Path)->Value{std::fs::read(data.join("tool_inventory.json")).ok().and_then(|b|serde_json::from_slice(&b).ok()).unwrap_or_else(||json!({"version":1,"observed_at":0,"tools":[]}))}
 fn save(data:&Path,v:&Value){let p=data.join("tool_inventory.json.tmp");if let Ok(b)=serde_json::to_vec(v){if std::fs::write(&p,b).is_ok(){let _=std::fs::rename(p,data.join("tool_inventory.json"));}}}
 pub fn refresh(data:&Path){
@@ -40,7 +67,11 @@ pub fn refresh(data:&Path){
       let mut x=old.cloned().unwrap_or_else(||json!({"id":tool,"installed":true,"auth_state":"unknown","can_create":false,"observed_at":0}));
       x["stale"]=json!(true);x["reason"]=p["reason"].clone();x
      },
-     Ok(p) if p["installed"]==true=>json!({"id":tool,"installed":true,"auth_state":p["auth_state"],"version":p["version"],"can_create":p["auth_state"]!="login_required" && (p["protocol_verified"]==true || (tool=="claude" && p["auth_state"]=="authenticated")) && p["reason"]!="NO_AVAILABLE_MODEL" && p["reason"]!="CONFIGURED_MODEL_UNAVAILABLE","reason":p["reason"],"observed_at":now,"stale":false}),
+     Ok(p) if p["installed"]==true=>{
+      let mut row=json!({"id":tool,"installed":true,"auth_state":p["auth_state"],"version":p["version"],"can_create":p["auth_state"]!="login_required" && (p["protocol_verified"]==true || (tool=="claude" && p["auth_state"]=="authenticated")) && p["reason"]!="NO_AVAILABLE_MODEL" && p["reason"]!="CONFIGURED_MODEL_UNAVAILABLE","reason":p["reason"],"observed_at":now,"stale":false});
+      if tool=="codex" { if let Some(models)=read_codex_models() { row["models"]=json!(models); } }
+      row
+     },
      _=>{let mut x=old.cloned().unwrap_or_else(||json!({"id":tool,"installed":true,"auth_state":"unknown","can_create":false,"observed_at":0}));x["stale"]=json!(true);x["reason"]=json!("HARNESS_PROBE_UNCONFIRMED");x}
     }
    };
@@ -55,11 +86,14 @@ pub fn snapshot(data:&Path,force:bool)->Result<Value,&'static str>{
  let mut v=read(data);let age=crate::now_millis()-v["observed_at"].as_i64().unwrap_or(0);
  if force||age>120_000{refresh(data);}
  v["stale"]=json!(age>300_000);v["refreshing"]=json!(UPDATING.get_or_init(||Mutex::new(HashSet::new())).lock().unwrap().contains(data));
- if let Some(rows)=v["tools"].as_array_mut(){for row in rows{
-  let id=row["id"].as_str().unwrap_or("").to_owned();let enabled=crate::tool_policy::enabled(data,"local",&id);
-  row["global_enabled"]=crate::tool_policy::read(data)?["tools"][&id].as_bool().map(Value::Bool).unwrap_or(json!(true));
-  row["enabled"]=json!(enabled);if !enabled{row["can_create"]=json!(false);row["reason"]=json!("TOOL_DISABLED");}
- }}
+  if let Some(rows)=v["tools"].as_array_mut(){for row in rows{
+   let id=row["id"].as_str().unwrap_or("").to_owned();let enabled=crate::tool_policy::enabled(data,"local",&id);
+   row["global_enabled"]=crate::tool_policy::read(data)?["tools"][&id].as_bool().map(Value::Bool).unwrap_or(json!(true));
+   row["enabled"]=json!(enabled);if !enabled{row["can_create"]=json!(false);row["reason"]=json!("TOOL_DISABLED");}
+   if id=="codex" && row.get("models").and_then(Value::as_array).map(|a|a.is_empty()).unwrap_or(true) {
+    if let Some(models)=read_codex_models() { row["models"]=json!(models); }
+   }
+  }}
  v["policy_revision"]=crate::tool_policy::read(data)?["revision"].clone();
  v["workspaces"]=serde_json::to_value(crate::host_tools::WorkspaceGrantStore::open(data)?.list_workspaces()).map_err(|_|"HOST_WORKSPACES_READ_FAILED")?;
  Ok(v)
@@ -92,5 +126,14 @@ mod tests {
   store.authorize_workspace(work.to_str().unwrap(),"",true,crate::now_millis()).unwrap();
   assert_eq!(authorize(&p,&json!({"connectionId":"local","path":work})),Err("HOST_WORKSPACE_READ_ONLY"));
   std::fs::remove_dir_all(p).unwrap();
+ }
+ #[test] fn parse_codex_models_cache_filters_visible_and_sorts_by_priority(){
+  let raw=br#"{"models":[{"slug":"hidden-m","visibility":"hide","priority":0},{"slug":"gpt-6.1-sol","display_name":"GPT-6.1-Sol","visibility":"list","priority":2,"supported_reasoning_levels":[{"effort":"low"},{"effort":"xhigh"}]},{"slug":"gpt-6.2-sol","display_name":"GPT-6.2-Sol","visibility":"list","priority":1,"supported_reasoning_levels":[{"effort":"low"},{"effort":"ultra"}]}]}"#;
+  let models=parse_codex_models_cache(raw).unwrap();
+  assert_eq!(models.len(),2);
+  assert_eq!(models[0]["id"],"gpt-6.2-sol");
+  assert_eq!(models[0]["label"],"GPT-6.2-Sol");
+  assert_eq!(models[0]["efforts"],json!(["low","ultra"]));
+  assert_eq!(models[1]["id"],"gpt-6.1-sol");
  }
 }
