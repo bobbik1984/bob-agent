@@ -530,56 +530,75 @@ watch([activeSubtab, timelineViewMode, weekOffset, compactCalendar], () => {
         class="quick-schedule-form hub-card"
         @submit.prevent="submitNewSchedule"
       >
-        <header class="schedule-editor-header"><h3 id="schedule-editor-title">{{ t(editingItem ? 'scheduleEditTitle' : 'scheduleToggleNewBtn') }}</h3><div style="display:flex;gap:8px;"><button v-if="editingItem" type="button" class="mini-ghost-btn" :disabled="saving" @click="deleteItem(editingItem)">{{ t('scheduleDeleteBtn') }}</button><button type="button" :disabled="saving" @click="closeEditor">{{ t('scheduleClose') }}</button></div></header>
-        <p v-if="saveError" role="alert">{{ saveError }}</p>
+        <header class="schedule-editor-header">
+          <h3 id="schedule-editor-title">{{ t(editingItem ? 'scheduleEditTitle' : 'scheduleToggleNewBtn') }}</h3>
+          <div class="schedule-editor-header-actions">
+            <button v-if="editingItem" type="button" class="mini-ghost-btn schedule-delete-btn" :disabled="saving" @click="deleteItem(editingItem)">{{ t('scheduleDeleteBtn') }}</button>
+            <button type="button" class="mini-ghost-btn" :disabled="saving" @click="closeEditor">{{ t('scheduleClose') }}</button>
+          </div>
+        </header>
+        <p v-if="saveError" class="schedule-editor-error" role="alert">{{ saveError }}</p>
         <p v-if="editingItem?.timing?.inference_note" class="schedule-time-context">{{ editingItem.timing.inference_note }}</p>
         <fieldset :disabled="saving" class="schedule-editor-fields">
-        <div class="quick-schedule-row">
-          <CustomSelect
-            v-model="draft.kind"
-            :disabled="!!editingItem"
-            :options="scheduleKindOptions"
-            class="schedule-kind-select"
-          />
-          <input
-            v-model="draft.title"
-            type="text"
-            class="schedule-title-input"
-            :placeholder="t('scheduleNewTitlePlaceholder')"
-            :aria-label="t('scheduleNewTitlePlaceholder')"
-            autofocus
-            required
-          />
-          <CustomSelect
-            v-model="draft.projectId"
-            :disabled="!!editingItem && draft.kind !== 'todo'"
-            :options="projectSelectOptions"
-            class="schedule-project-select"
-          />
-          <label v-if="draft.kind === 'todo'"><input type="checkbox" v-model="draft.startDateOnly" @change="changePrecision('start')" />{{ t('todoStartDateOnly') }}</label>
-          <label class="schedule-time-field">
-            <span>{{ t(draft.kind === 'todo' ? 'todoStartOptional' : 'scheduleDueLabel') }}</span>
-            <input v-model="draft.dueDate" :type="draft.kind === 'todo' && draft.startDateOnly ? 'date' : 'datetime-local'" class="schedule-date-input" :required="draft.kind === 'event'" :aria-label="t(draft.kind === 'todo' ? 'todoStartOptional' : 'scheduleDueLabel')" />
-          </label>
-          <label v-if="draft.kind === 'todo'"><input type="checkbox" v-model="draft.dueDateOnly" @change="changePrecision('due')" />{{ t('todoDueDateOnly') }}</label>
-          <label class="schedule-time-field">
-            <span>{{ t(draft.kind==='todo'?'todoDueOptional':'calendarEndOptional') }}</span>
-            <input v-model="draft.deadline" :type="draft.dueDateOnly ? 'date' : 'datetime-local'" class="schedule-date-input" :aria-label="t(draft.kind==='todo'?'todoDueOptional':'calendarEndOptional')" />
-          </label>
-          <button
-            type="submit"
-            class="primary-action-btn"
-            :disabled="busy || saving || !draft.title.trim()"
-          >
-            {{ t(editingItem ? 'scheduleSaveChanges' : 'scheduleAddBtn') }}
-          </button>
-        </div>
-        <input
-          v-model="draft.notes"
-          type="text"
-          class="schedule-notes-input"
-          :placeholder="t('scheduleNotesPlaceholder')"
-        />
+          <div class="schedule-editor-body">
+            <input
+              v-model="draft.title"
+              type="text"
+              class="schedule-title-input"
+              :placeholder="t('scheduleNewTitlePlaceholder')"
+              :aria-label="t('scheduleNewTitlePlaceholder')"
+              autofocus
+              required
+            />
+            <div class="schedule-editor-two-col">
+              <CustomSelect
+                v-model="draft.kind"
+                :disabled="!!editingItem"
+                :options="scheduleKindOptions"
+                class="schedule-kind-select"
+              />
+              <CustomSelect
+                v-model="draft.projectId"
+                :disabled="!!editingItem && draft.kind !== 'todo'"
+                :options="projectSelectOptions"
+                class="schedule-project-select"
+              />
+            </div>
+            <div class="schedule-editor-time-group">
+              <div class="schedule-time-label-row">
+                <span class="schedule-field-label">{{ t(draft.kind === 'todo' ? 'todoStartOptional' : 'scheduleDueLabel') }}</span>
+                <label v-if="draft.kind === 'todo'" class="schedule-inline-check">
+                  <input type="checkbox" v-model="draft.startDateOnly" @change="changePrecision('start')" />
+                  <span>{{ t('todoStartDateOnly') }}</span>
+                </label>
+              </div>
+              <input v-model="draft.dueDate" :type="draft.kind === 'todo' && draft.startDateOnly ? 'date' : 'datetime-local'" class="schedule-date-input" :required="draft.kind === 'event'" :aria-label="t(draft.kind === 'todo' ? 'todoStartOptional' : 'scheduleDueLabel')" />
+            </div>
+            <div class="schedule-editor-time-group">
+              <div class="schedule-time-label-row">
+                <span class="schedule-field-label">{{ t(draft.kind==='todo'?'todoDueOptional':'calendarEndOptional') }}</span>
+                <label v-if="draft.kind === 'todo'" class="schedule-inline-check">
+                  <input type="checkbox" v-model="draft.dueDateOnly" @change="changePrecision('due')" />
+                  <span>{{ t('todoDueDateOnly') }}</span>
+                </label>
+              </div>
+              <input v-model="draft.deadline" :type="draft.dueDateOnly ? 'date' : 'datetime-local'" class="schedule-date-input" :aria-label="t(draft.kind==='todo'?'todoDueOptional':'calendarEndOptional')" />
+            </div>
+            <textarea
+              v-model="draft.notes"
+              rows="3"
+              class="schedule-notes-input"
+              :placeholder="t('scheduleNotesPlaceholder')"
+              :aria-label="t('scheduleNotesPlaceholder')"
+            ></textarea>
+            <button
+              type="submit"
+              class="primary-action-btn schedule-editor-submit"
+              :disabled="busy || saving || !draft.title.trim()"
+            >
+              {{ t(editingItem ? 'scheduleSaveChanges' : 'scheduleAddBtn') }}
+            </button>
+          </div>
         </fieldset>
       </form>
       </dialog>
