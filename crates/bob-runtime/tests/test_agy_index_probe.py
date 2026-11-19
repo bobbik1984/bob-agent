@@ -173,5 +173,14 @@ class IndexTests(unittest.TestCase):
             self.assertIsNone(untouched_meta)
             self.assertEqual(untouched, small_bytes)
 
+    def test_native_file_references_strips_line_number_and_fragment_suffixes(self):
+        refs = probe._native_file_references({
+            'role': 'assistant',
+            'text': 'See [stage](/home/u/ws/CURRENT_STAGE.md:21) and [other](/home/u/ws/README.md#L10-L20) and [col](/home/u/ws/main.py:12:4).',
+        })
+        self.assertIn('/home/u/ws/CURRENT_STAGE.md', refs)
+        self.assertIn('/home/u/ws/README.md', refs)
+        self.assertIn('/home/u/ws/main.py', refs)
+
 if __name__ == '__main__':
     unittest.main()

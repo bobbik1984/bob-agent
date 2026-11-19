@@ -605,15 +605,20 @@ def _native_file_references(message):
     for token in re.findall(r'[^\s`"\'<>()[\]{},;=]+',body):
         if re.search(r'\.(?:png|jpe?g|webp|html)$',token,re.I):refs.add(token)
     from urllib.parse import urlsplit, unquote
+    normalized=set()
     for reference in tuple(refs):
-        if not reference.startswith('file:'):continue
-        try:
-            uri=urlsplit(reference)
-            if uri.scheme=='file' and not uri.netloc and not uri.query and not uri.fragment:
-                decoded=unquote(uri.path,errors='strict')
-                if decoded.startswith('/') and '\x00' not in decoded:refs.add(decoded)
-        except (ValueError,UnicodeError):pass
-    return {x for x in refs if x and not any(c in x for c in '\\:%?#\x00')}
+        if reference.startswith('file:'):
+            try:
+                uri=urlsplit(reference)
+                if uri.scheme=='file' and not uri.netloc and not uri.query and not uri.fragment:
+                    decoded=unquote(uri.path,errors='strict')
+                    if decoded.startswith('/') and '\x00' not in decoded:normalized.add(decoded)
+            except (ValueError,UnicodeError):pass
+            continue
+        cleaned=reference.split('#',1)[0].split('?',1)[0]
+        cleaned=re.sub(r':\d+(?::\d+)?$','',cleaned)
+        if cleaned:normalized.add(cleaned)
+    return {x for x in normalized if x and not any(c in x for c in '\\:%?#\x00')}
 
 def read_session_page(cfg, sid):
     ev, ws, h, jpath = [], '', 'dsh', ''
