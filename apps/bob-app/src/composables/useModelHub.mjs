@@ -446,11 +446,27 @@ function applyModelHubSnapshot(snap) {
   }
 }
 
+const MODEL_DISCOVER_TTL_MS = 24 * 60 * 60 * 1000;
+const MODEL_DISCOVER_KEY = 'bob-models-last-discover-at';
+
+function maybeAutoDiscoverModels() {
+  if (!available || !kernelBridge.modelsDiscover || discoveringModels.value) return;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const last = Number(localStorage.getItem(MODEL_DISCOVER_KEY) || 0);
+      if (last > 0 && Date.now() - last < MODEL_DISCOVER_TTL_MS) return;
+      localStorage.setItem(MODEL_DISCOVER_KEY, String(Date.now()));
+    }
+  } catch {}
+  discoverLatestModels(null).catch(() => {});
+}
+
 async function loadModelHub() {
   if (available && kernelBridge.modelHubGet) {
     const snap = await kernelBridge.modelHubGet().catch(() => null);
     if (snap) {
       applyModelHubSnapshot(snap);
+      maybeAutoDiscoverModels();
       return;
     }
   }
@@ -555,6 +571,11 @@ async function discoverLatestModels(providerId = null) {
       const snap = await kernelBridge.modelsDiscover(providerId).catch(() => null);
       if (snap) {
         applyModelHubSnapshot(snap);
+        try {
+          if (typeof localStorage !== 'undefined' && !providerId) {
+            localStorage.setItem(MODEL_DISCOVER_KEY, String(Date.now()));
+          }
+        } catch {}
         return;
       }
     }

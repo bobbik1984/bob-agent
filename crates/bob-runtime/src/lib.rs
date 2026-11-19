@@ -1504,6 +1504,7 @@ impl ModelHubRuntime {
 
         for (pid, pname, base_url, api_key, existing_ids) in targets {
             let mut candidate_ids: Vec<String> = Vec::new();
+            let mut live_ids: Vec<String> = Vec::new();
 
             // 1. Live /models probe if provider API key is configured
             if !api_key.is_empty() && !base_url.is_empty() {
@@ -1573,6 +1574,9 @@ impl ModelHubRuntime {
                                 };
                                 if !candidate_ids.iter().any(|x| x == clean) {
                                     candidate_ids.push(clean.to_owned());
+                                }
+                                if !live_ids.iter().any(|x| x == clean) {
+                                    live_ids.push(clean.to_owned());
                                 }
                             }
                         }
@@ -1677,27 +1681,32 @@ impl ModelHubRuntime {
             if let Some(providers) = registry.get_mut("providers").and_then(Value::as_array_mut) {
                 if let Some(prov) = providers.iter_mut().find(|p| p.get("id").and_then(Value::as_str) == Some(&pid)) {
                     if let Some(models) = prov.get_mut("models").and_then(Value::as_array_mut) {
-                        // Ensure chosen_main and chosen_flash exist in `models`
-                        for (role_id_opt, is_default) in [(&chosen_main, true), (&chosen_flash, false)] {
-                            if let Some(sel_id) = role_id_opt {
-                                if !models.iter().any(|m| m.get("id").and_then(Value::as_str) == Some(sel_id.as_str())) {
-                                    models.insert(0, json!({
-                                        "id": sel_id,
-                                        "name": sel_id,
-                                        "visible": true,
-                                        "vision": true,
-                                        "discovered": true,
-                                        "default": is_default,
-                                        "pricing": { "input": 0.0, "output": 0.0 }
-                                    }));
-                                }
+                        let live_latest_ids = latest_generation_live_ids(&pid, &live_ids);
+                        // Ensure chosen_main, chosen_flash, and live latest-generation models exist in `models`
+                        for sel_id in chosen_main.iter().chain(chosen_flash.iter()).chain(live_latest_ids.iter()) {
+                            if !models.iter().any(|m| {
+                                let mid = m.get("id").and_then(Value::as_str).unwrap_or("");
+                                let clean_mid = if pid == "gemini" { mid.strip_prefix("models/").unwrap_or(mid) } else { mid };
+                                clean_mid == sel_id.as_str()
+                            }) {
+                                models.insert(0, json!({
+                                    "id": sel_id,
+                                    "name": sel_id,
+                                    "visible": true,
+                                    "vision": true,
+                                    "discovered": true,
+                                    "default": chosen_main.as_deref() == Some(sel_id.as_str()),
+                                    "pricing": { "input": 0.0, "output": 0.0 }
+                                }));
                             }
                         }
 
                         for m in models.iter_mut() {
                             let mid = m.get("id").and_then(Value::as_str).unwrap_or("");
-                            let is_curated = chosen_main.as_deref() == Some(mid)
-                                || chosen_flash.as_deref() == Some(mid);
+                            let clean_mid = if pid == "gemini" { mid.strip_prefix("models/").unwrap_or(mid) } else { mid };
+                            let is_curated = chosen_main.as_deref() == Some(clean_mid)
+                                || chosen_flash.as_deref() == Some(clean_mid)
+                                || live_latest_ids.iter().any(|id| id == clean_mid);
                             m["visible"] = json!(is_curated);
                             if is_curated {
                                 m["vision"] = json!(true);
@@ -1737,6 +1746,79 @@ impl ModelHubRuntime {
     }
 }
 
+fn extract_model_version_score(id: &str) -> i64 {
+    let lower = id.to_ascii_lowercase();
+    let bytes = lower.as_bytes();
+    let mut best: i64 = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() {
+            let mut j = i;
+            while j < bytes.len() && bytes[j].is_ascii_digit() {
+                j += 1;
+            }
+            if let Ok(major) = lower[i..j].parse::<i64>() {
+                if (1..=20).contains(&major) {
+                    let mut minor: i64 = 0;
+                    if j + 1 < bytes.len() && (bytes[j] == b'.' || bytes[j] == b'-') && bytes[j + 1].is_ascii_digit() {
+                        let mut k = j + 1;
+                        while k < bytes.len() && bytes[k].is_ascii_digit() {
+                            k += 1;
+                        }
+                        if let Ok(m) = lower[j + 1..k].parse::<i64>() {
+                            if m <= 99 {
+                                minor = m;
+                            }
+                        }
+                    }
+                    best = best.max(major * 100 + minor);
+                }
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    best
+}
+
+fn latest_generation_live_ids(pid: &str, live_ids: &[String]) -> Vec<String> {
+    if pid == "deepseek" || live_ids.is_empty() {
+        return Vec::new();
+    }
+    let filtered: Vec<&String> = live_ids
+        .iter()
+        .filter(|id| {
+            let l = id.to_ascii_lowercase();
+            !l.contains("transcribe")
+                && !l.contains("robotics")
+                && !l.contains("computer-use")
+                && !l.contains("live")
+                && !l.contains("lyria")
+                && !l.contains("veo")
+                && !l.contains("gemma")
+                && !l.contains("deep-research")
+        })
+        .collect();
+    let max_major = filtered
+        .iter()
+        .map(|id| extract_model_version_score(id) / 100)
+        .max()
+        .unwrap_or(0);
+    if max_major == 0 {
+        return filtered.into_iter().take(6).cloned().collect();
+    }
+    filtered
+        .into_iter()
+        .filter(|id| {
+            let l = id.to_ascii_lowercase();
+            (extract_model_version_score(id) / 100) >= max_major || l.ends_with("-latest")
+        })
+        .take(8)
+        .cloned()
+        .collect()
+}
+
 fn pick_best_tier_model(candidates: &[String], want_flash: bool, exclude: Option<&str>) -> Option<String> {
     let mut best: Option<(i64, String)> = None;
     for id in candidates {
@@ -1745,18 +1827,15 @@ fn pick_best_tier_model(candidates: &[String], want_flash: bool, exclude: Option
         }
         let l = id.to_ascii_lowercase();
         let is_flash_like = l.contains("flash") || l.contains("mini") || l.contains("haiku") || l.contains("lite");
-        let is_main_like = l.contains("pro") || l.contains("max") || l.contains("sonnet") || l.contains("opus") || l.contains("plus") || l == "gpt-4o";
+        let is_main_like = l.contains("pro") || l.contains("max") || l.contains("sonnet") || l.contains("opus") || l.contains("plus") || l == "gpt-4o" || l.contains("ultra");
         let mut score: i64 = 0;
         if want_flash {
-            if is_flash_like { score += 1000; }
+            if is_flash_like { score += 10000; }
         } else if is_main_like && !is_flash_like {
-            score += 1000;
+            score += 10000;
         }
-        // Prefer higher version numbers & date snapshots (e.g. v4.1, -1017, -260215)
-        if l.contains("4.1") || l.contains("4-5") || l.contains("3.8") || l.contains("5.3") || l.contains("2.5") || l.contains("2-0") {
-            score += 300;
-        }
-        if l.contains("1017") || l.contains("2602") || l.contains("2508") || l.contains("2025") || l.contains("2026") {
+        score += extract_model_version_score(id) * 10;
+        if l.contains("1017") || l.contains("2602") || l.contains("2026") {
             score += 200;
         }
         if l.contains("lite") && want_flash {
