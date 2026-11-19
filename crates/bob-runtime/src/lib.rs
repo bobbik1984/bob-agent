@@ -1515,7 +1515,7 @@ impl ModelHubRuntime {
                 {
                     let native_base = base_trimmed.strip_suffix("/openai").unwrap_or(base_trimmed);
                     (
-                        format!("{native_base}/models?key={api_key}"),
+                        format!("{native_base}/models?pageSize=1000&key={api_key}"),
                         vec![("Accept", "application/json")],
                     )
                 } else if pid == "anthropic" || base_trimmed.contains("api.anthropic.com") {
@@ -1775,21 +1775,25 @@ fn extract_model_version_score(id: &str) -> i64 {
             while j < bytes.len() && bytes[j].is_ascii_digit() {
                 j += 1;
             }
-            if let Ok(major) = lower[i..j].parse::<i64>() {
-                if (1..=20).contains(&major) {
-                    let mut minor: i64 = 0;
-                    if j + 1 < bytes.len() && (bytes[j] == b'.' || bytes[j] == b'-') && bytes[j + 1].is_ascii_digit() {
-                        let mut k = j + 1;
-                        while k < bytes.len() && bytes[k].is_ascii_digit() {
-                            k += 1;
-                        }
-                        if let Ok(m) = lower[j + 1..k].parse::<i64>() {
-                            if m <= 99 {
-                                minor = m;
+            let token = &lower[i..j];
+            if !token.starts_with('0') && token.len() <= 2 {
+                if let Ok(major) = token.parse::<i64>() {
+                    if (1..=20).contains(&major) {
+                        let mut minor: i64 = 0;
+                        if j + 1 < bytes.len() && (bytes[j] == b'.' || bytes[j] == b'-') && bytes[j + 1].is_ascii_digit() {
+                            let mut k = j + 1;
+                            while k < bytes.len() && bytes[k].is_ascii_digit() {
+                                k += 1;
+                            }
+                            let minor_tok = &lower[j + 1..k];
+                            if !minor_tok.starts_with('0') && minor_tok.len() <= 2 {
+                                if let Ok(m) = minor_tok.parse::<i64>() {
+                                    minor = m;
+                                }
                             }
                         }
+                        best = best.max(major * 100 + minor);
                     }
-                    best = best.max(major * 100 + minor);
                 }
             }
             i = j;
@@ -1832,7 +1836,7 @@ fn latest_generation_live_ids(pid: &str, live_ids: &[String]) -> Vec<String> {
             let l = id.to_ascii_lowercase();
             (extract_model_version_score(id) / 100) >= max_major || l.ends_with("-latest")
         })
-        .take(8)
+        .take(16)
         .cloned()
         .collect()
 }
