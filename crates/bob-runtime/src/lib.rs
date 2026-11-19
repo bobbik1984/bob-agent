@@ -1511,11 +1511,11 @@ impl ModelHubRuntime {
                 let base_trimmed = base_url.trim_end_matches('/');
                 let auth_header = format!("Bearer {api_key}");
                 let (models_url, headers) = if pid == "gemini"
-                    || (base_trimmed.contains("generativelanguage.googleapis.com")
-                        && !base_trimmed.contains("/openai"))
+                    || base_trimmed.contains("generativelanguage.googleapis.com")
                 {
+                    let native_base = base_trimmed.strip_suffix("/openai").unwrap_or(base_trimmed);
                     (
-                        format!("{base_trimmed}/models?key={api_key}"),
+                        format!("{native_base}/models?key={api_key}"),
                         vec![("Accept", "application/json")],
                     )
                 } else if pid == "anthropic" || base_trimmed.contains("api.anthropic.com") {
@@ -1681,13 +1681,26 @@ impl ModelHubRuntime {
             if let Some(providers) = registry.get_mut("providers").and_then(Value::as_array_mut) {
                 if let Some(prov) = providers.iter_mut().find(|p| p.get("id").and_then(Value::as_str) == Some(&pid)) {
                     if let Some(models) = prov.get_mut("models").and_then(Value::as_array_mut) {
-                        let live_latest_ids = latest_generation_live_ids(&pid, &live_ids);
+                        let norm_id = |s: &str| -> String {
+                            if pid == "gemini" {
+                                s.strip_prefix("models/").unwrap_or(s).to_owned()
+                            } else {
+                                s.to_owned()
+                            }
+                        };
+                        let main_clean = chosen_main.as_deref().map(norm_id);
+                        let flash_clean = chosen_flash.as_deref().map(norm_id);
+                        let fallback_pool: Vec<String> = if live_ids.is_empty() {
+                            candidate_ids.iter().map(|s| norm_id(s)).collect()
+                        } else {
+                            live_ids.clone()
+                        };
+                        let live_latest_ids = latest_generation_live_ids(&pid, &fallback_pool);
                         // Ensure chosen_main, chosen_flash, and live latest-generation models exist in `models`
-                        for sel_id in chosen_main.iter().chain(chosen_flash.iter()).chain(live_latest_ids.iter()) {
+                        for sel_id in main_clean.iter().chain(flash_clean.iter()).chain(live_latest_ids.iter()) {
                             if !models.iter().any(|m| {
                                 let mid = m.get("id").and_then(Value::as_str).unwrap_or("");
-                                let clean_mid = if pid == "gemini" { mid.strip_prefix("models/").unwrap_or(mid) } else { mid };
-                                clean_mid == sel_id.as_str()
+                                norm_id(mid) == sel_id.as_str()
                             }) {
                                 models.insert(0, json!({
                                     "id": sel_id,
@@ -1695,7 +1708,7 @@ impl ModelHubRuntime {
                                     "visible": true,
                                     "vision": true,
                                     "discovered": true,
-                                    "default": chosen_main.as_deref() == Some(sel_id.as_str()),
+                                    "default": main_clean.as_deref() == Some(sel_id.as_str()),
                                     "pricing": { "input": 0.0, "output": 0.0 }
                                 }));
                             }
@@ -1703,13 +1716,18 @@ impl ModelHubRuntime {
 
                         for m in models.iter_mut() {
                             let mid = m.get("id").and_then(Value::as_str).unwrap_or("");
-                            let clean_mid = if pid == "gemini" { mid.strip_prefix("models/").unwrap_or(mid) } else { mid };
-                            let is_curated = chosen_main.as_deref() == Some(clean_mid)
-                                || chosen_flash.as_deref() == Some(clean_mid)
-                                || live_latest_ids.iter().any(|id| id == clean_mid);
+                            let clean_mid = norm_id(mid);
+                            let is_curated = main_clean.as_deref() == Some(clean_mid.as_str())
+                                || flash_clean.as_deref() == Some(clean_mid.as_str())
+                                || live_latest_ids.iter().any(|id| id == &clean_mid);
                             m["visible"] = json!(is_curated);
                             if is_curated {
                                 m["vision"] = json!(true);
+                            }
+                        }
+                        if !models.iter().any(|m| m.get("visible").and_then(Value::as_bool) == Some(true)) {
+                            for m in models.iter_mut().take(4) {
+                                m["visible"] = json!(true);
                             }
                         }
                         any_updated = true;

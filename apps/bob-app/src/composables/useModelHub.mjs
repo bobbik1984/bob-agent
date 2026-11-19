@@ -447,7 +447,7 @@ function applyModelHubSnapshot(snap) {
 }
 
 const MODEL_DISCOVER_TTL_MS = 24 * 60 * 60 * 1000;
-const MODEL_DISCOVER_KEY = 'bob-models-last-discover-at';
+const MODEL_DISCOVER_KEY = 'bob-models-last-discover-at-v2';
 
 function maybeAutoDiscoverModels() {
   if (!available || !kernelBridge.modelsDiscover || discoveringModels.value) return;
