@@ -713,7 +713,10 @@ const nativeActivities=computed(()=>{
   const hasActionable=(activity?.approvals||[]).some(a=>isActionableNativeApproval(a,now));
   return isActive||hasActionable;
  });
- if(liveOrWaiting.length)return liveOrWaiting;
+ if(liveOrWaiting.length){
+  const ownedLive=liveOrWaiting.filter(({id})=>!String(id||'').startsWith('external-codex-'));
+  return ownedLive.length?ownedLive:liveOrWaiting;
+ }
  const owned=ordered.filter(({id})=>!String(id||'').startsWith('external-codex-'));
  return (owned.length?owned:ordered).slice(-1);
 });
@@ -790,11 +793,39 @@ async function decidePermission(requestId,permissionId,optionId){
  finally{busyPermission.value='';}
 }
 
+function stripHistoryPrefix(text){
+ const normalize=value=>String(value??'').replace(/\s+/g,' ').trim();
+ const parts=String(text??'').split(/\n\s*\n/);
+ const chunks=parts.map(p=>p.trim()).filter(Boolean);
+ if(!chunks.length)return '';
+ const msgs=history.value?.messages||[];
+ let lastUserIdx=-1;
+ for(let i=msgs.length-1;i>=0;i--){if(msgs[i]?.role==='user'){lastUserIdx=i;break;}}
+ const latestRun=msgs.slice(lastUserIdx+1).filter(m=>m?.role==='assistant').map(m=>normalize(m.text)).join(' ');
+ if(!latestRun)return String(text??'');
+ let drop=0,offset=0;
+ while(drop<chunks.length){
+  const norm=normalize(chunks[drop]);
+  const at=latestRun.indexOf(norm,offset);
+  if(at<0)break;
+  offset=at+norm.length;
+  drop++;
+ }
+ return chunks.slice(drop).join('\n\n');
+}
 const nativeMessages=computed(()=>{
  const time=value=>typeof value==='number'?value:Date.parse(value)||0;
  const latestUser=Math.max(0,...(history.value?.messages||[]).filter(m=>m.role==='user').map(m=>time(m.created_at||m.createdAt||m.timestamp)));
+ const hasOwnedActive=Object.entries(nativeDrafts.value).some(([id,v])=>!String(id||'').startsWith('external-codex-')&&(v?.active===true||!v?.terminal||id===awaitingReply.value));
  // Historical checkpoints restore receipt state; they are not new replies to a later user turn.
- return Object.entries(nativeDrafts.value).filter(([id,v])=>v.text&&!v.unconfirmed&&!(v.terminal&&id!==awaitingReply.value&&time(v.timestamp)>0&&time(v.timestamp)<latestUser)&&!nativeTextInHistory(v.text)).map(([id,v])=>({...v,id})).sort((a,b)=>time(a.timestamp)-time(b.timestamp));
+ return Object.entries(nativeDrafts.value)
+  .filter(([id,v])=>{
+   if(String(id||'').startsWith('external-codex-')&&hasOwnedActive)return false;
+   return v.text&&!v.unconfirmed&&!(v.terminal&&id!==awaitingReply.value&&time(v.timestamp)>0&&time(v.timestamp)<latestUser)&&!nativeTextInHistory(v.text);
+  })
+  .map(([id,v])=>({...v,id,text:stripHistoryPrefix(v.text)}))
+  .filter(v=>Boolean(v.text&&v.text.trim()))
+  .sort((a,b)=>time(a.timestamp)-time(b.timestamp));
 });
 const displayMessages=computed(()=>{
  const raw=history.value?.messages||[];
