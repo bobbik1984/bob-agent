@@ -206,8 +206,12 @@ const currentSelectorModels = computed(() => {
   const prov = currentSelectorProvider.value;
   if (!prov) return [];
   const q = modelSearchQuery.value.trim().toLowerCase();
+  const seen = new Set();
   return (prov.models || []).filter(m => {
     if (m.visible === false) return false;
+    const norm = String(m.id || '').replace(/^models\//, '');
+    if (!norm || seen.has(norm)) return false;
+    seen.add(norm);
     if (!q) return true;
     return (
       (m.name && m.name.toLowerCase().includes(q)) ||

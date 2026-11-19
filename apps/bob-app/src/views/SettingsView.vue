@@ -410,6 +410,7 @@ async function handleSendTestApprovalNotification() {
                   :key="mdl.id"
                   type="button"
                   class="model-pool-chip"
+                  :title="mdl.id"
                   :class="{
                     selected:
                       modelHub.state.active_roles?.[editingRole]?.model_id === mdl.id &&
@@ -425,12 +426,12 @@ async function handleSendTestApprovalNotification() {
                   />
                   <div class="chip-text">
                     <strong>
-                      {{ mdl.name || mdl.id }}
+                      {{ String(mdl.name || mdl.id || '').replace(/^models\//, '') }}
                       <span v-if="mdl.discovered" class="model-tag-pill">{{
                         t('discoveredModelBadge')
                       }}</span>
                     </strong>
-                    <small>{{ mdl.id }}</small>
+                    <small>{{ String(mdl.id || '').replace(/^models\//, '') }}</small>
                   </div>
                 </button>
               </div>
