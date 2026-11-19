@@ -427,7 +427,8 @@ body,
 .layout-mobile-portrait .main,
 .layout-mobile-portrait .remote-session-host {
   width: 100%;
-  padding: 0.4rem 0.65rem;
+  padding: 0;
+  gap: 0;
 }
 
 .connection-note {
