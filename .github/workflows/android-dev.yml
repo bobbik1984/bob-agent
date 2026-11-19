@@ -39,7 +39,7 @@ jobs:
           echo "CARGO_TARGET_DIR=$RUNNER_TEMP/bob-target" >> "$GITHUB_ENV"
           echo "GRADLE_USER_HOME=$RUNNER_TEMP/bob-gradle" >> "$GITHUB_ENV"
           corepack enable
-          corepack prepare pnpm@11.13.0 --activate
+          corepack prepare pnpm@11.22.0 --activate
           rustup target add aarch64-linux-android
           test -n "$ANDROID_HOME"
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
