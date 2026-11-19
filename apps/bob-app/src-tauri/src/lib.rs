@@ -1247,7 +1247,6 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
         ])
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[tauri::command]
 fn app_system_bar_appearance<R: tauri::Runtime>(app: tauri::AppHandle<R>, light: bool) -> Result<(), String> {
     #[cfg(target_os = "android")]
@@ -1259,6 +1258,7 @@ fn app_system_bar_appearance<R: tauri::Runtime>(app: tauri::AppHandle<R>, light:
     Ok(())
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     configure(tauri::Builder::default())
         .run(tauri::generate_context!())
