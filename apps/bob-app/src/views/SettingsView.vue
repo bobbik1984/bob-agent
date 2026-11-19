@@ -1507,12 +1507,21 @@ async function handleSendTestApprovalNotification() {
 
 .security-lock-setting-card {
   margin-top: var(--gap-sm);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-md);
 }
 
 .security-lock-switch {
   position: relative;
-  width: 2.75rem;
-  height: 1.55rem;
+  display: inline-flex;
+  align-items: center;
+  width: 2.65rem;
+  height: 1.5rem;
+  min-width: 2.65rem;
+  min-height: 1.5rem;
   flex-shrink: 0;
   border-radius: var(--radius-pill);
   border: 1px solid var(--line);
@@ -1529,17 +1538,18 @@ async function handleSendTestApprovalNotification() {
 
 .security-lock-switch-thumb {
   position: absolute;
-  top: 0.18rem;
-  left: 0.18rem;
-  width: 1.1rem;
-  height: 1.1rem;
+  top: 50%;
+  left: 0.16rem;
+  width: 1.08rem;
+  height: 1.08rem;
   border-radius: 9999px;
   background: var(--text-primary);
+  transform: translateY(-50%);
   transition: transform 0.15s ease, background 0.15s ease;
 }
 
 .security-lock-switch.on .security-lock-switch-thumb {
-  transform: translateX(1.18rem);
+  transform: translate(1.18rem, -50%);
   background: var(--text-on-accent);
 }
 

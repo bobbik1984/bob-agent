@@ -2,7 +2,7 @@ name: Android development APK
 on:
   workflow_dispatch:
   push:
-    branches: ["1.0.1"]
+    branches: ["1.0.1", "1.0.2"]
     paths: [".github/workflows/android-dev.yml", "apps/bob-app/**", "crates/**", "Cargo.lock", "Cargo.toml"]
 permissions:
   contents: read
@@ -76,8 +76,13 @@ jobs:
           printf '%s  %s\n' "$checksum" "$archive" | sha256sum -c
           sed -i '/^distributionUrl=/d; /^distributionSha256Sum=/d' "$wrapper"
           printf '\ndistributionUrl=file://%s\ndistributionSha256Sum=%s\n' "$archive" "$checksum" >> "$wrapper"
-      - name: Build independent ARM64 development APK
-        run: pnpm exec tauri android build --debug --target aarch64 --apk --ci
+      - name: Build independent ARM64 APK
+        run: |
+          if [ "${{ github.ref_name }}" = "1.0.2" ]; then
+            pnpm exec tauri android build --target aarch64 --apk --ci
+          else
+            pnpm exec tauri android build --debug --target aarch64 --apk --ci
+          fi
       - name: Verify packaged Bob branding
         run: |
           for apk in src-tauri/gen/android/app/build/outputs/apk/*/*/*.apk; do

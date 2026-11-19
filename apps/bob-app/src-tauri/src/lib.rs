@@ -1106,6 +1106,7 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
             security_lock::app_security_lock_status,
             security_lock::app_security_lock_set,
             security_lock::app_security_lock_unlock,
+            app_system_bar_appearance,
             app_home_sync,
             app_bootstrap,
             app_accept,
@@ -1247,6 +1248,17 @@ fn configure<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R>
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[tauri::command]
+fn app_system_bar_appearance<R: tauri::Runtime>(app: tauri::AppHandle<R>, light: bool) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        android_vault::set_system_bar_appearance(&app, light).map_err(str::to_owned)?;
+    }
+    #[cfg(not(target_os = "android"))]
+    let _ = (&app, light);
+    Ok(())
+}
+
 pub fn run() {
     configure(tauri::Builder::default())
         .run(tauri::generate_context!())

@@ -205,3 +205,22 @@ pub(crate) async fn authenticate_device_owner<R: Runtime>(
         .await
         .map_err(|_| "SECURITY_LOCK_AUTH_FAILED")
 }
+
+#[derive(Serialize)]
+struct SystemBarAppearanceRequest {
+    light: bool,
+}
+
+pub(crate) fn set_system_bar_appearance<R: Runtime>(
+    app: &AppHandle<R>,
+    light: bool,
+) -> Result<(), &'static str> {
+    let handle = app.state::<AndroidVault<R>>().0.clone();
+    handle
+        .run_mobile_plugin::<serde_json::Value>(
+            "setSystemBarAppearance",
+            SystemBarAppearanceRequest { light },
+        )
+        .map(|_| ())
+        .map_err(|_| "SYSTEM_BAR_APPEARANCE_FAILED")
+}

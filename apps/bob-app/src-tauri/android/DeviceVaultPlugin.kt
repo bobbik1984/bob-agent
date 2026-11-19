@@ -422,4 +422,39 @@ class DeviceVaultPlugin(private val host: Activity) : Plugin(host) {
             put("status", if (ok) "ok" else "cancelled")
         })
     }
+
+    @InvokeArg
+    class SystemBarAppearanceArgs {
+        var light: Boolean = false
+    }
+
+    @Command
+    fun setSystemBarAppearance(invoke: Invoke) {
+        val args = invoke.parseArgs(SystemBarAppearanceArgs::class.java)
+        val isLight = args.light
+        host.runOnUiThread {
+            try {
+                val window = host.window
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val mask = android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+                        android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                    window.insetsController?.setSystemBarsAppearance(if (isLight) mask else 0, mask)
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    @Suppress("DEPRECATION")
+                    val decor = window.decorView
+                    @Suppress("DEPRECATION")
+                    var flags = decor.systemUiVisibility
+                    flags = if (isLight) {
+                        flags or android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                    } else {
+                        flags and android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
+                    }
+                    @Suppress("DEPRECATION")
+                    decor.systemUiVisibility = flags
+                }
+            } catch (_: Exception) {
+            }
+            invoke.resolve()
+        }
+    }
 }

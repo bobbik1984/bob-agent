@@ -701,12 +701,28 @@ const canSend = computed(
     !executionBlocked.value,
 );
 
+function resolveEffectiveTheme(value) {
+  if (value === 'light' || value === 'dark') return value;
+  return globalThis.matchMedia?.('(prefers-color-scheme: dark)')?.matches ? 'dark' : 'light';
+}
+
 function applyTheme(value) {
   if (value === 'light' || value === 'dark') {
     document.documentElement.dataset.theme = value;
   } else {
     delete document.documentElement.dataset.theme;
   }
+  const effective = resolveEffectiveTheme(value);
+  if (available && kernelBridge.systemBarAppearance) {
+    void kernelBridge.systemBarAppearance(effective === 'light').catch(() => {});
+  }
+}
+
+if (typeof globalThis.matchMedia === 'function') {
+  const mq = globalThis.matchMedia('(prefers-color-scheme: dark)');
+  mq?.addEventListener?.('change', () => {
+    if (theme.value === 'system') applyTheme('system');
+  });
 }
 
 watch(locale, value => {

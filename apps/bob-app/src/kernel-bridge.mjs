@@ -7,6 +7,7 @@ export function createKernelBridge(invoke, isAvailable) {
   }
   return {
     available: isAvailable,
+    systemBarAppearance: light => call('app_system_bar_appearance', { light: Boolean(light) }),
     projectLinks: () => call('app_project_links',{}),
     projectLinkSet: args => call('app_project_link_set',args),
     contextTasks: grantId => call('app_context_tasks',{grantId}),
