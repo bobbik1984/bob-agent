@@ -1296,7 +1296,9 @@ impl BobToolBus {
                 let catalog = app.catalog_snapshot().map_err(|_| "CATALOG_UNAVAILABLE")?;
                 let projects: Vec<Value> = catalog.projects.iter().map(|p| json!({"id":p.id,"title":p.title})).collect();
                 let mut nodes = Vec::new();
+                let mut compute_nodes = Vec::new();
                 if let Some(dir) = &self.data_dir {
+                    compute_nodes = crate::orchestrator::discover_compute_nodes(dir);
                     if let Ok(raw) = std::fs::read(dir.join("model_hub_state.json")) {
                         let hub: Value = serde_json::from_slice(&raw).map_err(|_| "PLATFORM_CONFIG_INVALID")?;
                         if let Some(configured) = hub["remoteNodes"].as_array() {
@@ -1310,7 +1312,7 @@ impl BobToolBus {
                         }
                     }
                 }
-                Ok(ToolBusOutcome::Executed { output: json!({"projects":projects,"configured_nodes":nodes,
+                Ok(ToolBusOutcome::Executed { output: json!({"projects":projects,"configured_nodes":nodes,"compute_nodes":compute_nodes,
                     "calendar":"Shared personal events and independent/project todos, read with schedule_list; edit existing IDs with schedule_update.",
                     "execution":"Node tool policy is necessary but not sufficient: installation, authentication and workspace grants must also be verified. Readable history is not execution permission."}), card:None })
             }

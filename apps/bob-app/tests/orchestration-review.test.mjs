@@ -87,6 +87,11 @@ test('useJarvisHome tracks active runs and review cards and dispatches accept/co
         ops.push(['continue', args.runId, args.prompt]);
         return { ok: true };
       },
+      dshPreview: async args => ({
+        base64: 'AAAA',
+        mime: 'image/webp',
+        path: args.path,
+      }),
       orchestrationCancel: async runId => {
         ops.push(['cancel', runId]);
         runs = runs.map(r => (r.run_id === runId ? { ...r, status: 'cancelled' } : r));
@@ -102,12 +107,19 @@ test('useJarvisHome tracks active runs and review cards and dispatches accept/co
   await jarvis.continueOrchestration({
     run_id: 'orch-review',
     suggested_next_prompt: 'Deploy to VPS2',
+    custom_prompt: 'Also bump version before deploying to VPS2',
   });
+  const thumb = await jarvis.previewOrchestrationArtifact({
+    connection_id: 'vps3',
+    session_id: 'codex:s1',
+    path_or_url: '/home/ubuntu/render.png',
+  });
+  assert.equal(thumb, 'data:image/webp;base64,AAAA');
   await jarvis.acceptOrchestration('orch-review');
   await jarvis.cancelOrchestration('orch-active');
 
   assert.deepEqual(ops, [
-    ['continue', 'orch-review', 'Deploy to VPS2'],
+    ['continue', 'orch-review', 'Also bump version before deploying to VPS2'],
     ['accept', 'orch-review'],
     ['cancel', 'orch-active'],
   ]);
@@ -124,6 +136,10 @@ test('orchestration i18n keys exist symmetrically and ActionCard supports orches
     'cardOrchInspect',
     'orchBannerTitle',
     'orchRoundBadge',
+    'cardOrchFollowupLabel',
+    'cardOrchFollowupPlaceholder',
+    'cardOrchArtifactsTitle',
+    'cardOrchLoadPreview',
   ]) {
     assert.ok(zh[key], `Missing zh-CN key: ${key}`);
     assert.ok(en[key], `Missing en-US key: ${key}`);
@@ -133,4 +149,6 @@ test('orchestration i18n keys exist symmetrically and ActionCard supports orches
   assert.ok(cardVue.includes('orch-accept'));
   assert.ok(cardVue.includes('orch-continue'));
   assert.ok(cardVue.includes('orch-inspect'));
+  assert.ok(cardVue.includes('orch-followup-input'));
+  assert.ok(cardVue.includes('orch-artifacts'));
 });

@@ -1166,7 +1166,34 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
                 .app
                 .set_capture_triage(capture_id, destination.as_ref(), args.get("batchId").and_then(Value::as_str), expected, at)
                 .map_err(|_| "INBOX_TRIAGE_REJECTED")?;
-            serde_json::to_value(triage).map_err(|_| "INBOX_TRIAGE_REJECTED")
+            let mut out = serde_json::to_value(&triage).map_err(|_| "INBOX_TRIAGE_REJECTED")?;
+            if let Some(dest) = destination.as_ref().filter(|d| d.kind == "project_todo") {
+                let capture_text = ctx
+                    .app
+                    .list_inbox(None)
+                    .ok()
+                    .and_then(|items| {
+                        items
+                            .into_iter()
+                            .find(|it| it.capture.id == capture_id)
+                            .map(|it| it.capture.content_ref)
+                    })
+                    .unwrap_or_default();
+                if !capture_text.trim().is_empty() {
+                    let wb = inbox_triage::writeback_or_queue_project_todo(
+                        &ctx.runtime.data_dir,
+                        capture_id,
+                        dest.ref_id.as_deref().unwrap_or(""),
+                        dest.label.as_deref().unwrap_or(""),
+                        &capture_text,
+                        at,
+                    );
+                    if let Some(obj) = out.as_object_mut() {
+                        obj.insert("writeback".to_string(), wb);
+                    }
+                }
+            }
+            Ok(out)
         }
         "app_inbox_triage_close" => {
             let id = args.get("batchId").and_then(Value::as_str).ok_or("TRIAGE_CLOSE_REJECTED")?;
@@ -4618,13 +4645,20 @@ pub fn spawn_node_server(config: BobNodeConfig) -> Result<RunningNodeServer, &'s
 
     let sched_stop = stop.clone();
     let sched_ctx = ctx.clone();
+    let sched_data_dir = config.data_dir.clone();
     std::thread::spawn(move || {
+        let mut tick_count: u64 = 0;
         while !sched_stop.load(Ordering::SeqCst) {
+            let now = now_millis();
             if let Ok(mut guard) = sched_ctx.try_lock() {
-                let now = now_millis();
                 let data_dir = guard.runtime.data_dir.clone();
                 let _ = bob_runtime::routines::tick_due_server(&data_dir, &mut guard.app, now);
             }
+            if tick_count % 60 == 5 {
+                inbox_triage::tick_daily_triage(&sched_ctx, &sched_data_dir, now);
+                let _ = inbox_triage::reconcile_writeback_queue(&sched_data_dir);
+            }
+            tick_count = tick_count.wrapping_add(1);
             for _ in 0..5 {
                 if sched_stop.load(Ordering::SeqCst) {
                     return;

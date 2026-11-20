@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 const props = defineProps({
@@ -10,6 +10,10 @@ const props = defineProps({
   busy: {
     type: Boolean,
     default: false,
+  },
+  previewArtifact: {
+    type: Function,
+    default: null,
   },
 });
 
@@ -40,6 +44,53 @@ const orchestrationMeta = computed(() => {
     return null;
   }
 });
+
+const orchestrationArtifacts = computed(() => {
+  const list = orchestrationMeta.value?.artifacts;
+  return Array.isArray(list) ? list : [];
+});
+
+const followupDraft = ref('');
+watch(
+  () => orchestrationMeta.value?.suggested_next_prompt,
+  val => {
+    if (!followupDraft.value && val) {
+      followupDraft.value = String(val);
+    }
+  },
+  { immediate: true },
+);
+
+const artifactThumbs = reactive({});
+const artifactLoading = reactive({});
+
+async function loadArtifactThumbnail(artifact) {
+  const key = artifact?.path_or_url;
+  if (!key || artifactThumbs[key] || artifactLoading[key] || typeof props.previewArtifact !== 'function') {
+    return;
+  }
+  artifactLoading[key] = true;
+  try {
+    const res = await props.previewArtifact(artifact);
+    if (res && typeof res === 'string') {
+      artifactThumbs[key] = res;
+    }
+  } catch {
+    // non-fatal
+  } finally {
+    artifactLoading[key] = false;
+  }
+}
+
+function submitOrchContinue() {
+  if (!orchestrationMeta.value) return;
+  const trimmed = followupDraft.value.trim();
+  if (!trimmed) return;
+  emit('orch-continue', {
+    ...orchestrationMeta.value,
+    custom_prompt: trimmed,
+  });
+}
 
 const resolvedIcon = computed(() => {
   if (props.card?.icon) {
@@ -328,7 +379,67 @@ const statusBadgeLabel = computed(() => {
       </button>
     </footer>
 
-    <footer v-else-if="kind === 'orchestration_review' && orchestrationMeta" class="card-actions">
+    <!-- Child Node Deliverables (BOB-D-018) -->
+    <div
+      v-if="kind === 'orchestration_review' && orchestrationArtifacts.length > 0"
+      class="orch-artifacts"
+    >
+      <span class="orch-section-label">{{ t('cardOrchArtifactsTitle') }}</span>
+      <div class="orch-artifact-list">
+        <template v-for="(art, idx) in orchestrationArtifacts" :key="art.path_or_url || idx">
+          <a
+            v-if="art.kind === 'link' || /^https?:\/\//i.test(art.path_or_url || '')"
+            class="orch-artifact-chip"
+            :href="art.path_or_url"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <span class="orch-artifact-kind">{{ art.kind }}</span>
+            <span class="orch-artifact-label">{{ art.label }}</span>
+          </a>
+          <div v-else-if="art.kind === 'image'" class="orch-artifact-image-item">
+            <img
+              v-if="artifactThumbs[art.path_or_url]"
+              :src="artifactThumbs[art.path_or_url]"
+              :alt="art.label"
+              class="orch-artifact-thumb"
+            />
+            <button
+              v-else
+              type="button"
+              class="orch-artifact-chip"
+              :disabled="Boolean(artifactLoading[art.path_or_url])"
+              @click="loadArtifactThumbnail(art)"
+            >
+              <span class="orch-artifact-kind">{{ t('cardOrchLoadPreview') }}</span>
+              <span class="orch-artifact-label">{{ art.label }}</span>
+            </button>
+          </div>
+          <span v-else class="orch-artifact-chip">
+            <span class="orch-artifact-kind">{{ art.kind }}</span>
+            <span class="orch-artifact-label">{{ art.label }}</span>
+          </span>
+        </template>
+      </div>
+    </div>
+
+    <!-- Editable Follow-up Instruction (BOB-D-018) -->
+    <div
+      v-if="kind === 'orchestration_review' && orchestrationMeta && isPending && orchestrationMeta.can_continue"
+      class="orch-followup-box"
+    >
+      <label class="orch-section-label" :for="`orch-followup-${card.id}`">{{ t('cardOrchFollowupLabel') }}</label>
+      <textarea
+        :id="`orch-followup-${card.id}`"
+        v-model="followupDraft"
+        class="orch-followup-input"
+        rows="2"
+        :disabled="busy"
+        :placeholder="t('cardOrchFollowupPlaceholder')"
+      ></textarea>
+    </div>
+
+    <footer v-if="kind === 'orchestration_review' && orchestrationMeta" class="card-actions">
       <button
         v-if="orchestrationMeta.session_id"
         type="button"
@@ -342,8 +453,8 @@ const statusBadgeLabel = computed(() => {
         v-if="isPending && orchestrationMeta.can_continue"
         type="button"
         class="btn btn-secondary"
-        :disabled="busy"
-        @click="emit('orch-continue', orchestrationMeta)"
+        :disabled="busy || !followupDraft.trim()"
+        @click="submitOrchContinue"
       >
         {{ t('cardOrchContinue') }}
       </button>
@@ -670,5 +781,80 @@ const statusBadgeLabel = computed(() => {
 
 .card-actions .btn-warning:not(:disabled):hover {
   opacity: 0.92;
+}
+
+.orch-artifacts,
+.orch-followup-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: var(--gap-xs);
+}
+
+.orch-section-label {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.orch-artifact-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.orch-artifact-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: var(--radius-btn);
+  background: var(--bg-secondary);
+  border: 1px solid var(--line);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.orch-artifact-kind {
+  color: var(--accent-primary);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.orch-artifact-label {
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orch-artifact-thumb {
+  display: block;
+  max-width: 100%;
+  max-height: 14rem;
+  border-radius: var(--radius-btn);
+  object-fit: contain;
+}
+
+.orch-followup-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 3.2rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: var(--radius-btn);
+  border: 1px solid var(--line);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.orch-followup-input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
 }
 </style>

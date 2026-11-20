@@ -1335,5 +1335,9 @@
   "cardOrchContinue": "按建议追派一轮",
   "cardOrchInspect": "查看底层会话",
   "orchBannerTitle": "跨节点调度执行中",
-  "orchRoundBadge": "第 {current}/{max} 轮"
+  "orchRoundBadge": "第 {current}/{max} 轮",
+  "cardOrchFollowupLabel": "下一轮补充指令",
+  "cardOrchFollowupPlaceholder": "可直接修改建议，或补充你的要求后再追派...",
+  "cardOrchArtifactsTitle": "子节点交付物",
+  "cardOrchLoadPreview": "预览图"
 }

@@ -19,9 +19,338 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 pub const DEFAULT_L2_MAX_AUTO_ROUNDS: u32 = 3;
 pub const HARD_MAX_AUTO_ROUNDS: u32 = 6;
+
+// ---------------------------------------------------------------------------
+// 0. Child Deliverables & Auto GPU / Compute Node Discovery
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OrchestrationArtifact {
+    pub label: String,
+    pub kind: String, // "image" | "apk" | "link" | "file"
+    pub path_or_url: String,
+    pub connection_id: String,
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GpuDeviceInfo {
+    pub name: String,
+    pub vram_mb: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ComputeNodeEntry {
+    pub name: String,
+    pub role: String,
+    pub gpu_summary: String,
+    pub access_hint: String,
+    pub source: String, // "local_probe" | "bob_node" | "node_inventory_ssot"
+}
+
+fn classify_artifact_kind(target: &str) -> Option<&'static str> {
+    let lower = target.to_ascii_lowercase();
+    let clean = lower.split(['?', '#']).next().unwrap_or(&lower);
+    if clean.ends_with(".png")
+        || clean.ends_with(".jpg")
+        || clean.ends_with(".jpeg")
+        || clean.ends_with(".webp")
+        || clean.ends_with(".gif")
+    {
+        return Some("image");
+    }
+    if clean.ends_with(".apk") {
+        return Some("apk");
+    }
+    if clean.starts_with("https://") || clean.starts_with("http://") {
+        return Some("link");
+    }
+    if clean.ends_with(".pdf") || clean.ends_with(".html") || clean.ends_with(".zip") {
+        return Some("file");
+    }
+    None
+}
+
+fn strip_path_punctuation(raw: &str) -> &str {
+    raw.trim_matches(|c: char| {
+        matches!(
+            c,
+            '`' | '"' | '\'' | '(' | ')' | '[' | ']' | '<' | '>' | ',' | ';' | '。' | '，' | '）' | '（'
+        )
+    })
+}
+
+/// Deterministically extracts deliverable URLs, screenshots/renders, APKs, and reports
+/// from child agent output so the single main-agent window can preview them directly.
+pub fn extract_child_artifacts(
+    output: &str,
+    connection_id: &str,
+    session_id: &str,
+) -> Vec<OrchestrationArtifact> {
+    let mut out: Vec<OrchestrationArtifact> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    let mut push_item = |label: String, target: &str| {
+        if out.len() >= 8 {
+            return;
+        }
+        let cleaned = strip_path_punctuation(target).trim();
+        if cleaned.is_empty() || cleaned.len() > 512 || cleaned.contains("..") {
+            return;
+        }
+        let target_norm = cleaned.strip_prefix("file://").unwrap_or(cleaned);
+        let Some(kind) = classify_artifact_kind(target_norm) else {
+            return;
+        };
+        if !seen.insert(target_norm.to_string()) {
+            return;
+        }
+        let final_label = if !label.trim().is_empty() {
+            label.trim().to_string()
+        } else {
+            target_norm
+                .rsplit(['/', '\\'])
+                .next()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(target_norm)
+                .to_string()
+        };
+        out.push(OrchestrationArtifact {
+            label: final_label.chars().take(80).collect(),
+            kind: kind.to_string(),
+            path_or_url: target_norm.to_string(),
+            connection_id: connection_id.to_string(),
+            session_id: session_id.to_string(),
+        });
+    };
+
+    // 1. Markdown links/images: [label](target) or ![label](target)
+    let bytes = output.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'[' {
+            if let Some(close_br) = output[i + 1..].find(']') {
+                let close_br_idx = i + 1 + close_br;
+                if output.as_bytes().get(close_br_idx + 1) == Some(&b'(') {
+                    if let Some(close_pa) = output[close_br_idx + 2..].find(')') {
+                        let label = &output[i + 1..close_br_idx];
+                        let target = &output[close_br_idx + 2..close_br_idx + 2 + close_pa];
+                        if !label.contains('\n') && !target.contains('\n') {
+                            push_item(label.to_string(), target);
+                        }
+                        i = close_br_idx + 2 + close_pa + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+
+    // 2. Standalone URLs and absolute/workspace deliverable paths
+    for token in output.split_whitespace() {
+        let clean = strip_path_punctuation(token);
+        if clean.starts_with("https://")
+            || clean.starts_with("http://")
+            || clean.starts_with('/')
+            || clean.contains("dist-release")
+        {
+            push_item(String::new(), clean);
+        }
+    }
+
+    out
+}
+
+/// Probes local NVIDIA GPUs via `nvidia-smi` once per process (zero overhead when absent).
+pub fn probe_local_gpus() -> &'static [GpuDeviceInfo] {
+    static LOCAL_GPUS: OnceLock<Vec<GpuDeviceInfo>> = OnceLock::new();
+    LOCAL_GPUS.get_or_init(|| {
+        let Ok(out) = Command::new("nvidia-smi")
+            .args([
+                "--query-gpu=name,memory.total",
+                "--format=csv,noheader,nounits",
+            ])
+            .output()
+        else {
+            return Vec::new();
+        };
+        if !out.status.success() {
+            return Vec::new();
+        }
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        stdout
+            .lines()
+            .filter_map(|line| {
+                let mut parts = line.split(',');
+                let name = parts.next()?.trim().to_string();
+                let vram_mb = parts.next()?.trim().parse::<u64>().ok()?;
+                if name.is_empty() {
+                    return None;
+                }
+                Some(GpuDeviceInfo { name, vram_mb })
+            })
+            .collect()
+    })
+}
+
+/// Pure read-only parser extracting GPU/render compute nodes from the synced
+/// `cluster-ops/references/node_inventory.md` quick-reference Markdown table.
+/// Never reads SSH keys, tokens, or secrets.
+pub fn parse_gpu_nodes_from_inventory_md(markdown: &str) -> Vec<ComputeNodeEntry> {
+    let mut entries = Vec::new();
+    for line in markdown.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with('|') || trimmed.starts_with("|---") || trimmed.starts_with("| ---") {
+            continue;
+        }
+        let cols: Vec<&str> = trimmed
+            .trim_matches('|')
+            .split('|')
+            .map(str::trim)
+            .collect();
+        if cols.len() < 5 {
+            continue;
+        }
+        let name = cols[0].replace("**", "").trim().to_string();
+        if name.is_empty() || name.eq_ignore_ascii_case("node") {
+            continue;
+        }
+        let ts_ip = cols[2].replace('`', "").trim().to_string();
+        let provider = cols[3].replace('`', "").trim().to_string();
+        let role = cols[4].replace('`', "").trim().to_string();
+        let combined = format!("{name} {provider} {role}").to_ascii_lowercase();
+        let is_gpu = combined.contains("gpu")
+            || combined.contains("optix")
+            || combined.contains("blender")
+            || combined.contains("cuda")
+            || combined.contains("gtx")
+            || combined.contains("rtx")
+            || combined.contains("t4")
+            || combined.contains("a100")
+            || combined.contains("l4")
+            || role.contains("渲染")
+            || role.contains("算力");
+        if !is_gpu {
+            continue;
+        }
+        entries.push(ComputeNodeEntry {
+            name,
+            role: role.clone(),
+            gpu_summary: format!("{provider} · {role}"),
+            access_hint: if !ts_ip.is_empty() && ts_ip != "—" && ts_ip != "-" {
+                format!("Tailscale {ts_ip}")
+            } else {
+                provider
+            },
+            source: "node_inventory_ssot".to_string(),
+        });
+    }
+    entries
+}
+
+pub fn discover_node_inventory_path() -> Option<PathBuf> {
+    if let Ok(explicit) = std::env::var("BOB_NODE_INVENTORY_PATH") {
+        let p = PathBuf::from(explicit.trim());
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()?;
+    let h = PathBuf::from(home.trim());
+    let candidates = [
+        h.join("common/knowledge/skills/cluster-ops/references/node_inventory.md"),
+        h.join("work/common/knowledge/skills/cluster-ops/references/node_inventory.md"),
+    ];
+    for c in candidates {
+        if c.is_file() {
+            return Some(c);
+        }
+    }
+    None
+}
+
+/// Discovers available GPU / render compute nodes from local hardware probes,
+/// paired node metadata, and the synced `node_inventory.md` SSOT table.
+pub fn discover_compute_nodes(data_dir: &Path) -> Vec<ComputeNodeEntry> {
+    let mut nodes: Vec<ComputeNodeEntry> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // 1. Local GPU probe
+    let local_gpus = probe_local_gpus();
+    if !local_gpus.is_empty() {
+        let summary = local_gpus
+            .iter()
+            .map(|g| format!("{} ({} MiB)", g.name, g.vram_mb))
+            .collect::<Vec<_>>()
+            .join(", ");
+        seen.insert("local".to_string());
+        nodes.push(ComputeNodeEntry {
+            name: "local".to_string(),
+            role: "Local GPU Host".to_string(),
+            gpu_summary: summary,
+            access_hint: "local".to_string(),
+            source: "local_probe".to_string(),
+        });
+    }
+
+    // 2. Paired remote nodes advertising GPUs in model_hub_state.json
+    if let Ok(raw) = std::fs::read(data_dir.join("model_hub_state.json")) {
+        if let Ok(hub) = serde_json::from_slice::<Value>(&raw) {
+            if let Some(arr) = hub["remoteNodes"].as_array() {
+                for n in arr {
+                    if let Some(gpus) = n.get("gpus").and_then(Value::as_array) {
+                        if !gpus.is_empty() {
+                            let label = n["label"]
+                                .as_str()
+                                .or_else(|| n["name"].as_str())
+                                .or_else(|| n["id"].as_str())
+                                .unwrap_or("remote-gpu")
+                                .to_string();
+                            let summary = gpus
+                                .iter()
+                                .filter_map(|g| {
+                                    let gn = g["name"].as_str()?;
+                                    let mb = g["vram_mb"].as_u64().unwrap_or(0);
+                                    Some(format!("{gn} ({mb} MiB)"))
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            if !summary.is_empty() && seen.insert(label.to_ascii_lowercase()) {
+                                nodes.push(ComputeNodeEntry {
+                                    name: label,
+                                    role: "Paired Bob GPU Node".to_string(),
+                                    gpu_summary: summary,
+                                    access_hint: n["id"].as_str().unwrap_or("").to_string(),
+                                    source: "bob_node".to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Synced cluster-ops node_inventory.md SSOT projection (for on-demand / dormant GPUs)
+    if let Some(inv_path) = discover_node_inventory_path() {
+        if let Ok(md) = std::fs::read_to_string(&inv_path) {
+            for entry in parse_gpu_nodes_from_inventory_md(&md) {
+                if seen.insert(entry.name.to_ascii_lowercase()) {
+                    nodes.push(entry);
+                }
+            }
+        }
+    }
+
+    nodes
+}
 
 // ---------------------------------------------------------------------------
 // 1. Enums & Durable Run Ledger Models
@@ -168,6 +497,8 @@ pub struct OrchestrationRun {
     pub dod_satisfied: bool,
     #[serde(default)]
     pub review_card_id: Option<String>,
+    #[serde(default)]
+    pub artifacts: Vec<OrchestrationArtifact>,
     pub created_at: i64,
     pub updated_at: i64,
     #[serde(default)]
@@ -710,7 +1041,7 @@ pub fn build_review_card(run: &OrchestrationRun, now_ms: i64) -> StructuredCard 
         .unwrap_or("Remote node task finished and is ready for review.")
         .to_string();
 
-    let items: Vec<CardItem> = run
+    let mut items: Vec<CardItem> = run
         .review_issues
         .iter()
         .take(5)
@@ -720,6 +1051,15 @@ pub fn build_review_card(run: &OrchestrationRun, now_ms: i64) -> StructuredCard 
             badge: Some("check".to_string()),
         })
         .collect();
+    if items.is_empty() && !run.artifacts.is_empty() {
+        for art in run.artifacts.iter().take(4) {
+            items.push(CardItem {
+                title: art.label.clone(),
+                subtitle: Some(art.path_or_url.clone()),
+                badge: Some(art.kind.clone()),
+            });
+        }
+    }
 
     let meta = json!({
         "run_id": run.run_id,
@@ -733,9 +1073,9 @@ pub fn build_review_card(run: &OrchestrationRun, now_ms: i64) -> StructuredCard 
         "max_auto_rounds": run.max_auto_rounds,
         "dod_satisfied": run.dod_satisfied,
         "suggested_next_prompt": run.suggested_next_prompt,
+        "artifacts": run.artifacts,
         "can_accept": run.status.is_reviewable(),
-        "can_continue": run.status.is_reviewable()
-            && run.suggested_next_prompt.as_deref().map(|s| !s.trim().is_empty()).unwrap_or(false),
+        "can_continue": run.status.is_reviewable(),
     });
 
     StructuredCard {
@@ -801,6 +1141,7 @@ mod tests {
             suggested_next_prompt: None,
             dod_satisfied: false,
             review_card_id: None,
+            artifacts: vec![],
             created_at: 1000,
             updated_at: 1000,
             rounds: vec![],
@@ -985,6 +1326,41 @@ mod tests {
         let meta: Value = serde_json::from_str(card.technical_detail.as_deref().unwrap()).unwrap();
         assert_eq!(meta["run_id"], "orch-test-1");
         assert_eq!(meta["can_accept"], true);
-        assert_eq!(meta["can_continue"], false);
+        assert_eq!(meta["can_continue"], true);
+    }
+
+    #[test]
+    fn extract_child_artifacts_captures_images_apks_and_links_without_duplicates() {
+        let output = "\
+已上线 0.5：\n\
+- [查看 Godot 实装截图](/home/bobbik/dsh_projects/winter/render_01.png)\n\
+- [下载 Android APK](https://github.com/bobbik1984/demo/releases/download/v0.5/app.apk)\n\
+- 本地产物 `/home/bobbik/dist-release/Bob-1.0.2.apk` 以及 https://preview.example.com/demo\n\
+- 重复链接 /home/bobbik/dsh_projects/winter/render_01.png\n";
+        let arts = extract_child_artifacts(output, "vps3", "codex:s1");
+        assert_eq!(arts.len(), 4);
+        assert_eq!(arts[0].kind, "image");
+        assert_eq!(arts[0].label, "查看 Godot 实装截图");
+        assert_eq!(arts[1].kind, "apk");
+        assert_eq!(arts[2].kind, "apk");
+        assert_eq!(arts[3].kind, "link");
+    }
+
+    #[test]
+    fn parse_gpu_nodes_from_inventory_md_extracts_gpu_rows_safely() {
+        let md = "\
+| Node | 公网 IP | Tailscale IP | 服务商 | 角色 | 参与 OpenClaw |
+|------|---------|-------------|--------|------|:---:|
+| **VPS2 (Hostinger)** | `1.2.3.4` | `100.64.0.6` | Hostinger | Exec Center | ✅ |
+| **bobbik-pc** | — | `100.64.0.9` | 本地 | GPU 算力 / Blender 渲染 (GTX 1660 Ti) | ❌ |
+| **bob-vm-02-gpu** | 动态 | `100.64.0.10` | GCP (`n1-standard-4` Spot + T4) | 云端 Blender 4.2.3 / OptiX 渲染主力 | ❌ |
+| **render-03** | — | `100.64.0.15` | 本地 | RTX 4090 渲染节点 | ❌ |
+";
+        let nodes = parse_gpu_nodes_from_inventory_md(md);
+        assert_eq!(nodes.len(), 3);
+        assert_eq!(nodes[0].name, "bobbik-pc");
+        assert_eq!(nodes[1].name, "bob-vm-02-gpu");
+        assert_eq!(nodes[2].name, "render-03");
+        assert_eq!(nodes[2].access_hint, "Tailscale 100.64.0.15");
     }
 }

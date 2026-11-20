@@ -266,3 +266,326 @@ pub fn check_implemented(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Resul
         "results": results,
     }))
 }
+
+// ---------------------------------------------------------------------------
+// BOB-D-014 Step 4: Confirmed Project todo.md Writeback + Daily 21:00 Auto-Triage
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingTodoWriteback {
+    pub capture_id: String,
+    pub project_ref_id: String,
+    pub project_label: String,
+    pub content: String,
+    pub created_at: i64,
+    pub status: String, // "waiting_for_pc"
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct WritebackQueueData {
+    pub items: Vec<PendingTodoWriteback>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DailyTriageSchedule {
+    #[serde(default = "default_true_flag")]
+    pub enabled: bool,
+    #[serde(default = "default_triage_hour")]
+    pub hour: u32,
+    #[serde(default)]
+    pub minute: u32,
+    #[serde(default = "default_utc_offset")]
+    pub utc_offset_hours: i32,
+    #[serde(default)]
+    pub last_run_date: Option<String>,
+}
+
+fn default_true_flag() -> bool {
+    true
+}
+fn default_triage_hour() -> u32 {
+    21
+}
+fn default_utc_offset() -> i32 {
+    8
+}
+
+impl Default for DailyTriageSchedule {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            hour: 21,
+            minute: 0,
+            utc_offset_hours: 8,
+            last_run_date: None,
+        }
+    }
+}
+
+fn resolve_project_todo_path(project_ref_id: &str, project_label: &str) -> Option<std::path::PathBuf> {
+    let reg_path = bob_runtime::project_registry::discover_registry_path()?;
+    let raw = std::fs::read_to_string(&reg_path).ok()?;
+    let root_dir = reg_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let entries = bob_runtime::project_registry::parse_project_registry_yaml(&raw);
+    let entry = entries.into_iter().find(|e| {
+        (!project_ref_id.is_empty() && e.id.eq_ignore_ascii_case(project_ref_id))
+            || (!project_label.is_empty()
+                && (e.name.eq_ignore_ascii_case(project_label)
+                    || e.id.eq_ignore_ascii_case(project_label)))
+    })?;
+    let rel = entry.path.as_deref()?;
+    let proj_dir = if std::path::Path::new(rel).is_absolute() {
+        std::path::PathBuf::from(rel)
+    } else {
+        root_dir.join(rel)
+    };
+    if !proj_dir.is_dir() {
+        return None;
+    }
+    Some(proj_dir.join("todo.md"))
+}
+
+fn append_todo_line_idempotent(
+    todo_path: &std::path::Path,
+    capture_id: &str,
+    content: &str,
+) -> Result<&'static str, &'static str> {
+    let marker = format!("<!-- bob-capture:{capture_id} -->");
+    let existing = if todo_path.is_file() {
+        std::fs::read_to_string(todo_path).map_err(|_| "TODO_WRITEBACK_READ_FAILED")?
+    } else {
+        "# TODO\n\n".to_string()
+    };
+    if existing.contains(&marker) {
+        return Ok("already_present");
+    }
+    let clean_line = content
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if clean_line.is_empty() {
+        return Ok("skipped_empty");
+    }
+    let mut updated = existing;
+    if !updated.ends_with('\n') && !updated.is_empty() {
+        updated.push('\n');
+    }
+    updated.push_str(&format!("- [ ] {clean_line} {marker}\n"));
+    let tmp = todo_path.with_extension("md.tmp");
+    std::fs::write(&tmp, updated.as_bytes()).map_err(|_| "TODO_WRITEBACK_WRITE_FAILED")?;
+    std::fs::rename(&tmp, todo_path).map_err(|_| "TODO_WRITEBACK_WRITE_FAILED")?;
+    Ok("written")
+}
+
+/// Writes a user-confirmed `project_todo` inbox capture into the target project's `todo.md`,
+/// or queues it into `inbox_todo_writeback_queue.json` (`waiting_for_pc`) if the repo is offline/not mounted here.
+pub fn writeback_or_queue_project_todo(
+    data_dir: &std::path::Path,
+    capture_id: &str,
+    project_ref_id: &str,
+    project_label: &str,
+    content: &str,
+    now_ms: i64,
+) -> Value {
+    if let Some(todo_path) = resolve_project_todo_path(project_ref_id, project_label) {
+        if let Ok(status) = append_todo_line_idempotent(&todo_path, capture_id, content) {
+            return json!({
+                "status": status,
+                "path": todo_path.to_string_lossy(),
+            });
+        }
+    }
+
+    let q_path = data_dir.join("inbox_todo_writeback_queue.json");
+    let mut q: WritebackQueueData = if q_path.is_file() {
+        std::fs::read_to_string(&q_path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    } else {
+        WritebackQueueData::default()
+    };
+    if !q.items.iter().any(|it| it.capture_id == capture_id) {
+        q.items.push(PendingTodoWriteback {
+            capture_id: capture_id.to_string(),
+            project_ref_id: project_ref_id.to_string(),
+            project_label: project_label.to_string(),
+            content: content.to_string(),
+            created_at: now_ms,
+            status: "waiting_for_pc".to_string(),
+        });
+        if let Ok(raw) = serde_json::to_string_pretty(&q) {
+            let tmp = q_path.with_extension("json.tmp");
+            if std::fs::write(&tmp, raw.as_bytes()).is_ok() {
+                let _ = std::fs::rename(&tmp, &q_path);
+            }
+        }
+    }
+    json!({
+        "status": "waiting_for_pc",
+        "queued": true,
+    })
+}
+
+/// Reconciles any queued `waiting_for_pc` inbox-to-todo writebacks whose local workspace is now mounted.
+pub fn reconcile_writeback_queue(data_dir: &std::path::Path) -> Value {
+    let q_path = data_dir.join("inbox_todo_writeback_queue.json");
+    if !q_path.is_file() {
+        return json!({ "flushed": 0, "remaining": 0 });
+    }
+    let mut q: WritebackQueueData = std::fs::read_to_string(&q_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let mut flushed = 0usize;
+    let mut remaining = Vec::new();
+    for item in q.items.drain(..) {
+        if let Some(todo_path) = resolve_project_todo_path(&item.project_ref_id, &item.project_label)
+        {
+            if append_todo_line_idempotent(&todo_path, &item.capture_id, &item.content).is_ok() {
+                flushed += 1;
+                continue;
+            }
+        }
+        remaining.push(item);
+    }
+    q.items = remaining;
+    if let Ok(raw) = serde_json::to_string_pretty(&q) {
+        let tmp = q_path.with_extension("json.tmp");
+        if std::fs::write(&tmp, raw.as_bytes()).is_ok() {
+            let _ = std::fs::rename(&tmp, &q_path);
+        }
+    }
+    json!({ "flushed": flushed, "remaining": q.items.len() })
+}
+
+fn local_date_and_hm(now_ms: i64, offset_hours: i32) -> (String, u32, u32) {
+    let total_secs = now_ms / 1000 + (offset_hours as i64) * 3600;
+    let days = total_secs.div_euclid(86400);
+    let rem = total_secs.rem_euclid(86400) as u32;
+    let hour = rem / 3600;
+    let minute = (rem % 3600) / 60;
+    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm)
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = (yoe as i64) + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if m <= 2 { y + 1 } else { y };
+    (format!("{year:04}-{m:02}-{d:02}"), hour, minute)
+}
+
+/// Checks if the daily scheduled inbox triage (default 21:00 UTC+8) is due.
+/// Never auto-sorts items: only creates a single coalesced draft batch for 100% human tap-to-confirm
+/// and fires a Web Push reminder.
+pub fn tick_daily_triage(state: &Arc<Mutex<NodeContext>>, data_dir: &std::path::Path, now_ms: i64) {
+    let sched_path = data_dir.join("inbox_triage_schedule.json");
+    let mut sched: DailyTriageSchedule = if sched_path.is_file() {
+        std::fs::read_to_string(&sched_path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    } else {
+        DailyTriageSchedule::default()
+    };
+    if !sched.enabled {
+        return;
+    }
+    let (today, hour, minute) = local_date_and_hm(now_ms, sched.utc_offset_hours);
+    if sched.last_run_date.as_deref() == Some(today.as_str()) {
+        return;
+    }
+    if hour < sched.hour || (hour == sched.hour && minute < sched.minute) {
+        return;
+    }
+
+    // Check quickly under lock if there are unsorted items and no open draft yet.
+    let should_run = {
+        let Ok(guard) = state.try_lock() else {
+            return;
+        };
+        let has_open = guard
+            .app
+            .latest_triage_draft()
+            .ok()
+            .flatten()
+            .is_some();
+        if has_open {
+            false
+        } else {
+            guard
+                .app
+                .list_inbox(Some("unsorted"))
+                .map(|items| !items.is_empty())
+                .unwrap_or(false)
+        }
+    };
+
+    // Mark today's slot checked regardless of empty/open to avoid polling every tick.
+    sched.last_run_date = Some(today.clone());
+    if let Ok(raw) = serde_json::to_string_pretty(&sched) {
+        let tmp = sched_path.with_extension("json.tmp");
+        if std::fs::write(&tmp, raw.as_bytes()).is_ok() {
+            let _ = std::fs::rename(&tmp, &sched_path);
+        }
+    }
+
+    if !should_run {
+        return;
+    }
+
+    if draft(state, &json!({ "regenerate": false })).is_ok() {
+        push_channels::notify_approval_wakeup_async(
+            data_dir.to_path_buf(),
+            format!("inbox-daily-triage:{today}"),
+        );
+    }
+}
+
+#[cfg(test)]
+mod step4_tests {
+    use super::*;
+
+    #[test]
+    fn todo_writeback_is_idempotent_and_queues_when_project_offline() {
+        let tmp = tempfile::tempdir().unwrap();
+        let todo_file = tmp.path().join("todo.md");
+
+        let s1 = append_todo_line_idempotent(&todo_file, "cap-1", "Add dark mode polish").unwrap();
+        assert_eq!(s1, "written");
+        let s2 = append_todo_line_idempotent(&todo_file, "cap-1", "Add dark mode polish").unwrap();
+        assert_eq!(s2, "already_present");
+        let content = std::fs::read_to_string(&todo_file).unwrap();
+        assert_eq!(content.matches("bob-capture:cap-1").count(), 1);
+
+        // Offline project queues cleanly as waiting_for_pc
+        let data_dir = tmp.path().join("data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+        let q_res = writeback_or_queue_project_todo(
+            &data_dir,
+            "cap-offline",
+            "nonexistent-pc-project",
+            "Offline PC Project",
+            "Sync local design assets",
+            1_795_000_000_000,
+        );
+        assert_eq!(q_res["status"], "waiting_for_pc");
+        let rec = reconcile_writeback_queue(&data_dir);
+        assert_eq!(rec["remaining"], 1);
+    }
+
+    #[test]
+    fn local_date_and_hm_computes_utc8_civil_time() {
+        // 2026-11-20 13:30:00 UTC = 2026-11-20 21:30:00 UTC+8
+        let ms = 1795181400000_i64;
+        let (date, h, m) = local_date_and_hm(ms, 8);
+        assert_eq!(date, "2026-11-20");
+        assert_eq!((h, m), (21, 30));
+    }
+}

@@ -165,9 +165,14 @@ pub fn route(
     now: i64,
 ) -> Result<Value> {
     if method == "GET" && path == "info" {
-        return Ok(
-            json!({"protocol":"bob-node-v1","node_id":identity(dir)?,"authentication":"owner_password","pairing":"single_use_qr","credential_days":365}),
-        );
+        return Ok(json!({
+            "protocol": "bob-node-v1",
+            "node_id": identity(dir)?,
+            "authentication": "owner_password",
+            "pairing": "single_use_qr",
+            "credential_days": 365,
+            "gpus": bob_runtime::orchestrator::probe_local_gpus(),
+        }));
     }
     if method != "POST" {
         return Err("NODE_METHOD_NOT_ALLOWED");

@@ -578,10 +578,34 @@ export function useJarvisHome(ctx = {}) {
   async function continueOrchestration(metaOrRunId, customPrompt = null) {
     const runId = typeof metaOrRunId === 'string' ? metaOrRunId : metaOrRunId?.run_id;
     if (!runId || typeof ctx.kernelBridge?.orchestrationContinue !== 'function') return null;
-    const prompt = customPrompt || (typeof metaOrRunId === 'object' ? metaOrRunId?.suggested_next_prompt : null);
+    const prompt =
+      (typeof metaOrRunId === 'object' ? metaOrRunId?.custom_prompt : null) ||
+      customPrompt ||
+      (typeof metaOrRunId === 'object' ? metaOrRunId?.suggested_next_prompt : null);
     const res = await ctx.kernelBridge.orchestrationContinue({ runId, prompt }).catch(() => null);
     await refreshOrchestrations();
     return res;
+  }
+
+  async function previewOrchestrationArtifact(artifact) {
+    if (!artifact?.path_or_url || !artifact?.connection_id || !artifact?.session_id) return null;
+    if (typeof ctx.kernelBridge?.dshPreview !== 'function') return null;
+    const res = await ctx.kernelBridge
+      .dshPreview({
+        connectionId: artifact.connection_id,
+        sessionId: artifact.session_id,
+        path: artifact.path_or_url,
+      })
+      .catch(() => null);
+    if (!res) return null;
+    if (typeof res.dataUrl === 'string' && res.dataUrl.startsWith('data:image/')) {
+      return res.dataUrl;
+    }
+    if (typeof res.base64 === 'string' && res.base64.length > 0) {
+      const mime = res.mime || res.mediaType || 'image/webp';
+      return `data:${mime};base64,${res.base64}`;
+    }
+    return null;
   }
 
   async function cancelOrchestration(runId) {
@@ -966,6 +990,7 @@ export function useJarvisHome(ctx = {}) {
     acceptOrchestration,
     continueOrchestration,
     cancelOrchestration,
+    previewOrchestrationArtifact,
     budgetState,
     orbMood,
     cardsForMessage,

@@ -5,9 +5,9 @@ use crate::{now_millis, push_channels, NodeContext};
 use bob_runtime::budget::MonthlyBudgetStore;
 use bob_runtime::orchestrator::{
     bootstrap_workspace_local, build_review_card, clamp_max_auto_rounds, evaluate_round_outcome,
-    extract_failure_signature, AutonomyMode, ChildTurnOutcome, OrchestrationRoundRecord,
-    OrchestrationRun, OrchestrationStage, OrchestrationStatus, OrchestrationStore, RoundTransition,
-    HARD_MAX_AUTO_ROUNDS,
+    extract_child_artifacts, extract_failure_signature, AutonomyMode, ChildTurnOutcome,
+    OrchestrationRoundRecord, OrchestrationRun, OrchestrationStage, OrchestrationStatus,
+    OrchestrationStore, RoundTransition, HARD_MAX_AUTO_ROUNDS,
 };
 use bob_runtime::tool_bus::{ActionRiskLevel, BobToolBus, ToolSpec};
 use bob_runtime::ModelHubRuntime;
@@ -352,6 +352,7 @@ pub fn execute_dispatch_to_node_session(data_dir: &Path, args: &Value) -> Result
         suggested_next_prompt: None,
         dod_satisfied: false,
         review_card_id: None,
+        artifacts: Vec::new(),
         created_at: now,
         updated_at: now,
         rounds: vec![OrchestrationRoundRecord {
@@ -960,6 +961,7 @@ fn poll_single_active_run(state: &Arc<Mutex<NodeContext>>, data_dir: &Path, mut 
     run.review_issues = review_issues;
     run.suggested_next_prompt = suggested_next_prompt;
     run.dod_satisfied = dod_satisfied;
+    run.artifacts = extract_child_artifacts(&child_excerpt, &run.connection_id, &run.session_id);
     run.updated_at = now;
 
     match transition {
@@ -1107,6 +1109,7 @@ mod tests {
             suggested_next_prompt: Some("Push to 1.0.2".to_string()),
             dod_satisfied: true,
             review_card_id: None,
+            artifacts: vec![],
             created_at: 1000,
             updated_at: 1000,
             rounds: vec![],

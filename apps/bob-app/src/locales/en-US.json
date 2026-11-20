@@ -1335,5 +1335,9 @@
   "cardOrchContinue": "Dispatch Next Round",
   "cardOrchInspect": "Inspect Node Session",
   "orchBannerTitle": "Cross-Node Orchestration Active",
-  "orchRoundBadge": "Round {current}/{max}"
+  "orchRoundBadge": "Round {current}/{max}",
+  "cardOrchFollowupLabel": "Follow-up Instruction",
+  "cardOrchFollowupPlaceholder": "Edit the suggestion or add follow-up notes before dispatching...",
+  "cardOrchArtifactsTitle": "Node Deliverables",
+  "cardOrchLoadPreview": "Preview"
 }
