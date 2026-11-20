@@ -22,6 +22,7 @@ pub mod onboarding;
 pub mod jarvis;
 pub mod push_channels;
 pub mod browser_ws;
+pub mod orchestration;
 mod quota_sync;
 
 use bob_kernel::app::LocalApp;
@@ -533,6 +534,16 @@ pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) ->
         "app_jarvis_approvals_list" => jarvis::approvals_list(&ctx.runtime.data_dir, args),
         "app_jarvis_budget_get" => jarvis::budget_get(&ctx.runtime.data_dir, args),
         "app_jarvis_budget_set" => jarvis::budget_set(&ctx.runtime.data_dir, args),
+        "app_orchestration_list" => orchestration::rpc_list(&ctx.runtime.data_dir, args),
+        "app_orchestration_accept" => orchestration::rpc_accept(&ctx.runtime.data_dir, args),
+        "app_orchestration_cancel" => orchestration::rpc_cancel(&ctx.runtime.data_dir, args),
+        "app_orchestration_continue" => {
+            orchestration::rpc_continue(&ctx.runtime.data_dir, args).map_err(|_| "ORCHESTRATION_CONTINUE_FAILED")
+        }
+        "app_node_bootstrap_workspace" => {
+            orchestration::execute_node_bootstrap_workspace(&ctx.runtime.data_dir, args)
+                .map_err(|_| "NODE_BOOTSTRAP_FAILED")
+        }
         "app_chief_orders_list" => chief_service::list_owner_orders(&ctx.runtime.data_dir, args),
         "app_chief_order_complete" => chief_service::record_order_receipt(&ctx.runtime.data_dir, args, at),
         "app_push_vapid_public_key" => {
@@ -3058,6 +3069,7 @@ fn execute_unlocked_harness_rpc_inner(
             bob_runtime::tool_inventory::snapshot(data_dir,args["refresh"].as_bool().unwrap_or(false))
         },
         "app_dsh_workspace_grant" => bob_runtime::tool_inventory::authorize(data_dir,args),
+        "app_node_bootstrap_workspace" => bob_runtime::orchestrator::bootstrap_workspace_local(data_dir, args),
         "app_context_list" | "app_context_read" | "app_context_refresh" | "app_context_tasks" => {
             context_capsule::rpc(data_dir, command, args)
         }
@@ -4050,7 +4062,36 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
         }
         if matches!(
             command.trim(),
-            "app_dsh_tool_policy_apply" | "app_dsh_tool_policy_set" | "app_dsh_inventory" | "app_dsh_workspace_grant" | "app_dsh_live" | "app_dsh_create" | "app_dsh_cancel" | "app_dsh_answer" | "app_dsh_permission_set" | "app_native_setup" | "app_native_events" | "app_native_cancel" | "app_native_permission" | "app_dsh_receipt"
+            "app_orchestration_list"
+                | "app_orchestration_accept"
+                | "app_orchestration_continue"
+                | "app_orchestration_cancel"
+        ) {
+            let data_dir = guard.runtime.data_dir.clone();
+            drop(guard);
+            let result: Result<Value, String> = match command.trim() {
+                "app_orchestration_list" => {
+                    orchestration::rpc_list(&data_dir, &args).map_err(str::to_owned)
+                }
+                "app_orchestration_accept" => {
+                    orchestration::rpc_accept(&data_dir, &args).map_err(str::to_owned)
+                }
+                "app_orchestration_continue" => orchestration::rpc_continue(&data_dir, &args),
+                "app_orchestration_cancel" => {
+                    orchestration::rpc_cancel(&data_dir, &args).map_err(str::to_owned)
+                }
+                _ => unreachable!(),
+            };
+            let (status, value) = match result {
+                Ok(result) => (200, json!({ "ok": true, "result": result })),
+                Err(e) => (400, json!({ "ok": false, "error": e })),
+            };
+            write_json_response(&mut stream, status, &value.to_string());
+            return;
+        }
+        if matches!(
+            command.trim(),
+            "app_dsh_tool_policy_apply" | "app_dsh_tool_policy_set" | "app_dsh_inventory" | "app_dsh_workspace_grant" | "app_node_bootstrap_workspace" | "app_dsh_live" | "app_dsh_create" | "app_dsh_cancel" | "app_dsh_answer" | "app_dsh_permission_set" | "app_native_setup" | "app_native_events" | "app_native_cancel" | "app_native_permission" | "app_dsh_receipt"
                 | "app_dsh_page"
                 | "app_dsh_preview"
                 | "app_dsh_list"
@@ -4592,6 +4633,8 @@ pub fn spawn_node_server(config: BobNodeConfig) -> Result<RunningNodeServer, &'s
             }
         }
     });
+
+    orchestration::spawn_orchestration_watcher(ctx.clone(), config.data_dir.clone(), stop.clone());
 
 
     std::thread::spawn(move || {

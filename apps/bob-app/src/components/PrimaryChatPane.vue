@@ -281,6 +281,9 @@ function latestWorkerStepSummary(task) {
               @reject="jarvisHome.rejectAction"
               @open-takeover="jarvisHome.openTakeover"
               @save-routine="jarvisHome.saveRoutine"
+              @orch-accept="jarvisHome.acceptOrchestration"
+              @orch-continue="jarvisHome.continueOrchestration"
+              @orch-inspect="m => openAssistantTarget({ target_connection_id: m.connection_id, target_session_id: m.session_id, target_title: m.workspace || m.session_id })"
             />
           </div>
           <div v-if="assistantLink(message)" class="message-state" role="status">
@@ -330,7 +333,7 @@ function latestWorkerStepSummary(task) {
           <span class="message-state">{{ t('assistantReply') }}</span>
           <MessageContent :content="jarvisHome.streamingReplyText.value" :stream="true" />
         </article>
-        <div v-if="jarvisHome?.pendingApprovals?.value?.length" class="pending-approvals-stream">
+        <div v-if="jarvisHome?.pendingApprovals?.value?.length || jarvisHome?.reviewOrchestrationCards?.value?.length" class="pending-approvals-stream">
           <ActionCard
             v-for="card in jarvisHome.pendingApprovals.value"
             :key="card.id"
@@ -339,6 +342,14 @@ function latestWorkerStepSummary(task) {
             @reject="jarvisHome.rejectAction"
             @open-takeover="jarvisHome.openTakeover"
             @save-routine="jarvisHome.saveRoutine"
+          />
+          <ActionCard
+            v-for="card in jarvisHome.reviewOrchestrationCards.value"
+            :key="card.id"
+            :card="card"
+            @orch-accept="jarvisHome.acceptOrchestration"
+            @orch-continue="jarvisHome.continueOrchestration"
+            @orch-inspect="m => openAssistantTarget({ target_connection_id: m.connection_id, target_session_id: m.session_id, target_title: m.workspace || m.session_id })"
           />
         </div>
         <div v-if="dispatchPending || saving || activeExecution" class="live-status-container" role="status" aria-live="polite">
@@ -360,13 +371,62 @@ function latestWorkerStepSummary(task) {
       </section>
       <div v-if="awayFromLatest" class="chat-jump-row"><button type="button" class="chat-jump-latest" @click="jumpLatest" :aria-label="t('chatJumpLatest')" :title="t('chatJumpLatest')"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 4v16m-6-6 6 6 6-6"/></svg></button></div>
 
-      <!-- Background Worker Progress Bar & Collapsible Step Ledger (WP-E1.2) -->
+      <!-- Background Worker & Active Cross-Node Orchestration Banner (WP-E1.2 + BOB-D-018) -->
       <section
-        v-if="activeSessionWorkerTasks.length > 0"
+        v-if="activeSessionWorkerTasks.length > 0 || (jarvisHome?.activeOrchestrationRuns?.value?.length || 0) > 0"
         class="jarvis-worker-banner"
         role="region"
         :aria-label="t('workerBannerTitle')"
       >
+        <div
+          v-for="run in (jarvisHome?.activeOrchestrationRuns?.value || [])"
+          :key="run.run_id"
+          class="worker-task-card"
+        >
+          <div class="worker-task-header">
+            <div class="worker-task-lead">
+              <span class="worker-spinner-chip" aria-hidden="true">
+                <svg class="inline-svg-xs worker-spin-svg" viewBox="0 0 24 24">
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                </svg>
+              </span>
+              <div class="worker-task-meta">
+                <div class="worker-title-row">
+                  <strong class="worker-task-title">{{ run.title || t('orchBannerTitle') }}</strong>
+                  <span class="worker-model-pill">{{ run.connection_id }} · {{ run.harness }}</span>
+                  <span class="worker-step-count-pill">
+                    {{ t('orchRoundBadge', { current: run.current_round, max: run.max_auto_rounds }) }} · {{ run.stage }}
+                  </span>
+                </div>
+                <p class="worker-latest-summary">{{ run.goal }}</p>
+              </div>
+            </div>
+            <div class="worker-task-actions">
+              <button
+                v-if="run.session_id"
+                type="button"
+                class="worker-expand-btn"
+                :title="t('cardOrchInspect')"
+                :aria-label="t('cardOrchInspect')"
+                @click="openAssistantTarget({ target_connection_id: run.connection_id, target_session_id: run.session_id, target_title: run.title })"
+              >
+                <svg class="inline-svg-xs" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="worker-cancel-btn"
+                @click="jarvisHome.cancelOrchestration(run.run_id)"
+              >
+                <svg class="inline-svg-xs" viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="6" y="6" width="12" height="12" rx="2" />
+                </svg>
+                <span>{{ t('workerCancelBtn') }}</span>
+              </button>
+            </div>
+          </div>
+        </div>
         <div
           v-for="task in activeSessionWorkerTasks"
           :key="task.task_id"

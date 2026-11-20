@@ -159,6 +159,17 @@ export function useJarvisHome(ctx = {}) {
   const streamingSessionId = ref(null);
   const messageCards = ref({});
   const pendingApprovals = ref([]);
+  const orchestrationRuns = ref([]);
+  const activeOrchestrationRuns = computed(() =>
+    orchestrationRuns.value.filter(r =>
+      ['dispatched', 'running', 'auto_retrying'].includes(String(r?.status || '').toLowerCase()),
+    ),
+  );
+  const reviewOrchestrationCards = computed(() =>
+    orchestrationRuns.value
+      .filter(r => r?.review_card && ['awaiting_review', 'halted_no_progress', 'halted_max_rounds', 'failed'].includes(String(r?.status || '').toLowerCase()))
+      .map(r => r.review_card),
+  );
   const budgetState = ref(null);
   const activeTakeover = ref(null);
   const siteSessions = ref([]);
@@ -349,13 +360,16 @@ export function useJarvisHome(ctx = {}) {
 
   function cardsForMessage(message) {
     if (!message) return [];
+    const list = [];
     if (message.id && messageCards.value[message.id]?.length) {
-      return messageCards.value[message.id];
+      list.push(...messageCards.value[message.id]);
+    } else if (message.request_id && messageCards.value[message.request_id]?.length) {
+      list.push(...messageCards.value[message.request_id]);
     }
-    if (message.request_id && messageCards.value[message.request_id]?.length) {
-      return messageCards.value[message.request_id];
+    if (message.orchestration_card && !list.some(c => c.id === message.orchestration_card.id)) {
+      list.push(message.orchestration_card);
     }
-    return [];
+    return list;
   }
 
   function upsertApproval(card) {
@@ -537,6 +551,44 @@ export function useJarvisHome(ctx = {}) {
     try {
       await refreshProactivity();
     } catch {}
+    try {
+      await refreshOrchestrations();
+    } catch {}
+  }
+
+  async function refreshOrchestrations(conversationId = null) {
+    if (typeof ctx.kernelBridge?.orchestrationList !== 'function') return [];
+    try {
+      const res = await ctx.kernelBridge.orchestrationList(conversationId).catch(() => null);
+      if (res && Array.isArray(res.runs)) {
+        orchestrationRuns.value = [...res.runs];
+        return orchestrationRuns.value;
+      }
+    } catch {}
+    return [];
+  }
+
+  async function acceptOrchestration(runId) {
+    if (!runId || typeof ctx.kernelBridge?.orchestrationAccept !== 'function') return null;
+    const res = await ctx.kernelBridge.orchestrationAccept(runId).catch(() => null);
+    await refreshOrchestrations();
+    return res;
+  }
+
+  async function continueOrchestration(metaOrRunId, customPrompt = null) {
+    const runId = typeof metaOrRunId === 'string' ? metaOrRunId : metaOrRunId?.run_id;
+    if (!runId || typeof ctx.kernelBridge?.orchestrationContinue !== 'function') return null;
+    const prompt = customPrompt || (typeof metaOrRunId === 'object' ? metaOrRunId?.suggested_next_prompt : null);
+    const res = await ctx.kernelBridge.orchestrationContinue({ runId, prompt }).catch(() => null);
+    await refreshOrchestrations();
+    return res;
+  }
+
+  async function cancelOrchestration(runId) {
+    if (!runId || typeof ctx.kernelBridge?.orchestrationCancel !== 'function') return null;
+    const res = await ctx.kernelBridge.orchestrationCancel(runId).catch(() => null);
+    await refreshOrchestrations();
+    return res;
   }
 
   async function approveAction(cardId) {
@@ -549,6 +601,9 @@ export function useJarvisHome(ctx = {}) {
     }
     try {
       await ctx.loadPersonalOps?.();
+    } catch {}
+    try {
+      await refreshOrchestrations();
     } catch {}
   }
 
@@ -904,6 +959,13 @@ export function useJarvisHome(ctx = {}) {
     messageCards,
     pendingApprovals,
     pendingApprovalCount,
+    orchestrationRuns,
+    activeOrchestrationRuns,
+    reviewOrchestrationCards,
+    refreshOrchestrations,
+    acceptOrchestration,
+    continueOrchestration,
+    cancelOrchestration,
     budgetState,
     orbMood,
     cardsForMessage,

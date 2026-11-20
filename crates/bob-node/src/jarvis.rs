@@ -339,6 +339,7 @@ pub fn build_harness(
         Err(e) => return Err((format!("TOOL_BUS_FAILED: {e}"), app)),
     };
     crate::browser_ws::register_browser_tools(&mut tool_bus, data_dir);
+    crate::orchestration::register_orchestration_tools(&mut tool_bus, data_dir);
 
     Ok(BobNativeHarness::new(
         profile,
@@ -400,6 +401,7 @@ pub fn build_clerk_harness(
         Err(e) => return Err((format!("TOOL_BUS_FAILED: {e}"), app)),
     };
     crate::browser_ws::register_browser_tools(&mut tool_bus, data_dir);
+    crate::orchestration::register_orchestration_tools(&mut tool_bus, data_dir);
     Ok(BobNativeHarness::new_clerk(
         clerk_profile,
         clerk_key,
@@ -427,6 +429,7 @@ pub fn build_worker_harness(
         Err(e) => return Err((format!("TOOL_BUS_FAILED: {e}"), app)),
     };
     crate::browser_ws::register_browser_tools(&mut tool_bus, data_dir);
+    crate::orchestration::register_orchestration_tools(&mut tool_bus, data_dir);
     Ok(BobNativeHarness::new_worker(
         maker_profile,
         maker_key,
@@ -533,6 +536,7 @@ pub fn build_shared_standard_harness(
     let mut tool_bus =
         BobToolBus::with_approval_store(data_dir).map_err(|e| format!("TOOL_BUS_FAILED: {e}"))?;
     crate::browser_ws::register_browser_tools(&mut tool_bus, data_dir);
+    crate::orchestration::register_orchestration_tools(&mut tool_bus, data_dir);
 
     let (placeholder_app, dummy_dir) = open_placeholder_app().map_err(str::to_owned)?;
     let harness = BobNativeHarness::new(profile, api_key, budget_store, tool_bus, placeholder_app)
@@ -1671,6 +1675,7 @@ pub fn approve(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
             let mut guard = state.lock().map_err(|_| "NODE_LOCK_POISONED")?;
             let mut bus = BobToolBus::with_approval_store(&data_dir).unwrap_or_else(|_| BobToolBus::new());
             crate::browser_ws::register_browser_tools(&mut bus, &data_dir);
+    crate::orchestration::register_orchestration_tools(&mut bus, &data_dir);
             let mut draft_store = bob_runtime::routines::UnattendedDraftStore::open(&data_dir)
                 .map_err(|_| "DRAFT_STORE_OPEN_FAILED")?;
             let output = draft_store
@@ -1687,6 +1692,7 @@ pub fn approve(state: &Arc<Mutex<NodeContext>>, args: &Value) -> Result<Value, &
         let mut guard = state.lock().map_err(|_| "NODE_LOCK_POISONED")?;
         let mut bus = BobToolBus::with_approval_store(&data_dir).unwrap_or_else(|_| BobToolBus::new());
         crate::browser_ws::register_browser_tools(&mut bus, &data_dir);
+    crate::orchestration::register_orchestration_tools(&mut bus, &data_dir);
         let mut store = PendingApprovalStore::open(&data_dir).map_err(|_| "APPROVALS_OPEN_FAILED")?;
         store
             .approve_once(approval_id, &bus, &mut guard.app)
@@ -1803,6 +1809,7 @@ pub fn approve_with_ctx(ctx: &mut NodeContext, args: &Value) -> Result<Value, &'
         if approval_id.starts_with("draft-") {
             let mut bus = BobToolBus::with_approval_store(&data_dir).unwrap_or_else(|_| BobToolBus::new());
             crate::browser_ws::register_browser_tools(&mut bus, &data_dir);
+    crate::orchestration::register_orchestration_tools(&mut bus, &data_dir);
             let mut draft_store = bob_runtime::routines::UnattendedDraftStore::open(&data_dir)
                 .map_err(|_| "DRAFT_STORE_OPEN_FAILED")?;
             let output = draft_store
@@ -1818,6 +1825,7 @@ pub fn approve_with_ctx(ctx: &mut NodeContext, args: &Value) -> Result<Value, &'
         }
         let mut bus = BobToolBus::with_approval_store(&data_dir).unwrap_or_else(|_| BobToolBus::new());
         crate::browser_ws::register_browser_tools(&mut bus, &data_dir);
+    crate::orchestration::register_orchestration_tools(&mut bus, &data_dir);
         let mut store = PendingApprovalStore::open(&data_dir).map_err(|_| "APPROVALS_OPEN_FAILED")?;
         store
             .approve_once(approval_id, &bus, &mut ctx.app)
@@ -1914,6 +1922,7 @@ pub fn approve_direct(data_dir: &Path, args: &Value) -> Result<Value, &'static s
             let mut app = LocalApp::open(&db_path).map_err(|_| "KERNEL_OPEN_FAILED")?;
             let mut bus = BobToolBus::with_approval_store(data_dir).unwrap_or_else(|_| BobToolBus::new());
             crate::browser_ws::register_browser_tools(&mut bus, data_dir);
+    crate::orchestration::register_orchestration_tools(&mut bus, data_dir);
             let mut draft_store = bob_runtime::routines::UnattendedDraftStore::open(data_dir)
                 .map_err(|_| "DRAFT_STORE_OPEN_FAILED")?;
             let output = draft_store
@@ -1931,6 +1940,7 @@ pub fn approve_direct(data_dir: &Path, args: &Value) -> Result<Value, &'static s
         let mut app = LocalApp::open(&db_path).map_err(|_| "KERNEL_OPEN_FAILED")?;
         let mut bus = BobToolBus::with_approval_store(data_dir).unwrap_or_else(|_| BobToolBus::new());
         crate::browser_ws::register_browser_tools(&mut bus, data_dir);
+    crate::orchestration::register_orchestration_tools(&mut bus, data_dir);
         let mut store =
             PendingApprovalStore::open(data_dir).map_err(|_| "APPROVALS_OPEN_FAILED")?;
         store

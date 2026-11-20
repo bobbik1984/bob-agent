@@ -29,6 +29,7 @@ pub mod native_harness;
 pub mod assistant_context;
 pub mod net_guard;
 pub mod node_pairing;
+pub mod orchestrator;
 pub mod project_context;
 pub mod project_registry;
 pub mod routines;

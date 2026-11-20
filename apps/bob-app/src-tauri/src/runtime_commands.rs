@@ -703,6 +703,96 @@ pub async fn app_jarvis_reject<R: Runtime>(
 }
 
 #[tauri::command]
+pub async fn app_orchestration_list<R: Runtime>(
+    host: AppHandle<R>,
+    conversation_id: Option<String>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_orchestration_list",
+            json!({ "conversationId": conversation_id }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_orchestration_accept<R: Runtime>(
+    host: AppHandle<R>,
+    run_id: String,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(&host, "app_orchestration_accept", json!({ "runId": run_id }))
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_orchestration_continue<R: Runtime>(
+    host: AppHandle<R>,
+    run_id: String,
+    prompt: Option<String>,
+    extra_rounds: Option<u64>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_orchestration_continue",
+            json!({
+                "runId": run_id,
+                "prompt": prompt,
+                "extra_rounds": extra_rounds.unwrap_or(1),
+            }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_orchestration_cancel<R: Runtime>(
+    host: AppHandle<R>,
+    run_id: String,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(&host, "app_orchestration_cancel", json!({ "runId": run_id }))
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
+pub async fn app_node_bootstrap_workspace<R: Runtime>(
+    host: AppHandle<R>,
+    connection_id: Option<String>,
+    slug: String,
+    git_url: Option<String>,
+    branch: Option<String>,
+    parent_dir: Option<String>,
+    title: Option<String>,
+) -> Result<Value, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        execute_rpc(
+            &host,
+            "app_node_bootstrap_workspace",
+            json!({
+                "connectionId": connection_id.unwrap_or_else(|| "local".to_string()),
+                "slug": slug,
+                "gitUrl": git_url,
+                "branch": branch,
+                "parentDir": parent_dir,
+                "title": title,
+            }),
+        )
+    })
+    .await
+    .map_err(|_| "RUNTIME_RPC_FAILED")?
+}
+
+#[tauri::command]
 pub async fn app_jarvis_budget_get<R: Runtime>(host: AppHandle<R>) -> Result<Value, &'static str> {
     tauri::async_runtime::spawn_blocking(move || {
         execute_rpc(&host, "app_jarvis_budget_get", json!({}))

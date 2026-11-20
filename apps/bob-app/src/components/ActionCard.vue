@@ -13,13 +13,33 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(['approve', 'reject', 'open-takeover', 'save-routine']);
+const emit = defineEmits([
+  'approve',
+  'reject',
+  'open-takeover',
+  'save-routine',
+  'orch-accept',
+  'orch-continue',
+  'orch-inspect',
+]);
 
 const { t } = useI18n();
 
 const kind = computed(() => props.card?.kind || 'info');
 const status = computed(() => props.card?.status || 'pending');
 const isPending = computed(() => !props.card?.status || props.card?.status === 'pending');
+
+const orchestrationMeta = computed(() => {
+  if (kind.value !== 'orchestration_review') return null;
+  const raw = props.card?.technicalDetail ?? props.card?.technical_detail;
+  if (!raw) return null;
+  if (typeof raw === 'object') return raw;
+  try {
+    return JSON.parse(String(raw));
+  } catch {
+    return null;
+  }
+});
 
 const resolvedIcon = computed(() => {
   if (props.card?.icon) {
@@ -305,6 +325,36 @@ const statusBadgeLabel = computed(() => {
         @click="emit('save-routine', card.id)"
       >
         {{ t('cardSaveAsRoutine') }}
+      </button>
+    </footer>
+
+    <footer v-else-if="kind === 'orchestration_review' && orchestrationMeta" class="card-actions">
+      <button
+        v-if="orchestrationMeta.session_id"
+        type="button"
+        class="btn btn-secondary"
+        :disabled="busy"
+        @click="emit('orch-inspect', orchestrationMeta)"
+      >
+        {{ t('cardOrchInspect') }}
+      </button>
+      <button
+        v-if="isPending && orchestrationMeta.can_continue"
+        type="button"
+        class="btn btn-secondary"
+        :disabled="busy"
+        @click="emit('orch-continue', orchestrationMeta)"
+      >
+        {{ t('cardOrchContinue') }}
+      </button>
+      <button
+        v-if="isPending && orchestrationMeta.can_accept !== false"
+        type="button"
+        class="btn btn-primary"
+        :disabled="busy"
+        @click="emit('orch-accept', orchestrationMeta.run_id)"
+      >
+        {{ t('cardOrchAccept') }}
       </button>
     </footer>
   </article>

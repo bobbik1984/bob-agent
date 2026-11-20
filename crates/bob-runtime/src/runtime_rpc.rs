@@ -81,6 +81,11 @@ pub fn is_runtime_rpc_command(command: &str) -> bool {
             | "app_host_queue_list"
             | "app_host_queue_enqueue"
             | "app_host_queue_reconcile"
+            | "app_orchestration_list"
+            | "app_orchestration_accept"
+            | "app_orchestration_continue"
+            | "app_orchestration_cancel"
+            | "app_node_bootstrap_workspace"
     )
 }
 
@@ -501,6 +506,68 @@ pub fn dispatch_runtime_rpc(
             let mut bus = crate::tool_bus::BobToolBus::with_approval_store(data_dir)?;
             let (tool_name, tool_args) = bus.reject(approval_id)?;
             Ok(json!({ "rejected": true, "tool_name": tool_name, "args": tool_args }))
+        }
+        "app_orchestration_list" => {
+            let store = crate::orchestrator::OrchestrationStore::open(data_dir)?;
+            let conv_id = args
+                .get("conversationId")
+                .or_else(|| args.get("conversation_id"))
+                .and_then(Value::as_str)
+                .filter(|s| !s.trim().is_empty());
+            let now = crate::now_millis();
+            let runs = store.list_runs(conv_id);
+            let active_count = runs.iter().filter(|r| r.status.is_active()).count();
+            let review_count = runs.iter().filter(|r| r.status.is_reviewable()).count();
+            let enriched: Vec<Value> = runs
+                .iter()
+                .map(|r| {
+                    let mut v = serde_json::to_value(r).unwrap_or_else(|_| json!({}));
+                    if r.status.is_reviewable() {
+                        v["review_card"] =
+                            serde_json::to_value(crate::orchestrator::build_review_card(r, now))
+                                .unwrap_or(Value::Null);
+                    }
+                    v
+                })
+                .collect();
+            Ok(json!({
+                "runs": enriched,
+                "active_count": active_count,
+                "review_count": review_count,
+            }))
+        }
+        "app_orchestration_accept" => {
+            let run_id = args
+                .get("runId")
+                .or_else(|| args.get("run_id"))
+                .and_then(Value::as_str)
+                .ok_or("ORCHESTRATION_RUN_ID_REQUIRED")?;
+            let mut store = crate::orchestrator::OrchestrationStore::open(data_dir)?;
+            let mut run = store.get_run(run_id).ok_or("ORCHESTRATION_RUN_NOT_FOUND")?;
+            run.status = crate::orchestrator::OrchestrationStatus::Completed;
+            run.dod_satisfied = true;
+            run.active_request_id = None;
+            run.updated_at = crate::now_millis();
+            let saved = store.upsert_run(run)?;
+            Ok(json!({ "ok": true, "run": saved }))
+        }
+        "app_orchestration_cancel" => {
+            let run_id = args
+                .get("runId")
+                .or_else(|| args.get("run_id"))
+                .and_then(Value::as_str)
+                .ok_or("ORCHESTRATION_RUN_ID_REQUIRED")?;
+            let mut store = crate::orchestrator::OrchestrationStore::open(data_dir)?;
+            let mut run = store.get_run(run_id).ok_or("ORCHESTRATION_RUN_NOT_FOUND")?;
+            run.status = crate::orchestrator::OrchestrationStatus::Cancelled;
+            run.active_request_id = None;
+            run.updated_at = crate::now_millis();
+            let saved = store.upsert_run(run)?;
+            Ok(json!({ "ok": true, "run": saved }))
+        }
+        "app_orchestration_continue" => Err("ORCHESTRATION_HOST_NODE_REQUIRED"),
+        "app_node_bootstrap_workspace" => {
+            crate::orchestrator::bootstrap_workspace_local(data_dir, args)
         }
         "app_jarvis_budget_get" => {
             let mut store = crate::budget::MonthlyBudgetStore::open(data_dir)?;

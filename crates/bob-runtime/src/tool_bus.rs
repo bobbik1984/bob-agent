@@ -638,23 +638,73 @@ impl BobToolBus {
             },
         );
 
-        // 8. dispatch_to_node_session
+        // 8. dispatch_to_node_session / node_bootstrap_workspace / orchestration_status
         self.specs.insert(
             "dispatch_to_node_session".to_string(),
             ToolSpec {
                 name: "dispatch_to_node_session".to_string(),
-                description: "Dispatches a subtask prompt to an external node session. Side effect: requires user approval before execution."
+                description: "Dispatches a subtask prompt to an existing or newly created remote node coding session (Codex/AGY/Claude/DSH) tracked by the Orchestration Watcher with DoD and L1/L2 stage-gate controls. Side effect: requires user approval before execution."
                     .to_string(),
                 input_schema: json!({
                     "type": "object",
                     "properties": {
-                        "connection_id": { "type": "string", "description": "Target connection or cluster node ID" },
-                        "session_id": { "type": "string", "description": "Target session ID" },
-                        "prompt": { "type": "string", "description": "Prompt instructions to execute on remote node" }
+                        "connection_id": { "type": "string", "description": "Target connection or cluster node ID (from platform_overview, or 'local')" },
+                        "session_id": { "type": "string", "description": "Existing session ID to continue. Omit or leave empty to start a brand-new session in `workspace` with `harness`." },
+                        "harness": { "type": "string", "enum": ["codex", "agy", "claude", "dsh"], "description": "Target coding harness when creating a new session (default: codex)" },
+                        "workspace": { "type": "string", "description": "Exact authorized absolute workspace directory on the target node (call node_bootstrap_workspace first for brand-new projects)" },
+                        "prompt": { "type": "string", "description": "Prompt instructions to execute on remote node" },
+                        "title": { "type": "string", "description": "Short task title for orchestration tracking" },
+                        "goal": { "type": "string", "description": "Concise task goal" },
+                        "dod": { "type": "array", "items": { "type": "string" }, "description": "Objective Definition of Done checks (e.g. 'cargo test passes', 'node --test passes')" },
+                        "stage": { "type": "string", "enum": ["plan", "execute", "verify", "release"], "description": "Workflow stage gate (plan/release always pause for user review)" },
+                        "autonomy_mode": { "type": "string", "enum": ["L1", "L2", "L3"], "description": "L1 (default): pause after 1 round with Review Card; L2: bounded auto-retry up to max_auto_rounds on objective errors with no-progress breaker" },
+                        "max_auto_rounds": { "type": "integer", "description": "Max autonomous rounds for L2/L3 (default 3, hard cap 6)" },
+                        "project_id": { "type": "string", "description": "Optional associated project ID" },
+                        "conversation_id": { "type": "string", "description": "Main conversation ID where the Review Card should be posted" }
                     },
-                    "required": ["connection_id", "session_id", "prompt"]
+                    "required": ["connection_id", "prompt"]
                 }),
                 risk_level: ActionRiskLevel::SideEffect,
+            },
+        );
+
+        self.specs.insert(
+            "node_bootstrap_workspace".to_string(),
+            ToolSpec {
+                name: "node_bootstrap_workspace".to_string(),
+                description: "Deterministically creates or git-clones a project directory on a target node and registers it as an authorized writable workspace BEFORE starting any coding agent session. Side effect: requires user approval."
+                    .to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "connection_id": { "type": "string", "description": "Target node ID (or 'local')" },
+                        "slug": { "type": "string", "description": "Safe directory slug (e.g. 'bob-agent-next')" },
+                        "git_url": { "type": "string", "description": "Optional https:// or git@ repository URL to clone" },
+                        "branch": { "type": "string", "description": "Optional branch to checkout on clone" },
+                        "parent_dir": { "type": "string", "description": "Optional parent directory under the node's home (defaults to ~/code or ~/work)" },
+                        "title": { "type": "string", "description": "Optional project title for initial README.md when creating a fresh repo" },
+                        "init_readme": { "type": "boolean", "description": "Create initial README.md if empty fresh project (default true)" }
+                    },
+                    "required": ["connection_id", "slug"]
+                }),
+                risk_level: ActionRiskLevel::SideEffect,
+            },
+        );
+
+        self.specs.insert(
+            "orchestration_status".to_string(),
+            ToolSpec {
+                name: "orchestration_status".to_string(),
+                description: "Lists active and recent cross-node orchestration runs, including node, harness, stage, round count, DoD status, and review state."
+                    .to_string(),
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "conversation_id": { "type": "string", "description": "Optional conversation ID filter" },
+                        "active_only": { "type": "boolean", "description": "Return only currently active runs (default false)" }
+                    }
+                }),
+                risk_level: ActionRiskLevel::ReadOnly,
             },
         );
 
@@ -1599,6 +1649,41 @@ impl BobToolBus {
                     card: None,
                 })
             }
+            "node_bootstrap_workspace" => {
+                let dir = self.data_dir.as_deref().unwrap_or_else(|| Path::new("."));
+                let conn_id = args
+                    .get("connection_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("local");
+                if conn_id != "local" {
+                    return Err("NODE_BOOTSTRAP_REMOTE_BRIDGE_REQUIRED".to_string());
+                }
+                let out = crate::orchestrator::bootstrap_workspace_local(dir, args)
+                    .map_err(|e| format!("NODE_BOOTSTRAP_FAILED: {e}"))?;
+                Ok(ToolBusOutcome::Executed {
+                    output: out,
+                    card: None,
+                })
+            }
+            "orchestration_status" => {
+                let dir = self.data_dir.as_deref().unwrap_or_else(|| Path::new("."));
+                let store = crate::orchestrator::OrchestrationStore::open(dir)
+                    .map_err(|e| format!("ORCHESTRATION_STORE_ERROR: {e}"))?;
+                let active_only = args
+                    .get("active_only")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let conv_id = args.get("conversation_id").and_then(Value::as_str);
+                let runs = if active_only {
+                    store.list_active_runs()
+                } else {
+                    store.list_runs(conv_id)
+                };
+                Ok(ToolBusOutcome::Executed {
+                    output: json!({ "runs": runs }),
+                    card: None,
+                })
+            }
             "feature_create" => {
                 let dir = self.data_dir.as_deref().unwrap_or_else(|| Path::new("."));
                 let name = args
@@ -2128,6 +2213,7 @@ impl BobToolBus {
         let title = match spec.name.as_str() {
             "schedule_delete" => "Confirm Schedule Deletion".to_string(),
             "dispatch_to_node_session" => "Confirm Remote Node Task Dispatch".to_string(),
+            "node_bootstrap_workspace" => "Confirm Project Workspace Bootstrap".to_string(),
             "mcp_add" => "Confirm External Remote MCP Server Addition".to_string(),
             "soul_update" => "Confirm SOUL Persona Evolution".to_string(),
             "host_write_file" => "Confirm Host File Write".to_string(),
@@ -2147,11 +2233,30 @@ impl BobToolBus {
                 let sess = args
                     .get("session_id")
                     .and_then(Value::as_str)
-                    .unwrap_or("");
-                format!(
-                    "Requesting authorization to dispatch prompt to node '{}' (session '{}')",
-                    conn, sess
-                )
+                    .filter(|s| !s.trim().is_empty());
+                let harness = args.get("harness").and_then(Value::as_str).unwrap_or("codex");
+                let mode = args.get("autonomy_mode").and_then(Value::as_str).unwrap_or("L1");
+                if let Some(s) = sess {
+                    format!(
+                        "Requesting authorization to dispatch prompt to node '{}' (session '{}', mode {})",
+                        conn, s, mode
+                    )
+                } else {
+                    let ws = args.get("workspace").and_then(Value::as_str).unwrap_or("");
+                    format!(
+                        "Requesting authorization to start new {} session on node '{}' in '{}' (mode {})",
+                        harness, conn, ws, mode
+                    )
+                }
+            }
+            "node_bootstrap_workspace" => {
+                let conn = args.get("connection_id").and_then(Value::as_str).unwrap_or("local");
+                let slug = args.get("slug").and_then(Value::as_str).unwrap_or("");
+                if let Some(url) = args.get("git_url").and_then(Value::as_str).filter(|s| !s.trim().is_empty()) {
+                    format!("Requesting authorization to clone '{}' into '{}' on node '{}' and authorize workspace", url, slug, conn)
+                } else {
+                    format!("Requesting authorization to create and authorize workspace '{}' on node '{}'", slug, conn)
+                }
             }
             "mcp_add" => {
                 let name = args.get("name").and_then(Value::as_str).unwrap_or("unknown");
@@ -2343,6 +2448,7 @@ impl BobToolBus {
                 | "feature_list"
                 | "skill_list"
                 | "routine_list"
+                | "orchestration_status"
         ) || name.starts_with("schedule_")
             || name.starts_with("note_")
             || name.starts_with("inbox_")

@@ -1330,5 +1330,10 @@
   "approvalNotifyTestBtn": "发送测试通知",
   "approvalNotifyTestSent": "已触发测试通知，请查看系统通知栏",
   "approvalNotifyPushTitle": "Bob · 等待你确认",
-  "approvalNotifyPushBody": "{title}（点击直达处理）"
+  "approvalNotifyPushBody": "{title}（点击直达处理）",
+  "cardOrchAccept": "验收结案",
+  "cardOrchContinue": "按建议追派一轮",
+  "cardOrchInspect": "查看底层会话",
+  "orchBannerTitle": "跨节点调度执行中",
+  "orchRoundBadge": "第 {current}/{max} 轮"
 }

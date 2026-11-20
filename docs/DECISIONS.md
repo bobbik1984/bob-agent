@@ -293,3 +293,23 @@
      - `bob-online` 主对话、`grok_bot`、`meta_muse` 作为**无状态轮值参谋长（Planner / Chief Seats）**平权接入同一契约：`bob_briefing`（读取获准项目态势、开源待办、跨席位最近指令与回执）→ `bob_order_submit`（提交带幂等 `request_id` 与目标约束的标准指令单）→ **`bob-online` 唯一主权账本与手机审批门禁（`pending_approval` → `ApprovalRequest`）** → 执行完成后写入 `ChiefOrderReceipt` → 任一参谋长通过 `bob_orders` 回收成果。
   3. **零锁定退订保证（Zero-Lock-In Unsubscribe）**：外部参谋长不持有项目记忆库或节点执行权，所有状态、决策与回执均沉淀在 `bob-online`（`chief_orders.json` / `kernel.sqlite`）与 Git 仓库 `docs/`。在 `bot-grants.json` 将某一席位标记为 `revoked: true` 即刻吊销其访问并下线，保留该席位历史订单与成果记录供其余席位无缝接力，对主系统零损耗。
 - **实施路由**：安全与权限边界入 `docs/ARCHITECTURE.md`，`WP-C1` 交付回执入 `docs/CURRENT_STAGE.md` 与 `progress.yaml`。
+
+---
+
+## BOB-D-018 — 单一主 Agent 对话窗统筹调度架构：确定性建项、真实跨节点派发、L1 自动审阅与 L2 进度熔断闭环
+
+- 日期：2026-11-20；状态：**accepted（已合入主干并完成后端/前端核心闭环实现）**。来源：用户确立最终产品形态——网页端与手机端统一以 `bob-online` 主 Agent 为唯一日常工作入口，底层多节点项目会话退居可下钻执行层，避免手动进入单一项目会话反复编写指令，同时杜绝多 Agent 自主调度失控烧光订阅额度。
+- **背景**：
+  1. **新建项目目录时序悖论**：在父目录启动 Coding CLI（Codex / AGY / Claude）再由模型新建子目录，会导致 `cwd` 沙箱放大、无法加载子目录 `AGENTS.md`/`.git`、会话归档错位与长对话路径漂移。
+  2. **跨节点派发与回调断链**：`BobToolBus` 原 `dispatch_to_node_session` 为占位实现，且子节点完成后无法自动唤醒主 Agent 评审并向手机推送下一步建议。
+  3. **纯预算百分比上限的局限**：固定消耗百分比会导致小任务过度空转、大任务中途腰斩，必须以**阶段门（Stage Gates）+ 完成定义（DoD）+ 跨轮无进展熔断**作为停止控制条件。
+- **决定**：
+  1. **确定性建项原语（`node_bootstrap_workspace` / `app_node_bootstrap_workspace`）**：
+     - 建目录 / `git clone` → 最小骨架初始化 → 写入节点 `WorkspaceGrantStore` 授权，全部由确定性 Rust 原语执行（严格校验 `slug` 与 `git_url`，禁止路径逃逸与系统目录写入，受 `SideEffect` 审批门禁保护）；完成后再以精确 `workspace` 作为 `cwd` 启动节点 Coding 会话。
+  2. **真实跨节点派发与持久化调度账本（`bob-runtime::orchestrator` + `bob-node::orchestration`）**：
+     - 将 `dispatch_to_node_session` 接入 `route_paired_node_rpc`，支持续聊已有会话或自动调用远端 `app_native_setup` / `app_dsh_create` 新建会话，并在 `orchestration_runs.json` 持久化 `stage`（`plan / execute / verify / release`）、`dod`、`autonomy_mode`（`L1 / L2 / L3`）、`max_auto_rounds`（L2 默认 3、硬上限 6）与每轮 `failure_signature`。
+     - 向 Clerk 与 Worker 同步暴露只读 `orchestration_status` 与调度协议契约。
+  3. **后台完成监听、L1 自动审阅卡片与 L2 有界进度熔断（Progress-Gated Autonomy）**：
+     - `spawn_orchestration_watcher` 轻量追踪在途远端回执（空闲零开销）；远端 turn 结束后自动拉取摘要并提取归一化错误签名 `extract_failure_signature`，执行受月度预算约束的低成本只读主 Agent 评审（支持离线确定性回退）。
+     - **停止控制律（`evaluate_round_outcome`）**：取消即停；DoD 满足即硬停（禁止无意义主观润色）；`plan`/`release` 阶段门与主观决策强制停下交给人；`L1` 默认每轮产出 `orchestration_review` 卡片（`[验收结案]` / `[按建议追派一轮]` / `[查看底层会话]`）并触发 Web Push；`L2` 在客观失败、错误签名变化且未超轮次上限时自动纠错，连续 2 轮相同错误签名触发 `HaltedNoProgress` 熔断、达上限触发 `HaltedMaxRounds` 交回人工审批。
+- **实施路由**：核心状态机与建项原语在 `crates/bob-runtime/src/orchestrator.rs`，跨节点执行/监听/RPC 在 `crates/bob-node/src/orchestration.rs`，前端单一窗口审阅卡与在途条在 `ActionCard.vue` / `PrimaryChatPane.vue` / `useJarvisHome.mjs` / `kernel-bridge.mjs`。

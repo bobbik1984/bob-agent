@@ -389,6 +389,32 @@ export function createKernelBridge(invoke, isAvailable) {
     jarvisReject: approvalId => call('app_jarvis_reject', { approvalId }),
     jarvisBudgetGet: () => call('app_jarvis_budget_get', {}),
     jarvisBudgetSet: monthlyCapUsd => call('app_jarvis_budget_set', { monthlyCapUsd }),
+    orchestrationList: (conversationId = null) =>
+      call('app_orchestration_list', { conversationId }),
+    orchestrationAccept: runId => call('app_orchestration_accept', { runId }),
+    orchestrationContinue: ({ runId, prompt = null, extraRounds = 1 }) =>
+      call('app_orchestration_continue', {
+        runId,
+        prompt: prompt ?? null,
+        extra_rounds: extraRounds,
+      }),
+    orchestrationCancel: runId => call('app_orchestration_cancel', { runId }),
+    nodeBootstrapWorkspace: ({
+      connectionId = 'local',
+      slug,
+      gitUrl = null,
+      branch = null,
+      parentDir = null,
+      title = null,
+    }) =>
+      call('app_node_bootstrap_workspace', {
+        connectionId,
+        slug,
+        gitUrl: gitUrl ?? null,
+        branch: branch ?? null,
+        parentDir: parentDir ?? null,
+        title: title ?? null,
+      }),
     featuresList: () => call('app_features_list', {}),
     featureKeep: name => call('app_feature_keep', { name }),
     featureRollback: (name, targetVersion = null) =>

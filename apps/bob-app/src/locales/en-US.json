@@ -1330,5 +1330,10 @@
   "approvalNotifyTestBtn": "Send Test Notification",
   "approvalNotifyTestSent": "Test notification triggered",
   "approvalNotifyPushTitle": "Bob · Action Awaiting Approval",
-  "approvalNotifyPushBody": "{title} (Tap to review)"
+  "approvalNotifyPushBody": "{title} (Tap to review)",
+  "cardOrchAccept": "Accept & Close",
+  "cardOrchContinue": "Dispatch Next Round",
+  "cardOrchInspect": "Inspect Node Session",
+  "orchBannerTitle": "Cross-Node Orchestration Active",
+  "orchRoundBadge": "Round {current}/{max}"
 }
