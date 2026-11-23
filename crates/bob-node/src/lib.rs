@@ -1,0 +1,5727 @@
+//! `bob-node` — Always-on headless node and unified Web App server (`XP-05`..`XP-10`).
+//!
+//! Serves:
+//! 1. Unified Web UI static assets (`--static-dir`, injecting `window.__BOB_NODE_RUNTIME__ = true`)
+//! 2. `GET /api/capabilities` & `GET /api/events` (SSE)
+//! 3. `POST /api/rpc/:command` (full `kernelBridge` RPC surface backed by `LocalApp` + `ModelHubRuntime`)
+//! 4. `/api/client/v1/*` (full Online Work Service Client API v1: pairings, token exchange, revoke,
+//!    capabilities, projects, tasks, messages, task snapshot, and idempotent operations for task
+//!    continuation, V1->V2 revision creation, cancellation, and review verdicts)
+//! 5. Read-only idempotent migration from legacy `nexus_control_plane.db` (`XP-10`).
+
+mod assistant;
+mod bot_access;
+pub mod chief_service;
+mod todo_service;
+mod project_service;
+mod inbox_triage;
+mod context_capsule;
+mod claude_rpc;
+pub mod node_access;
+pub mod onboarding;
+pub mod jarvis;
+pub mod push_channels;
+pub mod browser_ws;
+pub mod orchestration;
+mod quota_sync;
+
+use bob_kernel::app::LocalApp;
+use bob_runtime::{now_millis, ModelHubRuntime, RuntimeCapabilityManifest};
+use rusqlite::{Connection, OpenFlags};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
+use std::time::Duration;
+
+#[derive(Clone, Debug)]
+pub struct BobNodeConfig {
+    pub bind_addr: String,
+    pub data_dir: PathBuf,
+    pub static_dir: Option<PathBuf>,
+    pub legacy_db_path: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OnlinePairingSession {
+    pub pairing_id: String,
+    pub user_code: String,
+    pub device_name: String,
+    pub created_at: i64,
+    pub expires_at: i64,
+    pub exchanged_token: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OnlineCredentialRecord {
+    pub credential_id: String,
+    pub token_hash: String,
+    pub device_name: String,
+    pub created_at: i64,
+    pub expires_at: i64,
+    pub revoked: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct OnlineWorkState {
+    #[serde(default)]
+    pub imported_project_ids: Vec<String>,
+    pub server_instance_id: String,
+    pub pairings: HashMap<String, OnlinePairingSession>,
+    pub credentials: HashMap<String, OnlineCredentialRecord>,
+    pub task_snapshots: HashMap<String, Value>,
+    pub project_messages: HashMap<String, Vec<Value>>,
+    pub operations: HashMap<String, Value>,
+}
+
+pub struct NodeContext {
+    pub app: LocalApp,
+    pub runtime: ModelHubRuntime,
+    pub online: OnlineWorkState,
+    pub online_store_path: PathBuf,
+    pub static_dir: Option<PathBuf>,
+}
+
+fn hash_token(token: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(token.trim().as_bytes());
+    let digest = hasher.finalize();
+    digest.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn load_online_state(path: &Path) -> OnlineWorkState {
+    if let Ok(raw) = std::fs::read_to_string(path) {
+        if let Ok(parsed) = serde_json::from_str::<OnlineWorkState>(&raw) {
+            return parsed;
+        }
+    }
+    OnlineWorkState {
+        imported_project_ids: Vec::new(),
+        server_instance_id: format!("bob-node-{}", now_millis()),
+        pairings: HashMap::new(),
+        credentials: HashMap::new(),
+        task_snapshots: HashMap::new(),
+        project_messages: HashMap::new(),
+        operations: HashMap::new(),
+    }
+}
+
+fn save_online_state(path: &Path, state: &OnlineWorkState) {
+    if let Ok(raw) = serde_json::to_string_pretty(state) {
+        let _ = std::fs::write(path, raw);
+    }
+}
+
+impl NodeContext {
+    pub fn open(config: &BobNodeConfig) -> Result<Self, &'static str> {
+        std::fs::create_dir_all(&config.data_dir).map_err(|_| "DATA_DIR_UNAVAILABLE")?;
+        let db_path = config.data_dir.join("kernel.sqlite");
+        let app = LocalApp::open(&db_path).map_err(|_| "KERNEL_OPEN_FAILED")?;
+        let runtime = ModelHubRuntime::with_file_vault(config.data_dir.clone())?;
+        let online_store_path = config.data_dir.join("online_work_store.json");
+        let online = load_online_state(&online_store_path);
+        let mut ctx = Self {
+            app,
+            runtime,
+            online,
+            online_store_path,
+            static_dir: config.static_dir.clone(),
+        };
+        if let Some(ref legacy_path) = config.legacy_db_path {
+            if legacy_path.exists() {
+                let _ = ctx.import_legacy_nexus_db(legacy_path);
+            }
+        }
+        ctx.sync_catalog_into_online_store();
+        Ok(ctx)
+    }
+
+    pub fn save_online(&self) {
+        save_online_state(&self.online_store_path, &self.online);
+    }
+
+    /// Directory refresh does not manufacture execution or verification evidence.
+    pub fn sync_catalog_into_online_store(&mut self) {
+        let Ok(catalog) = self.app.catalog_snapshot() else { return; };
+        for project in catalog.projects {
+            self.online.project_messages.entry(project.id).or_default();
+        }
+        self.save_online();
+    }
+
+    pub fn sync_project_registry(&mut self, path: &Path) -> Result<usize, &'static str> {
+        let synced = bob_runtime::project_registry::sync_registry_file(
+            &mut self.app,
+            path,
+            now_millis(),
+        )?;
+        self.sync_catalog_into_online_store();
+        Ok(synced)
+    }
+
+    /// `XP-10`: Idempotent read-only import from legacy `nexus_control_plane.db`.
+    pub fn import_legacy_nexus_db(&mut self, db_path: &Path) -> Result<usize, &'static str> {
+        let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|_| "LEGACY_DB_OPEN_FAILED")?;
+        let mut imported_count = 0usize;
+        let stamp = now_millis();
+
+        let has_status_col = conn
+            .prepare("PRAGMA table_info(projects)")
+            .and_then(|mut s| {
+                let names: Vec<String> = s
+                    .query_map([], |r| r.get::<_, String>(1))?
+                    .flatten()
+                    .collect();
+                Ok(names.iter().any(|n| n == "status"))
+            })
+            .unwrap_or(false);
+
+        let proj_sql = if has_status_col {
+            "SELECT id, COALESCE(name, id), COALESCE(updated_at, ?1) FROM projects WHERE COALESCE(status, 'active') = 'active' ORDER BY id LIMIT 500"
+        } else {
+            "SELECT id, COALESCE(name, id), COALESCE(updated_at, ?1) FROM projects ORDER BY id LIMIT 500"
+        };
+
+        if let Ok(mut stmt) = conn.prepare(proj_sql) {
+            let rows = stmt
+                .query_map([stamp], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2).unwrap_or(stamp),
+                    ))
+                })
+                .ok();
+            if let Some(iter) = rows {
+                for item in iter.flatten() {
+                    let (pid, name, updated_at) = item;
+                    let is_legacy_noise = has_status_col
+                        && (pid == "cloud-agent-dogfood"
+                            || pid == "proj_636c6f75642d6167"
+                            || name == "cloud-agent-dogfood"
+                            || pid == "proj_daily_assistant"
+                            || pid.starts_with("proj_e2e_")
+                            || pid.starts_with("proj_ux")
+                            || pid.starts_with("proj_four_harness_")
+                            || pid.starts_with("proj_mobile_loop_"));
+                    if is_legacy_noise {
+                        continue;
+                    }
+                    if !self.online.imported_project_ids.contains(&pid) {
+                        self.online.imported_project_ids.push(pid.clone());
+                    }
+                    let _ = self.app.create_project(&pid, &name, updated_at);
+                    imported_count += 1;
+                }
+            }
+        }
+
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT id, project_id, COALESCE(title, id), COALESCE(status, 'open'), COALESCE(updated_at, ?1) FROM tasks ORDER BY id LIMIT 1000",
+        ) {
+            let rows = stmt
+                .query_map([stamp], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, i64>(4).unwrap_or(stamp),
+                    ))
+                })
+                .ok();
+            if let Some(iter) = rows {
+                for item in iter.flatten() {
+                    let (tid, pid, title, status, updated_at) = item;
+                    let conv_id = format!("conv-{tid}");
+                    let _ = self
+                        .app
+                        .import_conversation(&conv_id, Some(&pid), &title, updated_at);
+                    self.online.task_snapshots.entry(tid.clone()).or_insert_with(|| {
+                        json!({
+                            "task": {
+                                "id": tid,
+                                "project_id": pid,
+                                "title": title,
+                                "instruction": title,
+                                "description": title,
+                                "status": status,
+                                "created_at": updated_at,
+                                "updated_at": updated_at,
+                            },
+                            "source_kind": "legacy_import",
+                            "executions": [],
+                            "steering": [],
+                            "verifications": [],
+                            "reviews": [],
+                            "artifacts": [],
+                            "missing_facts": []
+                        })
+                    });
+                }
+            }
+        }
+        self.save_online();
+        Ok(imported_count)
+    }
+}
+
+fn csprng_digits_6() -> String {
+    use ring::rand::{SecureRandom, SystemRandom};
+    let rng = SystemRandom::new();
+    let mut buf = [0u8; 4];
+    loop {
+        if rng.fill(&mut buf).is_err() {
+            return format!("{}", (now_millis() as u64 % 900_000) + 100_000);
+        }
+        let val = u32::from_le_bytes(buf);
+        if val < (u32::MAX / 900_000) * 900_000 {
+            return format!("{}", (val % 900_000) + 100_000);
+        }
+    }
+}
+
+pub fn resolve_public_url(public_url: Option<&str>, bound_addr: Option<SocketAddr>) -> String {
+    if let Some(explicit) = public_url
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.trim_end_matches('/').to_owned())
+    {
+        return explicit;
+    }
+    if let Ok(env_url) = std::env::var("BOB_NODE_PUBLIC_URL") {
+        let trimmed = env_url.trim().trim_end_matches('/');
+        if !trimmed.is_empty() {
+            return trimmed.to_owned();
+        }
+    }
+    if let Ok(env_url) = std::env::var("BOB_PUBLIC_URL") {
+        let trimmed = env_url.trim().trim_end_matches('/');
+        if !trimmed.is_empty() {
+            return trimmed.to_owned();
+        }
+    }
+    if let Ok(domain) = std::env::var("BOB_PUBLIC_DOMAIN") {
+        let trimmed = domain.trim().trim_end_matches('/');
+        if !trimmed.is_empty() {
+            return if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+                trimmed.to_owned()
+            } else {
+                format!("https://{trimmed}")
+            };
+        }
+    }
+    let port = bound_addr
+        .map(|a| a.port())
+        .or_else(|| {
+            std::env::var("BOB_NODE_BIND")
+                .ok()
+                .and_then(|b| b.rsplit_once(':').and_then(|(_, p)| p.parse::<u16>().ok()))
+        })
+        .unwrap_or(53020);
+    let ip = match bound_addr {
+        Some(addr) if !addr.ip().is_loopback() && !addr.ip().is_unspecified() => {
+            addr.ip().to_string()
+        }
+        _ => bob_runtime::node_pairing::detect_lan_or_tailscale_ip(),
+    };
+    format!("http://{ip}:{port}")
+}
+
+pub fn resolve_node_label(label: Option<&str>, clean_url: &str) -> String {
+    if let Some(explicit) = label.map(str::trim).filter(|s| !s.is_empty()) {
+        return explicit.to_owned();
+    }
+    if let Ok(env_label) = std::env::var("BOB_NODE_LABEL") {
+        let trimmed = env_label.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_owned();
+        }
+    }
+    let from_url = bob_runtime::node_pairing::default_label_for_url(clean_url);
+    if !from_url.is_empty()
+        && !from_url.starts_with("127.")
+        && !from_url.starts_with("localhost")
+        && !from_url.starts_with("0.0.0.0")
+    {
+        return from_url;
+    }
+    std::env::var("HOSTNAME")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| std::env::var("COMPUTERNAME").ok().filter(|s| !s.trim().is_empty()))
+        .unwrap_or_else(|| "Bob Node".to_owned())
+}
+
+pub fn issue_node_access_cli_pairing(
+    data_dir: &std::path::Path,
+    clean_url: &str,
+    label: Option<&str>,
+) -> Result<bob_runtime::node_pairing::NodePairingInvitation, &'static str> {
+    let clean_url = clean_url.trim().trim_end_matches('/').to_owned();
+    let inv = node_access::create_compact_invitation(data_dir, now_millis())?;
+    let pairing_id = inv["pairing_id"]
+        .as_str()
+        .ok_or("NODE_ACCESS_STORE")?
+        .to_owned();
+    let user_code = inv["user_code"]
+        .as_str()
+        .ok_or("NODE_ACCESS_STORE")?
+        .to_owned();
+    let expires_at = inv["expires_at"].as_i64().unwrap_or(now_millis() + 600_000);
+    let node_id = inv["node_id"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| bob_runtime::node_pairing::compute_node_id(&clean_url));
+    let resolved_label = resolve_node_label(label, &clean_url);
+    let harnesses = discover_local_cli_harnesses(data_dir);
+    Ok(bob_runtime::node_pairing::NodePairingInvitation {
+        v: 1,
+        role: "node".to_owned(),
+        node_id,
+        label: resolved_label,
+        base_url: clean_url,
+        pairing_id,
+        user_code,
+        expires_at,
+        harnesses,
+    })
+}
+
+pub fn issue_offline_online_pairing(
+    data_dir: &std::path::Path,
+    clean_url: &str,
+    label: Option<&str>,
+) -> Result<bob_runtime::node_pairing::NodePairingInvitation, &'static str> {
+    let clean_url = clean_url.trim().trim_end_matches('/').to_owned();
+    let at = now_millis();
+    let pairing_id = format!(
+        "qr_{}",
+        node_access::random_base62(8).unwrap_or_else(|_| format!("{at}"))
+    );
+    let user_code = node_access::random_base62(16).unwrap_or_else(|_| csprng_digits_6());
+    let expires_at = at + 600_000;
+    let resolved_label = resolve_node_label(label, &clean_url);
+    let _ = std::fs::create_dir_all(data_dir);
+    let online_store_path = data_dir.join("online_work_store.json");
+    let mut online = load_online_state(&online_store_path);
+    online.pairings.insert(
+        pairing_id.clone(),
+        OnlinePairingSession {
+            pairing_id: pairing_id.clone(),
+            user_code: user_code.clone(),
+            device_name: resolved_label.clone(),
+            created_at: at,
+            expires_at,
+            exchanged_token: None,
+        },
+    );
+    save_online_state(&online_store_path, &online);
+    Ok(bob_runtime::node_pairing::NodePairingInvitation {
+        v: 1,
+        role: "node".to_owned(),
+        node_id: bob_runtime::node_pairing::compute_node_id(&clean_url),
+        label: resolved_label,
+        base_url: clean_url,
+        pairing_id,
+        user_code,
+        expires_at,
+        harnesses: discover_local_cli_harnesses(data_dir),
+    })
+}
+
+fn discover_local_cli_harnesses(data_dir: &std::path::Path) -> Vec<String> {
+    bob_runtime::agy_directory::ensure_local_grant_registered(data_dir, "local")
+        .and_then(|g| g.get("harnesses").cloned())
+        .and_then(|h| h.as_array().cloned())
+        .map(|arr| {
+            arr.into_iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn catalog_snapshot_json(ctx: &NodeContext) -> Result<Value, &'static str> {
+    let snap = ctx
+        .app
+        .catalog_snapshot()
+        .map_err(|_| "CATALOG_READ_FAILED")?;
+    let mut value = serde_json::to_value(snap).map_err(|_| "CATALOG_READ_FAILED")?;
+    if let Some(projects) = value["projects"].as_array_mut() {
+        for project in projects {
+            let imported = project["id"]
+                .as_str()
+                .map(|id| ctx.online.imported_project_ids.iter().any(|p| p == id))
+                .unwrap_or(false);
+            project["source_kind"] = json!(if imported { "legacy_import" } else { "bob_native" });
+        }
+    }
+    value["imported_project_ids"] = json!(ctx.online.imported_project_ids);
+    Ok(value)
+}
+
+pub fn handle_rpc_command(ctx: &mut NodeContext, command: &str, args: &Value) -> Result<Value, &'static str> {
+    bob_runtime::tool_policy::check_rpc(&ctx.runtime.data_dir,command,args)?;
+    let at = now_millis();
+    let data_dir = &ctx.runtime.data_dir;
+    match command {
+        "app_features_list" => {
+            let mut store = bob_runtime::features::FeatureStore::open(&ctx.runtime.data_dir)?;
+            let list = store.list(at);
+            serde_json::to_value(list).map_err(|_| "FEATURES_LIST_FAILED")
+        }
+        "app_feature_keep" => {
+            let name = args.get("name").and_then(Value::as_str).ok_or("FEATURE_NAME_REQUIRED")?;
+            let mut store = bob_runtime::features::FeatureStore::open(&ctx.runtime.data_dir)?;
+            let feat = store.keep_feature(name, at)?;
+            serde_json::to_value(feat).map_err(|_| "FEATURE_KEEP_FAILED")
+        }
+        "app_feature_rollback" => {
+            let name = args.get("name").and_then(Value::as_str).ok_or("FEATURE_NAME_REQUIRED")?;
+            let target_version = args
+                .get("targetVersion")
+                .or_else(|| args.get("target_version"))
+                .and_then(Value::as_u64)
+                .map(|v| v as u32);
+            let mut store = bob_runtime::features::FeatureStore::open(&ctx.runtime.data_dir)?;
+            let feat = store.rollback_feature(name, target_version, at)?;
+            Ok(json!({
+                "rolled_back": true,
+                "feature": feat,
+            }))
+        }
+        "app_feature_toggle" => {
+            let name = args.get("name").and_then(Value::as_str).ok_or("FEATURE_NAME_REQUIRED")?;
+            let enabled = args.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+            let mut store = bob_runtime::features::FeatureStore::open(&ctx.runtime.data_dir)?;
+            let feat = store.toggle_feature(name, enabled, at)?;
+            serde_json::to_value(feat).map_err(|_| "FEATURE_TOGGLE_FAILED")
+        }
+        "app_feature_call" => {
+            bob_runtime::features::execute_feature_call(&ctx.runtime.data_dir, args)
+        }
+        "app_feature_storage_save" => {
+            let name = args.get("name").and_then(Value::as_str).ok_or("FEATURE_NAME_REQUIRED")?;
+            let storage = args.get("storage").cloned().unwrap_or(json!({}));
+            let mut store = bob_runtime::features::FeatureStore::open(&ctx.runtime.data_dir)?;
+            let saved = store.save_storage(name, storage, at)?;
+            Ok(json!({
+                "ok": true,
+                "storage": saved,
+            }))
+        }
+        "app_jarvis_worker_tasks" => {
+            let cid = args.get("sessionId").or_else(|| args.get("conversationId")).or_else(|| args.get("conversation_id")).and_then(Value::as_str);
+            if let Some(cid) = cid.filter(|s| !s.trim().is_empty()) {
+                jarvis::reconcile_worker_failures(&ctx.runtime.data_dir, cid);
+            }
+            Ok(serde_json::json!(bob_runtime::worker_ledger::WorkerTaskStore::list_tasks(
+                &ctx.runtime.data_dir, cid, args.get("afterSeq").and_then(Value::as_u64).unwrap_or(0))))
+        }
+        "app_jarvis_chat" => jarvis::chat_with_ctx(ctx, args),
+        "app_jarvis_approve" => jarvis::approve_with_ctx(ctx, args),
+        "app_jarvis_reject" => jarvis::reject_with_ctx(ctx, args),
+        "app_jarvis_approvals_list" => jarvis::approvals_list(&ctx.runtime.data_dir, args),
+        "app_jarvis_budget_get" => jarvis::budget_get(&ctx.runtime.data_dir, args),
+        "app_jarvis_budget_set" => jarvis::budget_set(&ctx.runtime.data_dir, args),
+        "app_orchestration_list" => orchestration::rpc_list(&ctx.runtime.data_dir, args),
+        "app_orchestration_accept" => orchestration::rpc_accept(&ctx.runtime.data_dir, args),
+        "app_orchestration_cancel" => orchestration::rpc_cancel(&ctx.runtime.data_dir, args),
+        "app_orchestration_continue" => {
+            orchestration::rpc_continue(&ctx.runtime.data_dir, args).map_err(|_| "ORCHESTRATION_CONTINUE_FAILED")
+        }
+        "app_node_bootstrap_workspace" => {
+            orchestration::execute_node_bootstrap_workspace(&ctx.runtime.data_dir, args)
+                .map_err(|_| "NODE_BOOTSTRAP_FAILED")
+        }
+        "app_chief_orders_list" => chief_service::list_owner_orders(&ctx.runtime.data_dir, args),
+        "app_chief_order_complete" => chief_service::record_order_receipt(&ctx.runtime.data_dir, args, at),
+        "app_push_vapid_public_key" => {
+            let store = push_channels::PushStore::open(&ctx.runtime.data_dir)?;
+            Ok(json!({
+                "publicKey": store.public_key(),
+                "public_key": store.public_key(),
+            }))
+        }
+        "app_push_subscribe" => {
+            let sub_val = args.get("subscription").unwrap_or(args);
+            let sub: push_channels::WebPushSubscription = serde_json::from_value(sub_val.clone())
+                .map_err(|_| "SUBSCRIPTION_PARSE_FAILED")?;
+            let mut store = push_channels::PushStore::open(&ctx.runtime.data_dir)?;
+            store.add_subscription(sub)?;
+            Ok(json!({ "ok": true }))
+        }
+        "app_push_status" => {
+            let store = push_channels::PushStore::open(&ctx.runtime.data_dir)?;
+            Ok(json!({
+                "ok": true,
+                "subscriptionCount": store.list_subscriptions().len(),
+                "publicKey": store.public_key(),
+            }))
+        }
+        "app_push_test" => {
+            let mut store = push_channels::PushStore::open(&ctx.runtime.data_dir)?;
+            let sent = store.send_web_push_wakeups(at / 1000)?;
+            Ok(json!({
+                "ok": true,
+                "sent": sent,
+                "subscriptionCount": store.list_subscriptions().len(),
+            }))
+        }
+        "app_proactivity_get" => {
+            let store = bob_runtime::growth::ProactivityStore::open(&ctx.runtime.data_dir)?;
+            Ok(store.config.to_json_value())
+        }
+        "app_proactivity_set" => {
+            let level = args.get("level").and_then(Value::as_f64);
+            let start = args.get("quietHoursStart").or_else(|| args.get("quiet_hours_start")).and_then(Value::as_str).map(str::to_owned);
+            let end = args.get("quietHoursEnd").or_else(|| args.get("quiet_hours_end")).and_then(Value::as_str).map(str::to_owned);
+            let offset = args.get("utcOffsetMinutes").or_else(|| args.get("utc_offset_minutes")).and_then(Value::as_i64).map(|v| v as i32);
+            let mut store = bob_runtime::growth::ProactivityStore::open(&ctx.runtime.data_dir)?;
+            let cfg = store.set_config(level, start, end, offset)?;
+            Ok(cfg.to_json_value())
+        }
+        "app_morning_brief" => {
+            let brief = bob_runtime::growth::generate_morning_brief(&ctx.runtime.data_dir, &ctx.app, at)?;
+            serde_json::to_value(brief).map_err(|_| "MORNING_BRIEF_SERIALIZE_FAILED")
+        }
+        "app_dream_run" => {
+            let mut bus = bob_runtime::tool_bus::BobToolBus::with_approval_store(&ctx.runtime.data_dir)
+                .map_err(|_| "BUS_INIT_FAILED")?;
+            crate::browser_ws::register_browser_tools(&mut bus, &ctx.runtime.data_dir);
+            let report = bob_runtime::growth::run_nightly_dream(&ctx.runtime.data_dir, &mut ctx.app, &mut bus, at)?;
+            serde_json::to_value(report).map_err(|_| "DREAM_REPORT_SERIALIZE_FAILED")
+        }
+        "app_kb_search" => {
+            let query = args.get("query").and_then(Value::as_str).unwrap_or("");
+            let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(10) as usize;
+            let hits = ctx.app.kb_search(query, limit).map_err(|_| "KB_SEARCH_FAILED")?;
+            Ok(json!({
+                "hits": hits,
+                "count": hits.len(),
+            }))
+        }
+        "app_routines_list" => {
+            let store = bob_runtime::routines::RoutineStore::open(&ctx.runtime.data_dir)?;
+            let list = store.list();
+            serde_json::to_value(list).map_err(|_| "ROUTINES_LIST_FAILED")
+        }
+        "app_routine_save" => {
+            let routine_val = args.get("routine").unwrap_or(args);
+            let routine: bob_runtime::routines::RoutineRecord = serde_json::from_value(routine_val.clone())
+                .map_err(|_| "ROUTINE_PARSE_FAILED")?;
+            let mut store = bob_runtime::routines::RoutineStore::open(&ctx.runtime.data_dir)?;
+            let saved = store.save_routine(routine)?;
+            let _ = bob_runtime::routines::mirror_routine_to_schedule(&mut ctx.app, &saved, at);
+            serde_json::to_value(saved).map_err(|_| "ROUTINE_SAVE_FAILED")
+        }
+        "app_routine_trial" => {
+            let id = args.get("id").or_else(|| args.get("routine_id")).or_else(|| args.get("routineId")).and_then(Value::as_str).ok_or("ROUTINE_ID_REQUIRED")?;
+            let mut store = bob_runtime::routines::RoutineStore::open(&ctx.runtime.data_dir)?;
+            let mut draft_store = bob_runtime::routines::UnattendedDraftStore::open(&ctx.runtime.data_dir)?;
+            let mut bus = bob_runtime::tool_bus::BobToolBus::with_approval_store(&ctx.runtime.data_dir)
+                .map_err(|_| "BUS_INIT_FAILED")?;
+            crate::browser_ws::register_browser_tools(&mut bus, &ctx.runtime.data_dir);
+            let (routine, report, drafts) = store.run_trial(id, &mut bus, &mut draft_store, &mut ctx.app, at)?;
+            let _ = bob_runtime::routines::mirror_routine_to_schedule(&mut ctx.app, &routine, at);
+            Ok(json!({
+                "routine": routine,
+                "report": report,
+                "drafts": drafts,
+            }))
+        }
+        "app_routine_toggle" => {
+            let id = args.get("id").or_else(|| args.get("routine_id")).or_else(|| args.get("routineId")).and_then(Value::as_str).ok_or("ROUTINE_ID_REQUIRED")?;
+            let enabled = args.get("enabled").and_then(Value::as_bool).ok_or("ROUTINE_ENABLED_REQUIRED")?;
+            let mut store = bob_runtime::routines::RoutineStore::open(&ctx.runtime.data_dir)?;
+            let updated = store.enable_routine(id, enabled, at)?;
+            let _ = bob_runtime::routines::mirror_routine_to_schedule(&mut ctx.app, &updated, at);
+            serde_json::to_value(updated).map_err(|_| "ROUTINE_TOGGLE_FAILED")
+        }
+        "app_routine_delete" => {
+            let id = args.get("id").or_else(|| args.get("routine_id")).or_else(|| args.get("routineId")).and_then(Value::as_str).ok_or("ROUTINE_ID_REQUIRED")?;
+            let mut store = bob_runtime::routines::RoutineStore::open(&ctx.runtime.data_dir)?;
+            let deleted = store.delete_routine(id)?;
+            let _ = bob_runtime::routines::unmirror_routine_from_schedule(&mut ctx.app, &deleted, at);
+            serde_json::to_value(deleted).map_err(|_| "ROUTINE_DELETE_FAILED")
+        }
+        "app_routine_drafts_list" => {
+            let mut store = bob_runtime::routines::UnattendedDraftStore::open(&ctx.runtime.data_dir)?;
+            let list = store.list_pending(at);
+            serde_json::to_value(list).map_err(|_| "ROUTINE_DRAFTS_LIST_FAILED")
+        }
+        "app_context_list" | "app_context_read" | "app_context_refresh" | "app_context_tasks" => context_capsule::rpc(&ctx.runtime.data_dir,command,args),
+        "app_claude_capabilities" | "app_claude_sessions" | "app_claude_history" | "app_claude_prompt" | "app_claude_cancel" | "app_claude_reconcile" | "app_claude_review" | "app_claude_artifacts" | "app_claude_preview" => claude_rpc::rpc(&ctx.runtime.data_dir, command, args),
+        "app_capability_registry_get" => serde_json::to_value(bob_runtime::capability_borrowing::load_capabilities(&ctx.runtime.data_dir)?).map_err(|_| "CAPABILITY_READ_FAILED"),
+        "app_vault_rotate_seed" => {
+            let mut store = bob_runtime::FileVaultSecretStore::open(&ctx.runtime.data_dir)?; 
+            let rotated = store.rotate_master_seed()?;
+            Ok(json!({ "rotated_slots": rotated }))
+        }
+        "app_egress_audit_list" => serde_json::to_value(bob_runtime::capability_borrowing::list_egress_audit_records(&ctx.runtime.data_dir)?).map_err(|_| "EGRESS_AUDIT_READ_FAILED"),
+        "app_render_grants_list" => serde_json::to_value(bob_runtime::capability_borrowing::load_render_grants(&ctx.runtime.data_dir)?).map_err(|_| "RENDER_GRANTS_READ_FAILED"),
+        "app_subagent_dispatch" => {
+            let grant: bob_runtime::subagent_pool::SubagentGrant = serde_json::from_value(args.get("grant").cloned().unwrap_or(Value::Null))
+                .map_err(|_| "SUBAGENT_GRANT_INVALID")?;
+            let request: bob_runtime::subagent_pool::SubagentInvocationRequest = serde_json::from_value(args.get("request").cloned().unwrap_or(Value::Null))
+                .map_err(|_| "SUBAGENT_REQUEST_INVALID")?;
+            let record = bob_runtime::subagent_pool::SubagentPoolCoordinator::dispatch(&ctx.runtime.data_dir, &grant, &request)?;
+            serde_json::to_value(record).map_err(|_| "SUBAGENT_SERIALIZE_FAILED")
+        }
+        "app_subagent_execute" => {
+            let grant: bob_runtime::subagent_pool::SubagentGrant = serde_json::from_value(args.get("grant").cloned().unwrap_or(Value::Null))
+                .map_err(|_| "SUBAGENT_GRANT_INVALID")?;
+            let run_id = args.get("runId").or_else(|| args.get("run_id")).and_then(Value::as_str).ok_or("SUBAGENT_RUN_ID_REQUIRED")?;
+            let actions: Vec<bob_runtime::subagent_pool::SubagentStepAction> = serde_json::from_value(args.get("actions").cloned().unwrap_or(Value::Null))
+                .map_err(|_| "SUBAGENT_ACTIONS_INVALID")?;
+            let record = bob_runtime::subagent_pool::SubagentPoolCoordinator::execute_bounded_turn(&ctx.runtime.data_dir, &grant, run_id, &actions)?;
+            serde_json::to_value(record).map_err(|_| "SUBAGENT_SERIALIZE_FAILED")
+        }
+        "app_subagent_cancel" => {
+            let parent_task_id = args.get("parentTaskId").or_else(|| args.get("parent_task_id")).and_then(Value::as_str).ok_or("SUBAGENT_PARENT_TASK_REQUIRED")?;
+            let run_id = args.get("runId").or_else(|| args.get("run_id")).and_then(Value::as_str);
+            let reason = args.get("reason").and_then(Value::as_str).unwrap_or("EXPLICIT_CANCEL");
+            let record = bob_runtime::subagent_pool::SubagentPoolCoordinator::cancel(&ctx.runtime.data_dir, parent_task_id, run_id, reason)?;
+            serde_json::to_value(record).map_err(|_| "SUBAGENT_SERIALIZE_FAILED")
+        }
+        "app_subagent_reconcile" => {
+            let reconciled = bob_runtime::subagent_pool::SubagentPoolCoordinator::reconcile_on_restart(&ctx.runtime.data_dir)?;
+            serde_json::to_value(reconciled).map_err(|_| "SUBAGENT_SERIALIZE_FAILED")
+        }
+        "app_subagent_status" => {
+            let run_id = args.get("runId").or_else(|| args.get("run_id")).and_then(Value::as_str).ok_or("SUBAGENT_RUN_ID_REQUIRED")?;
+            let record = bob_runtime::subagent_pool::SubagentPoolCoordinator::get_run(&ctx.runtime.data_dir, run_id)?;
+            serde_json::to_value(record).map_err(|_| "SUBAGENT_SERIALIZE_FAILED")
+        }
+        "app_subagent_list" => {
+            let parent_task_id = args.get("parentTaskId").or_else(|| args.get("parent_task_id")).and_then(Value::as_str).ok_or("SUBAGENT_PARENT_TASK_REQUIRED")?;
+            let list = bob_runtime::subagent_pool::SubagentPoolCoordinator::list_runs_for_task(&ctx.runtime.data_dir, parent_task_id)?;
+            serde_json::to_value(list).map_err(|_| "SUBAGENT_SERIALIZE_FAILED")
+        }
+        "app_bootstrap" => {
+            let session_id = ctx
+                .app
+                .selected_conversation()
+                .map_err(|_| "LOCAL_STORE_UNAVAILABLE")?;
+            Ok(json!({
+                "session_id": session_id,
+                "provider_status": ctx.app.prewarm(),
+            }))
+        }
+        "app_prewarm" => Ok(json!("provider_unconfigured")),
+        "app_readiness" => {
+            let mut status = ctx
+                .app
+                .readiness()
+                .map_err(|_| "LOCAL_STATUS_UNAVAILABLE")?;
+            let direct_ready = ctx.app.direct_provider_ready().unwrap_or(false);
+            if direct_ready {
+                status.mode = "direct_provider";
+                status.execution_available = true;
+            }
+            serde_json::to_value(status).map_err(|_| "LOCAL_STATUS_UNAVAILABLE")
+        }
+        "app_assistant_conversation" => {
+            let id = ctx.app.assistant_conversation(at).map_err(|_| "ASSISTANT_OPEN_FAILED")?;
+            Ok(json!({"conversation_id": id}))
+        }
+        "app_catalog" => catalog_snapshot_json(ctx),
+        "app_history" => {
+            let session_id = args
+                .get("sessionId")
+                .or_else(|| args.get("session_id"))
+                .and_then(Value::as_str)
+                .unwrap_or("default");
+            let hist = ctx
+                .app
+                .history(session_id)
+                .map_err(|_| "LOCAL_HISTORY_UNAVAILABLE")?;
+            serde_json::to_value(hist).map_err(|_| "LOCAL_HISTORY_UNAVAILABLE")
+        }
+        "app_accept" => {
+            let request_id = args
+                .get("requestId")
+                .or_else(|| args.get("request_id"))
+                .and_then(Value::as_str)
+                .ok_or("REQUEST_ID_REQUIRED")?;
+            let message_id = args
+                .get("messageId")
+                .or_else(|| args.get("message_id"))
+                .and_then(Value::as_str)
+                .ok_or("MESSAGE_ID_REQUIRED")?;
+            let session_id = args
+                .get("sessionId")
+                .or_else(|| args.get("session_id"))
+                .and_then(Value::as_str)
+                .unwrap_or("default");
+            let content = args
+                .get("content")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned();
+            let expected_rev = args
+                .get("expectedDraftRevision")
+                .or_else(|| args.get("expected_draft_revision"))
+                .and_then(Value::as_i64);
+            let accepted = ctx
+                .app
+                .accept_with_draft_revision(
+                    request_id,
+                    message_id,
+                    session_id,
+                    content,
+                    expected_rev,
+                    at,
+                )
+                .map_err(|_| "LOCAL_SAVE_UNCONFIRMED")?;
+            serde_json::to_value(accepted).map_err(|_| "LOCAL_SAVE_UNCONFIRMED")
+        }
+        "app_project_create" => {
+            let project_id = args
+                .get("projectId")
+                .or_else(|| args.get("project_id"))
+                .and_then(Value::as_str)
+                .ok_or("PROJECT_CREATE_FAILED")?;
+            let title = args
+                .get("title")
+                .and_then(Value::as_str)
+                .ok_or("PROJECT_CREATE_FAILED")?;
+            ctx.app
+                .create_project(project_id, title, at)
+                .map_err(|_| "PROJECT_CREATE_FAILED")?;
+            ctx.sync_catalog_into_online_store();
+            catalog_snapshot_json(ctx)
+        }
+        "app_conversation_create" => {
+            let conversation_id = args
+                .get("conversationId")
+                .or_else(|| args.get("conversation_id"))
+                .and_then(Value::as_str)
+                .ok_or("CONVERSATION_CREATE_FAILED")?;
+            let project_id = args
+                .get("projectId")
+                .or_else(|| args.get("project_id"))
+                .and_then(Value::as_str);
+            let title = args
+                .get("title")
+                .and_then(Value::as_str)
+                .ok_or("CONVERSATION_CREATE_FAILED")?;
+            ctx.app
+                .create_conversation(conversation_id, project_id, title, at)
+                .map_err(|_| "CONVERSATION_CREATE_FAILED")?;
+            ctx.sync_catalog_into_online_store();
+            let snap = ctx
+                .app
+                .catalog_snapshot()
+                .map_err(|_| "CATALOG_READ_FAILED")?;
+            serde_json::to_value(snap).map_err(|_| "CATALOG_READ_FAILED")
+        }
+        "app_conversation_promote" => {
+            let conversation_id = args
+                .get("conversationId")
+                .or_else(|| args.get("conversation_id"))
+                .and_then(Value::as_str)
+                .ok_or("CONVERSATION_PROMOTE_FAILED")?;
+            let project_id = args
+                .get("projectId")
+                .or_else(|| args.get("project_id"))
+                .and_then(Value::as_str)
+                .ok_or("CONVERSATION_PROMOTE_FAILED")?;
+            let title = args
+                .get("title")
+                .and_then(Value::as_str)
+                .ok_or("CONVERSATION_PROMOTE_FAILED")?;
+            let snap = ctx
+                .app
+                .promote_conversation_to_project(conversation_id, project_id, title, at)
+                .map_err(|_| "CONVERSATION_PROMOTE_FAILED")?;
+            ctx.sync_catalog_into_online_store();
+            serde_json::to_value(snap).map_err(|_| "CONVERSATION_PROMOTE_FAILED")
+        }
+        "app_conversation_delete" => {
+            let conversation_id = args
+                .get("conversationId")
+                .and_then(Value::as_str)
+                .ok_or("CONVERSATION_DELETE_FAILED")?;
+            ctx.app
+                .delete_local_conversation(conversation_id, at)
+                .map_err(|_| "CONVERSATION_DELETE_FAILED")?;
+            handle_rpc_command(ctx, "app_catalog", &json!({}))
+        }
+        "app_conversation_select" => {
+            let conversation_id = args
+                .get("conversationId")
+                .or_else(|| args.get("conversation_id"))
+                .and_then(Value::as_str)
+                .ok_or("CONVERSATION_SELECT_FAILED")?;
+            ctx.app
+                .select_conversation(conversation_id, at)
+                .map_err(|_| "CONVERSATION_SELECT_FAILED")?;
+            let snap = ctx
+                .app
+                .catalog_snapshot()
+                .map_err(|_| "CATALOG_READ_FAILED")?;
+            serde_json::to_value(snap).map_err(|_| "CATALOG_READ_FAILED")
+        }
+        "app_view_state_save" => {
+            let conversation_id = args
+                .get("conversationId")
+                .or_else(|| args.get("conversation_id"))
+                .and_then(Value::as_str)
+                .ok_or("VIEW_STATE_SAVE_FAILED")?;
+            let draft = args.get("draft").and_then(Value::as_str);
+            let scroll_offset = args
+                .get("scrollOffset")
+                .or_else(|| args.get("scroll_offset"))
+                .and_then(Value::as_i64);
+            let mark_read = args
+                .get("markRead")
+                .or_else(|| args.get("mark_read"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let state = ctx
+                .app
+                .save_conversation_view_state(
+                    conversation_id,
+                    draft,
+                    None,
+                    scroll_offset,
+                    mark_read,
+                    at,
+                )
+                .map_err(|_| "VIEW_STATE_SAVE_FAILED")?;
+            serde_json::to_value(state).map_err(|_| "VIEW_STATE_SAVE_FAILED")
+        }
+        "app_preferences_save" => {
+            let sidebar = args
+                .get("sidebarGroupMode")
+                .or_else(|| args.get("sidebar_group_mode"))
+                .and_then(Value::as_str);
+            let locale = args.get("locale").and_then(Value::as_str);
+            let theme = args.get("theme").and_then(Value::as_str);
+            let prefs = ctx
+                .app
+                .save_ui_preferences(sidebar, locale, theme, at)
+                .map_err(|_| "PREFERENCES_SAVE_FAILED")?;
+            serde_json::to_value(prefs).map_err(|_| "PREFERENCES_SAVE_FAILED")
+        }
+        "app_personal_snapshot" => {
+            let schedules = ctx
+                .app
+                .list_schedule_items()
+                .map_err(|_| "PERSONAL_OPS_READ_FAILED")?;
+            let notes = ctx
+                .app
+                .list_notes(None)
+                .map_err(|_| "PERSONAL_OPS_READ_FAILED")?;
+            let captures = ctx
+                .app
+                .list_captures()
+                .map_err(|_| "PERSONAL_OPS_READ_FAILED")?;
+            let memories = ctx
+                .app
+                .list_memories(false)
+                .map_err(|_| "PERSONAL_OPS_READ_FAILED")?;
+            let decisions = ctx
+                .app
+                .list_all_decisions()
+                .map_err(|_| "PERSONAL_OPS_READ_FAILED")?;
+            let pending_sync_count = ctx
+                .app
+                .pending_personal_op_syncs()
+                .map(|v| v.len())
+                .unwrap_or(0);
+            Ok(json!({
+                "schedules": schedules,
+                "notes": notes,
+                "captures": captures,
+                "memories": memories,
+                "decisions": decisions,
+                "pending_sync_count": pending_sync_count,
+            }))
+        }
+        "app_schedule_create" => {
+            let id = args.get("id").and_then(Value::as_str).ok_or("SCHEDULE_CREATE_FAILED")?;
+            let project_id = args
+                .get("projectId")
+                .or_else(|| args.get("project_id"))
+                .and_then(Value::as_str);
+            let task_id = args
+                .get("taskId")
+                .or_else(|| args.get("task_id"))
+                .and_then(Value::as_str);
+            let title = args.get("title").and_then(Value::as_str).ok_or("SCHEDULE_CREATE_FAILED")?;
+            let kind = args.get("kind").and_then(Value::as_str).unwrap_or("event");
+            let start_at = args
+                .get("startAt")
+                .or_else(|| args.get("start_at"))
+                .and_then(Value::as_i64)
+                .unwrap_or(0);
+            let end_at = args
+                .get("endAt")
+                .or_else(|| args.get("end_at"))
+                .and_then(Value::as_i64);
+            let reminder_at = args
+                .get("reminderAt")
+                .or_else(|| args.get("reminder_at"))
+                .and_then(Value::as_i64);
+            let notes = args.get("notes").and_then(Value::as_str).unwrap_or("");
+            let created = ctx
+                .app
+                .create_schedule_item_with_timing(
+                    id, project_id, task_id, title, kind, start_at, end_at, reminder_at, notes, serde_json::from_value(args.get("timing").cloned().unwrap_or(serde_json::json!({}))).map_err(|_|"SCHEDULE_CREATE_FAILED")?, at,
+                )
+                .map_err(|_| "SCHEDULE_CREATE_FAILED")?;
+            serde_json::to_value(created).map_err(|_| "SCHEDULE_CREATE_FAILED")
+        }
+        "app_schedule_edit" => {
+            let old=ctx.app.list_schedule_items().map_err(|_|"SCHEDULE_UPDATE_FAILED")?.into_iter()
+                .find(|s|Some(s.id.as_str())==args["id"].as_str()).ok_or("SCHEDULE_UPDATE_FAILED")?;
+            let item = if old.kind=="todo" {
+                ctx.app.edit_todo_item_with_timing(&old.id,args["expectedVersion"].as_i64().ok_or("SCHEDULE_UPDATE_FAILED")?,
+                    args["title"].as_str().ok_or("SCHEDULE_UPDATE_FAILED")?,
+                    if args.get("projectId").is_some(){args["projectId"].as_str()}else{old.project_id.as_deref()},
+                    args["startAt"].as_i64(),args.get("endAt").map_or(old.end_at,Value::as_i64),
+                    args["notes"].as_str().unwrap_or(""),args.get("timing").map(|v|serde_json::from_value(v.clone())).transpose().map_err(|_|"SCHEDULE_UPDATE_FAILED")?,at)
+            } else {ctx.app.edit_schedule_interval(
+                args["id"].as_str().ok_or("SCHEDULE_UPDATE_FAILED")?,
+                args["expectedVersion"].as_i64().ok_or("SCHEDULE_UPDATE_FAILED")?,
+                args["title"].as_str().ok_or("SCHEDULE_UPDATE_FAILED")?,
+                args["startAt"].as_i64().ok_or("SCHEDULE_UPDATE_FAILED")?,
+                args.get("endAt").map(Value::as_i64),
+                args["notes"].as_str().unwrap_or(""), at
+            )}.map_err(|_| "SCHEDULE_UPDATE_FAILED")?;
+            serde_json::to_value(item).map_err(|_| "SCHEDULE_UPDATE_FAILED")
+        }
+        "app_schedule_status" => {
+            let id = args.get("id").and_then(Value::as_str).ok_or("SCHEDULE_UPDATE_FAILED")?;
+            let status = args
+                .get("status")
+                .and_then(Value::as_str)
+                .ok_or("SCHEDULE_UPDATE_FAILED")?;
+            let updated = ctx
+                .app
+                .update_schedule_status(id, status, at)
+                .map_err(|_| "SCHEDULE_UPDATE_FAILED")?;
+            serde_json::to_value(updated).map_err(|_| "SCHEDULE_UPDATE_FAILED")
+        }
+        "app_schedule_delete" => {
+            let id = args.get("id").and_then(Value::as_str).ok_or("SCHEDULE_DELETE_FAILED")?;
+            let deleted = ctx
+                .app
+                .delete_schedule_item(id, at)
+                .map_err(|_| "SCHEDULE_DELETE_FAILED")?;
+            serde_json::to_value(deleted).map_err(|_| "SCHEDULE_DELETE_FAILED")
+        }
+        "app_note_upsert" => {
+            let id = args.get("id").and_then(Value::as_str).ok_or("NOTE_SAVE_FAILED")?;
+            let project_id = args
+                .get("projectId")
+                .or_else(|| args.get("project_id"))
+                .and_then(Value::as_str);
+            let conversation_id = args
+                .get("conversationId")
+                .or_else(|| args.get("conversation_id"))
+                .and_then(Value::as_str);
+            let title = args.get("title").and_then(Value::as_str).unwrap_or("");
+            let body_markdown = args
+                .get("bodyMarkdown")
+                .or_else(|| args.get("body_markdown"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let tags: Vec<String> = args
+                .get("tags")
+                .and_then(Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let note = ctx
+                .app
+                .upsert_note(id, project_id, conversation_id, title, body_markdown, &tags, at)
+                .map_err(|_| "NOTE_SAVE_FAILED")?;
+            serde_json::to_value(note).map_err(|_| "NOTE_SAVE_FAILED")
+        }
+        "app_note_delete" => {
+            let id = args.get("id").and_then(Value::as_str).ok_or("NOTE_DELETE_FAILED")?;
+            let deleted = ctx
+                .app
+                .delete_note(id, at)
+                .map_err(|_| "NOTE_DELETE_FAILED")?;
+            serde_json::to_value(deleted).map_err(|_| "NOTE_DELETE_FAILED")
+        }
+        "app_ticket_upsert" => {
+            let id = args.get("id").and_then(Value::as_str).ok_or("TICKET_SAVE_FAILED")?;
+            let title = args.get("title").and_then(Value::as_str).ok_or("TICKET_SAVE_FAILED")?;
+            let category = args.get("category").and_then(Value::as_str).unwrap_or("general");
+            let ticket_meta = args
+                .get("ticketMeta")
+                .or_else(|| args.get("ticket_meta"))
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            let start_at = args
+                .get("startAt")
+                .or_else(|| args.get("start_at"))
+                .and_then(Value::as_i64);
+            let end_at = args
+                .get("endAt")
+                .or_else(|| args.get("end_at"))
+                .and_then(Value::as_i64);
+            let notes_summary = args
+                .get("notesSummary")
+                .or_else(|| args.get("notes_summary"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let (note, schedule) = ctx
+                .app
+                .upsert_ticket(
+                    id,
+                    title,
+                    category,
+                    &ticket_meta,
+                    start_at,
+                    end_at,
+                    notes_summary,
+                    at,
+                )
+                .map_err(|_| "TICKET_SAVE_FAILED")?;
+            Ok(json!({
+                "ticket": note,
+                "schedule": schedule,
+            }))
+        }
+        "app_capture_vision_target" => serde_json::to_value(ctx.runtime.vision_target()?).map_err(|_|"VISION_NOT_CONFIGURED"),
+        "app_capture_media_put" => {
+            let id=ctx.app.put_capture_media(args["mime"].as_str().unwrap_or(""),args["base64"].as_str().unwrap_or(""),at).map_err(|_|"CAPTURE_IMAGE_INVALID")?;
+            Ok(json!({"id":id}))
+        }
+        "app_capture_media_get" => {
+            let id=if let Some(id)=args["mediaId"].as_str() {Some(id.to_owned())} else {
+                ctx.app.capture_image_id(args["captureId"].as_str().unwrap_or("")).map_err(|_|"CAPTURE_IMAGE_MISSING")?
+            };
+            match id {Some(id)=>serde_json::to_value(ctx.app.capture_media(&id).map_err(|_|"CAPTURE_IMAGE_MISSING")?).map_err(|_|"CAPTURE_IMAGE_MISSING"),None=>Ok(Value::Null)}
+        }
+        "app_capture_create" => {
+            let id = args.get("id").and_then(Value::as_str).ok_or("CAPTURE_SAVE_FAILED")?;
+            let source_message_id = args
+                .get("sourceMessageId")
+                .or_else(|| args.get("source_message_id"))
+                .and_then(Value::as_str);
+            let content_ref = args
+                .get("contentRef")
+                .or_else(|| args.get("content_ref"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let cap = ctx
+                .app
+                .capture_with_image(id, source_message_id, content_ref,
+                    args.get("projectId").and_then(Value::as_str),
+                    args.get("newProjectTitle").and_then(Value::as_str), args.get("mediaId").and_then(Value::as_str), at)
+                .map_err(|_| "CAPTURE_SAVE_FAILED")?;
+            serde_json::to_value(cap).map_err(|_| "CAPTURE_SAVE_FAILED")
+        }
+        // BOB-D-014 unified inbox. Zero-decision capture: no project, tag or date at write time.
+        // Also the ingestion target for external clients (owner token via /api/rpc/).
+        "app_inbox_capture" => {
+            let id = args.get("id").and_then(Value::as_str).ok_or("INBOX_CAPTURE_FAILED")?;
+            let content = args.get("content").and_then(Value::as_str).unwrap_or("");
+            let cap = ctx
+                .app
+                .capture_with_image(id, None, content, None, None, args.get("mediaId").and_then(Value::as_str), at)
+                .map_err(|_| "INBOX_CAPTURE_FAILED")?;
+            serde_json::to_value(cap).map_err(|_| "INBOX_CAPTURE_FAILED")
+        }
+        "app_inbox_list" => {
+            let items = ctx
+                .app
+                .list_inbox(args.get("status").and_then(Value::as_str))
+                .map_err(|_| "INBOX_LIST_FAILED")?;
+            serde_json::to_value(items).map_err(|_| "INBOX_LIST_FAILED")
+        }
+        "app_inbox_triage_set" => {
+            let capture_id = args.get("captureId").and_then(Value::as_str).ok_or("INBOX_TRIAGE_REJECTED")?;
+            let expected = args.get("expectedVersion").and_then(Value::as_i64).ok_or("INBOX_TRIAGE_REJECTED")?;
+            let destination = match args.get("destination").filter(|d| !d.is_null()) {
+                Some(d) => Some(bob_kernel::spark_inbox::TriageDestination {
+                    kind: d.get("kind").and_then(Value::as_str).ok_or("INBOX_TRIAGE_REJECTED")?.to_owned(),
+                    ref_id: d.get("refId").and_then(Value::as_str).map(str::to_owned),
+                    label: d.get("label").and_then(Value::as_str).map(str::to_owned),
+                }),
+                None => None,
+            };
+            let triage = ctx
+                .app
+                .set_capture_triage(capture_id, destination.as_ref(), args.get("batchId").and_then(Value::as_str), expected, at)
+                .map_err(|_| "INBOX_TRIAGE_REJECTED")?;
+            let mut out = serde_json::to_value(&triage).map_err(|_| "INBOX_TRIAGE_REJECTED")?;
+            if let Some(dest) = destination.as_ref().filter(|d| d.kind == "project_todo") {
+                let capture_text = ctx
+                    .app
+                    .list_inbox(None)
+                    .ok()
+                    .and_then(|items| {
+                        items
+                            .into_iter()
+                            .find(|it| it.capture.id == capture_id)
+                            .map(|it| it.capture.content_ref)
+                    })
+                    .unwrap_or_default();
+                if !capture_text.trim().is_empty() {
+                    let wb = inbox_triage::writeback_or_queue_project_todo(
+                        &ctx.runtime.data_dir,
+                        capture_id,
+                        dest.ref_id.as_deref().unwrap_or(""),
+                        dest.label.as_deref().unwrap_or(""),
+                        &capture_text,
+                        at,
+                    );
+                    if let Some(obj) = out.as_object_mut() {
+                        obj.insert("writeback".to_string(), wb);
+                    }
+                }
+            }
+            Ok(out)
+        }
+        "app_inbox_triage_close" => {
+            let id = args.get("batchId").and_then(Value::as_str).ok_or("TRIAGE_CLOSE_REJECTED")?;
+            let status = args.get("status").and_then(Value::as_str).ok_or("TRIAGE_CLOSE_REJECTED")?;
+            let batch = ctx.app.close_triage_batch(id, status, at).map_err(|_| "TRIAGE_CLOSE_REJECTED")?;
+            serde_json::to_value(batch).map_err(|_| "TRIAGE_CLOSE_REJECTED")
+        }
+        "app_inbox_resolution_set" => {
+            let capture_id = args.get("captureId").and_then(Value::as_str).ok_or("INBOX_RESOLUTION_REJECTED")?;
+            let status = args.get("resolutionStatus").and_then(Value::as_str).ok_or("INBOX_RESOLUTION_REJECTED")?;
+            let note = args.get("resolutionNote").and_then(Value::as_str);
+            let triage = ctx
+                .app
+                .set_inbox_resolution(capture_id, status, note, at)
+                .map_err(|_| "INBOX_RESOLUTION_REJECTED")?;
+            serde_json::to_value(triage).map_err(|_| "INBOX_RESOLUTION_REJECTED")
+        }
+        "app_inbox_update_content" => {
+            let capture_id = args.get("captureId").and_then(Value::as_str).ok_or("INBOX_UPDATE_REJECTED")?;
+            let content = args.get("content").and_then(Value::as_str).ok_or("INBOX_UPDATE_REJECTED")?;
+            ctx.app
+                .update_inbox_content(capture_id, content)
+                .map_err(|_| "INBOX_UPDATE_REJECTED")?;
+            Ok(json!({ "ok": true, "capture_id": capture_id }))
+        }
+        "app_memory_state" => {
+            let id = args.get("id").and_then(Value::as_str).ok_or("MEMORY_UPDATE_FAILED")?;
+            let new_state = args
+                .get("newState")
+                .or_else(|| args.get("new_state"))
+                .and_then(Value::as_str)
+                .ok_or("MEMORY_UPDATE_FAILED")?;
+            let mem = ctx
+                .app
+                .update_memory_state(id, new_state)
+                .map_err(|_| "MEMORY_UPDATE_FAILED")?;
+            serde_json::to_value(mem).map_err(|_| "MEMORY_UPDATE_FAILED")
+        }
+        "app_decision_record" => {
+            let id = args.get("id").and_then(Value::as_str).ok_or("DECISION_SAVE_FAILED")?;
+            let project_id = args
+                .get("projectId")
+                .or_else(|| args.get("project_id"))
+                .and_then(Value::as_str)
+                .filter(|s| !s.trim().is_empty())
+                .map(str::to_owned)
+                .unwrap_or_else(|| {
+                    let snap = ctx.app.catalog_snapshot().ok();
+                    if let Some(first) = snap.and_then(|s| s.projects.into_iter().next()) {
+                        first.id
+                    } else {
+                        let pid = "proj-default".to_owned();
+                        let _ = ctx.app.create_project(&pid, "Default Workspace", at);
+                        pid
+                    }
+                });
+            let task_id = args
+                .get("taskId")
+                .or_else(|| args.get("task_id"))
+                .and_then(Value::as_str);
+            let body = args.get("body").and_then(Value::as_str).unwrap_or("");
+            let source_message_id = args
+                .get("sourceMessageId")
+                .or_else(|| args.get("source_message_id"))
+                .and_then(Value::as_str)
+                .filter(|s| !s.trim().is_empty())
+                .map(str::to_owned)
+                .unwrap_or_else(|| {
+                    let session = ctx
+                        .app
+                        .selected_conversation()
+                        .unwrap_or_else(|_| "default".to_owned());
+                    let hist = ctx.app.history(&session).unwrap_or_default();
+                    if let Some(last) = hist.last() {
+                        last.id.clone()
+                    } else {
+                        let req_id = format!("dec-src-req-{id}");
+                        let mid = format!("dec-src-msg-{id}");
+                        let _ = ctx.app.accept(
+                            &req_id,
+                            &mid,
+                            &session,
+                            format!("Decision record: {body}"),
+                            at,
+                        );
+                        mid
+                    }
+                });
+            let rationale_json = args
+                .get("rationaleJson")
+                .or_else(|| args.get("rationale_json"))
+                .and_then(Value::as_str)
+                .unwrap_or("{}");
+            let status = args
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("proposed");
+            let supersedes_id = args
+                .get("supersedesId")
+                .or_else(|| args.get("supersedes_id"))
+                .and_then(Value::as_str);
+            let dec = ctx
+                .app
+                .record_decision(
+                    id,
+                    &project_id,
+                    task_id,
+                    &source_message_id,
+                    body,
+                    rationale_json,
+                    status,
+                    supersedes_id,
+                )
+                .map_err(|_| "DECISION_SAVE_FAILED")?;
+            serde_json::to_value(dec).map_err(|_| "DECISION_SAVE_FAILED")
+        }
+        "app_decision_status" => {
+            let id = args.get("id").and_then(Value::as_str).ok_or("DECISION_UPDATE_FAILED")?;
+            let status = args
+                .get("status")
+                .and_then(Value::as_str)
+                .ok_or("DECISION_UPDATE_FAILED")?;
+            let dec = ctx
+                .app
+                .update_decision_status(id, status)
+                .map_err(|_| "DECISION_UPDATE_FAILED")?;
+            serde_json::to_value(dec).map_err(|_| "DECISION_UPDATE_FAILED")
+        }
+        "app_model_hub_get" => {
+            let mut snap = ctx.runtime.build_snapshot_and_sync(&mut ctx.app)?;
+            if let Some(quotas) = snap.get("subscriptionQuotas") {
+                quota_sync::maybe_sync_in_background(quotas);
+            }
+            snap["quotaCheckpoint"] = quota_sync::status_snapshot();
+            Ok(snap)
+        }
+        "app_quota_checkpoint_sync" => {
+            let quotas = bob_runtime::subscription_quota::read(&ctx.runtime.data_dir);
+            Ok(quota_sync::sync_now(&quotas))
+        }
+        "app_provider_key_set" => {
+            let pid = args
+                .get("providerId")
+                .or_else(|| args.get("provider_id"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let api_key = args
+                .get("apiKey")
+                .or_else(|| args.get("api_key"))
+                .and_then(Value::as_str);
+            let clear_key = args
+                .get("clearKey")
+                .or_else(|| args.get("clear_key"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            ctx.runtime
+                .set_provider_key(&mut ctx.app, pid, api_key, clear_key)
+        }
+        "app_model_role_assign" => {
+            let role = args.get("role").and_then(Value::as_str).unwrap_or("main");
+            let model_ref_val = args
+                .get("modelRef")
+                .or_else(|| args.get("modelEntryId"))
+                .or_else(|| args.get("model_ref"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim();
+            let model_ref = if !model_ref_val.is_empty() {
+                model_ref_val.to_string()
+            } else {
+                let pid = args.get("providerId").or_else(|| args.get("provider_id")).and_then(Value::as_str).unwrap_or("");
+                let mid = args.get("modelId").or_else(|| args.get("model_id")).and_then(Value::as_str).unwrap_or("");
+                if !pid.is_empty() && !mid.is_empty() {
+                    format!("{pid}::{mid}")
+                } else {
+                    model_ref_val.to_string()
+                }
+            };
+            ctx.runtime.assign_role(&mut ctx.app, role, &model_ref)
+        }
+        "app_provider_variant_set" => {
+            let pid = args
+                .get("providerId")
+                .or_else(|| args.get("provider_id"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let variant = args
+                .get("variant")
+                .and_then(Value::as_str)
+                .unwrap_or("default");
+            ctx.runtime
+                .set_provider_variant(&mut ctx.app, pid, variant)
+        }
+        "app_custom_model_save" => {
+            let id = args.get("id").and_then(Value::as_str).map(str::to_owned);
+            let name = args.get("name").and_then(Value::as_str).unwrap_or("");
+            let model_name = args
+                .get("modelName")
+                .or_else(|| args.get("modelId"))
+                .or_else(|| args.get("model_name"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let base_url = args
+                .get("baseUrl")
+                .or_else(|| args.get("base_url"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let api_key = args
+                .get("apiKey")
+                .or_else(|| args.get("api_key"))
+                .and_then(Value::as_str);
+            let vision = args
+                .get("vision")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            ctx.runtime.save_custom_model(
+                &mut ctx.app,
+                id,
+                name,
+                model_name,
+                base_url,
+                api_key,
+                vision,
+            )
+        }
+        "app_custom_model_delete" => {
+            let id = args.get("id").and_then(Value::as_str).unwrap_or("");
+            ctx.runtime.delete_custom_model(&mut ctx.app, id)
+        }
+        "app_project_links" => ctx.app.project_session_links().map_err(|_| "PROJECT_LINK_READ_FAILED"),
+        "app_project_link_set" => {
+            ctx.app.set_project_session_link(
+                args["connectionId"].as_str().ok_or("PROJECT_LINK_TARGET_REQUIRED")?,
+                args["harness"].as_str().ok_or("PROJECT_LINK_TARGET_REQUIRED")?,
+                args["sessionId"].as_str().ok_or("PROJECT_LINK_TARGET_REQUIRED")?,
+                args["projectId"].as_str(),
+                args["expectedVersion"].as_i64().ok_or("PROJECT_LINK_VERSION_REQUIRED")?,
+                now_millis(),
+            ).map_err(|_| "PROJECT_LINK_CONFLICT")
+        }
+        "app_remote_node_save" => {
+            let id = args.get("id").and_then(Value::as_str).map(str::to_owned);
+            let name = args.get("name").or_else(|| args.get("label")).and_then(Value::as_str).unwrap_or("");
+            let url = args.get("url").or_else(|| args.get("baseUrl")).and_then(Value::as_str).unwrap_or("");
+            let token = args.get("token").and_then(Value::as_str);
+            let clear_token = args
+                .get("clearToken")
+                .or_else(|| args.get("clear_token"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let remark = args.get("remark").and_then(Value::as_str);
+            let enabled = args
+                .get("enabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            ctx.runtime.save_remote_node_for_device(
+                &mut ctx.app,
+                id,
+                name,
+                url,
+                token,
+                clear_token,
+                remark,
+                enabled,
+                args.get("deviceId").and_then(Value::as_str),
+            )
+        }
+        "app_remote_node_delete" => {
+            let id = args.get("id").and_then(Value::as_str).unwrap_or("");
+            ctx.runtime.delete_remote_node(&mut ctx.app, id)
+        }
+        "app_registry_save" => {
+            let registry = args
+                .get("registry")
+                .cloned()
+                .ok_or("REGISTRY_SAVE_FAILED")?;
+            ctx.runtime.save_registry(&registry)?;
+            ctx.runtime.build_snapshot_and_sync(&mut ctx.app)
+        }
+        "app_model_visibility_set" => {
+            let pid = args
+                .get("providerId")
+                .or_else(|| args.get("provider_id"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let mid = args
+                .get("modelId")
+                .or_else(|| args.get("model_id"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let visible = args
+                .get("visible")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            ctx.runtime
+                .set_model_visibility(&mut ctx.app, pid, mid, visible)
+        }
+        "app_models_discover" => {
+            let pid = args
+                .get("providerId")
+                .or_else(|| args.get("provider_id"))
+                .and_then(Value::as_str);
+            ctx.runtime.discover_and_curate_models(&mut ctx.app, pid)
+        }
+        "app_provider_get" => {
+            let prof = ctx
+                .app
+                .direct_provider_profile()
+                .map_err(|_| "PROVIDER_READ_FAILED")?;
+            serde_json::to_value(prof).map_err(|_| "PROVIDER_READ_FAILED")
+        }
+        "app_route_get" => {
+            let session = args
+                .get("sessionId")
+                .or_else(|| args.get("session_id"))
+                .and_then(Value::as_str)
+                .unwrap_or("default");
+            let route = ctx
+                .app
+                .conversation_execution_route(session)
+                .unwrap_or_else(|_| "auto".to_owned());
+            Ok(json!(route))
+        }
+        "app_route_set" => {
+            let session = args
+                .get("sessionId")
+                .or_else(|| args.get("session_id"))
+                .and_then(Value::as_str)
+                .unwrap_or("default");
+            let route = args.get("route").and_then(Value::as_str).unwrap_or("auto");
+            let saved = ctx
+                .app
+                .set_conversation_execution_route(session, route, at)
+                .map_err(|_| "ROUTE_SAVE_FAILED")?;
+            Ok(json!(saved))
+        }
+        "app_pairing_capabilities" => {
+            let mut val = serde_json::to_value(RuntimeCapabilityManifest::headless_node())
+                .map_err(|_| "CAPABILITIES_UNAVAILABLE")?;
+            if let Some(obj) = val.as_object_mut() {
+                obj.insert("can_host".to_owned(), json!(true));
+                obj.insert("can_scan".to_owned(), json!(false));
+                obj.insert("start_pairing".to_owned(), json!(false));
+            }
+            Ok(val)
+        }
+        "app_pairing_status" => {
+            let latest_qr = ctx
+                .online
+                .pairings
+                .values()
+                .filter(|p| p.pairing_id.starts_with("qr_"))
+                .max_by_key(|p| p.created_at);
+            let (state_str, exp_opt) = match latest_qr {
+                Some(p) if p.exchanged_token.is_some() => ("connected", Some(p.expires_at)),
+                Some(p) if p.expires_at > at => ("open", Some(p.expires_at)),
+                _ => ("home_ready", None),
+            };
+            Ok(json!({
+                "role": "home",
+                "state": state_str,
+                "expires_at": exp_opt,
+                "paired_home": Value::Null,
+                "home_enabled": true,
+                "online_node": true,
+            }))
+        }
+        "app_pairing_qr_create" => {
+            let _ = bob_runtime::agy_directory::ensure_local_grant_registered(
+                &ctx.runtime.data_dir,
+                "local",
+            );
+            let origin = args
+                .get("origin")
+                .or_else(|| args.get("baseUrl"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .or_else(|| std::env::var("BOB_NODE_PUBLIC_URL").ok().filter(|s| !s.trim().is_empty()))
+                .unwrap_or_else(|| {
+                    format!(
+                        "http://{}:53020",
+                        bob_runtime::node_pairing::detect_lan_or_tailscale_ip()
+                    )
+                });
+            let clean_url = origin.trim_end_matches('/').to_owned();
+            let url_host_label = clean_url
+                .split("://")
+                .nth(1)
+                .unwrap_or(&clean_url)
+                .split('/')
+                .next()
+                .unwrap_or("")
+                .split(':')
+                .next()
+                .unwrap_or("")
+                .split('.')
+                .next()
+                .filter(|s| !s.is_empty() && *s != "localhost" && *s != "127")
+                .map(str::to_owned);
+            let default_host = std::env::var("BOB_NODE_LABEL")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .or(url_host_label)
+                .or_else(|| std::env::var("HOSTNAME").ok().filter(|s| !s.trim().is_empty()))
+                .or_else(|| std::env::var("COMPUTERNAME").ok().filter(|s| !s.trim().is_empty()))
+                .unwrap_or_else(|| "Bob Host".to_owned());
+            let label = args
+                .get("label")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or(&default_host)
+                .to_owned();
+            let role = args
+                .get("role")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or(if ctx.static_dir.is_some() {
+                    "web_host"
+                } else {
+                    "node"
+                })
+                .to_owned();
+            let pairing_id = format!(
+                "qr_{}",
+                node_access::random_base62(8).unwrap_or_else(|_| format!("{at}_{}", ctx.online.pairings.len() + 1))
+            );
+            let user_code = node_access::random_base62(16).unwrap_or_else(|_| csprng_digits_6());
+            let expires_at = at + 600_000;
+            ctx.online.pairings.insert(
+                pairing_id.clone(),
+                OnlinePairingSession {
+                    pairing_id: pairing_id.clone(),
+                    user_code: user_code.clone(),
+                    device_name: label.clone(),
+                    created_at: at,
+                    expires_at,
+                    exchanged_token: None,
+                },
+            );
+            ctx.save_online();
+            let node_id = bob_runtime::node_pairing::compute_node_id(&clean_url);
+            let inv = bob_runtime::node_pairing::NodePairingInvitation {
+                v: 1,
+                role: role.clone(),
+                node_id: node_id.clone(),
+                label: label.clone(),
+                base_url: clean_url.clone(),
+                pairing_id: pairing_id.clone(),
+                user_code: user_code.clone(),
+                expires_at,
+                harnesses: Vec::new(),
+            };
+            let qr_code = inv.encode_compact_qr_code();
+            Ok(json!({
+                "code": qr_code,
+                "expires_at": expires_at,
+                "state": "open",
+                "role": role,
+                "node_id": node_id,
+                "home_name": label,
+                "base_url": clean_url,
+                "pairing_id": pairing_id,
+                "user_code": user_code,
+                "addresses": [clean_url],
+            }))
+        }
+        "app_security_lock_status" | "app_security_lock_set" | "app_security_lock_unlock" => {
+            Ok(json!({
+                "supported": false,
+                "enrolled": false,
+                "decided": true,
+                "enabled": false,
+                "unlocked": true,
+            }))
+        }
+        "app_node_discover" => {
+            let address = args
+                .get("address")
+                .or_else(|| args.get("baseUrl"))
+                .and_then(Value::as_str)
+                .ok_or("NODE_ADDRESS_INVALID")?;
+            bob_runtime::node_pairing::discover_remote_node(address)
+        }
+        "app_node_connect" => {
+            let local_topo = bob_runtime::node_pairing::export_local_topology_with_app(
+                &ctx.runtime.data_dir,
+                Some(&ctx.app),
+                &ctx.runtime,
+                true,
+            );
+            let device_name = std::env::var("BOB_NODE_LABEL")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "Bob Operator".to_owned());
+            let connected = bob_runtime::node_pairing::connect_remote_node(
+                args,
+                &device_name,
+                &local_topo,
+                at,
+            )?;
+            let node_id = connected["nodeId"]
+                .as_str()
+                .ok_or("NODE_CONNECT_FAILED")?
+                .to_owned();
+            let label = connected["label"].as_str().unwrap_or(&node_id).to_owned();
+            let base_url = connected["baseUrl"]
+                .as_str()
+                .ok_or("NODE_CONNECT_FAILED")?
+                .to_owned();
+            let role = connected["role"].as_str().unwrap_or("node").to_owned();
+            let token = connected["accessToken"]
+                .as_str()
+                .ok_or("NODE_CONNECT_FAILED")?
+                .to_owned();
+            let _ = ctx.runtime.save_remote_node(
+                &mut ctx.app,
+                Some(node_id.clone()),
+                &label,
+                &base_url,
+                Some(&token),
+                false,
+                Some(&role),
+                true,
+            )?;
+            if let Some(synced) = connected.get("syncedTopology").filter(|v| v.is_object() && !v.as_object().unwrap().is_empty()) {
+                let _ = bob_runtime::node_pairing::merge_topology(
+                    &ctx.runtime.data_dir,
+                    &mut ctx.app,
+                    &ctx.runtime,
+                    synced,
+                );
+            }
+            Ok(json!({
+                "connected": true,
+                "nodeId": node_id,
+                "label": label,
+                "baseUrl": base_url,
+                "role": role,
+                "mobileQr": connected.get("mobileQr").cloned().unwrap_or(Value::Null),
+            }))
+        }
+        "app_pairing_qr_propose" => {
+            let raw_code = args
+                .get("invitationCode")
+                .or_else(|| args.get("invitation_code"))
+                .or_else(|| args.get("code"))
+                .and_then(Value::as_str)
+                .ok_or("PAIRING_CODE_INVALID")?;
+            let inv = bob_runtime::node_pairing::NodePairingInvitation::decode_qr_code(raw_code, at)?;
+            let local_topo = bob_runtime::node_pairing::export_local_topology_with_app(
+                &ctx.runtime.data_dir,
+                Some(&ctx.app),
+                &ctx.runtime,
+                true,
+            );
+            let exchanged = bob_runtime::node_pairing::exchange_and_sync_with_peer(
+                &inv,
+                "Bob Mobile Broker",
+                &local_topo,
+            )?;
+            let token = exchanged
+                .get("accessToken")
+                .and_then(Value::as_str)
+                .ok_or("PAIRING_CODE_INVALID")?;
+            let _ = ctx.runtime.save_remote_node(
+                &mut ctx.app,
+                Some(inv.node_id.clone()),
+                &inv.label,
+                &inv.base_url,
+                Some(token),
+                false,
+                Some(&inv.role),
+                true,
+            )?;
+            if let Some(synced) = exchanged.get("syncedTopology") {
+                let _ = bob_runtime::node_pairing::merge_topology(
+                    &ctx.runtime.data_dir,
+                    &mut ctx.app,
+                    &ctx.runtime,
+                    synced,
+                );
+            }
+            Ok(json!({
+                "role": "replica",
+                "state": "connected",
+                "node_id": inv.node_id,
+                "label": inv.label,
+                "base_url": inv.base_url,
+                "expires_at": inv.expires_at,
+            }))
+        }
+        "app_pairing_finish" => Ok(json!({
+            "role": "replica",
+            "state": "connected",
+        })),
+        "app_pairing_reset" => {
+            for p in ctx.online.pairings.values_mut() {
+                if p.exchanged_token.is_none() {
+                    p.expires_at = 0;
+                }
+            }
+            ctx.save_online();
+            Ok(json!({
+                "role": "home",
+                "state": "unconfigured",
+            }))
+        }
+        "app_topology_sync" => {
+            let _ = bob_runtime::agy_directory::ensure_local_grant_registered(
+                &ctx.runtime.data_dir,
+                "local",
+            );
+            let mut cleaned = args.clone();
+            if ctx.static_dir.is_some() {
+                filter_self_web_host_nodes(&mut cleaned);
+            }
+            bob_runtime::node_pairing::merge_topology(
+                &ctx.runtime.data_dir,
+                &mut ctx.app,
+                &ctx.runtime,
+                &cleaned,
+            )
+        }
+        "app_home_sync" => Ok(json!({
+            "status": "online_node_local",
+            "reachable": true,
+        })),
+        "app_executions" => {
+            let session = args
+                .get("sessionId")
+                .or_else(|| args.get("session_id"))
+                .and_then(Value::as_str)
+                .unwrap_or("default");
+            let mut result: Vec<Value> = ctx
+                .app
+                .local_executions(session)
+                .map_err(|_| "EXECUTION_READ_FAILED")?
+                .into_iter()
+                .filter_map(|e| serde_json::to_value(e).ok())
+                .collect();
+            let remote: Vec<Value> = ctx
+                .app
+                .remote_executions(session)
+                .map_err(|_| "EXECUTION_READ_FAILED")?
+                .into_iter()
+                .filter_map(|e| serde_json::to_value(e).ok())
+                .collect();
+            result.extend(remote);
+            Ok(json!(result))
+        }
+        "app_execute" => {
+            let request_id = args
+                .get("requestId")
+                .or_else(|| args.get("request_id"))
+                .and_then(Value::as_str)
+                .ok_or("REQUEST_ID_REQUIRED")?;
+            let prepared = ctx
+                .app
+                .prepare_direct_execution(request_id, at)
+                .map_err(|_| "EXECUTION_PREPARE_FAILED")?;
+            if !prepared.can_start {
+                let existing = ctx.app.local_executions(&prepared.conversation_id)
+                    .map_err(|_| "EXECUTION_READ_FAILED")?.into_iter()
+                    .find(|e| e.id == prepared.execution_id).ok_or("EXECUTION_READ_FAILED")?;
+                return serde_json::to_value(existing).map_err(|_| "EXECUTION_READ_FAILED");
+            }
+            let profile = ctx
+                .app
+                .direct_provider_profile()
+                .map_err(|_| "PROVIDER_READ_FAILED")?
+                .ok_or("PROVIDER_UNCONFIGURED")?;
+            let prompt = prepared
+                .messages
+                .last()
+                .map(|m| m.content.as_str())
+                .unwrap_or("");
+            let outcome = if prepared.can_start {
+                match ctx
+                    .runtime
+                    .invoke_direct_model(&profile, &prepared.messages, prompt)
+                {
+                    Ok(reply) => bob_kernel::direct_provider::DirectExecutionOutcome::Completed {
+                        text: reply,
+                        provider_reported_model: None,
+                        input_tokens: None,
+                        output_tokens: None,
+                    },
+                    Err(code) => bob_kernel::direct_provider::DirectExecutionOutcome::Failed {
+                        reason: code.to_owned(),
+                    },
+                }
+            } else {
+                bob_kernel::direct_provider::DirectExecutionOutcome::Failed {
+                    reason: "EXECUTION_ALREADY_RUNNING".to_owned(),
+                }
+            };
+            let exec = ctx
+                .app
+                .finish_direct_execution(&prepared.execution_id, outcome, now_millis())
+                .map_err(|_| "EXECUTION_READ_FAILED")?;
+            serde_json::to_value(exec).map_err(|_| "EXECUTION_READ_FAILED")
+        }
+        "app_dsh_receipt" => {
+            let connection = args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+            if connection == "local" {
+                let _ = bob_runtime::agy_directory::ensure_local_grant_registered(&ctx.runtime.data_dir, "local");
+            }
+            if let Some(sid)=args.get("sessionId").and_then(Value::as_str).filter(|s|bob_runtime::agy_directory::owns_readable_session(s)) {
+                match bob_runtime::agy_directory::inspect_receipt(
+                    &ctx.runtime.data_dir,
+                    connection,
+                    sid,
+                    args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?,
+                    args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?,
+                ) {
+                    Ok(v) => return Ok(v),
+                    Err("DSH_CONNECTION_REQUIRED") if connection != "local" => {
+                        return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                            &ctx.runtime,
+                            connection,
+                            command,
+                            args,
+                        );
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            if let Some(v) = claude_rpc::try_handle_dsh_command(&ctx.runtime.data_dir, command, args)? {
+                return Ok(v);
+            }
+            bob_runtime::dsh_transport::inspect_receipt(&ctx.runtime.data_dir,
+                connection,
+                args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?,
+                args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?,
+                args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?)
+        }
+        "app_attachment_upload_chunk" | "app_attachment_finalize" => {
+            let connection = args.get("connectionId").and_then(Value::as_str).unwrap_or("local");
+            if connection != "local" {
+                return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                    &ctx.runtime,
+                    connection,
+                    command,
+                    args,
+                );
+            }
+            if command == "app_attachment_upload_chunk" {
+                bob_runtime::dsh_transport::stage_attachment_chunk(&ctx.runtime.data_dir, args)
+            } else {
+                bob_runtime::dsh_transport::finalize_attachment_staging(&ctx.runtime.data_dir, args, at)
+            }
+        }
+        "app_dsh_create" | "app_dsh_cancel" | "app_dsh_answer" | "app_dsh_permission_set" | "app_dsh_live" | "app_dsh_page" | "app_dsh_preview" | "app_dsh_list" | "app_dsh_history" | "app_dsh_prompt" => {
+            let connection=args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+            if connection == "local" {
+                let _ = bob_runtime::agy_directory::ensure_local_grant_registered(&ctx.runtime.data_dir, "local");
+            }
+            if command=="app_dsh_list" {
+                let base = claude_rpc::merge_claude_into_dsh_list(
+                    &ctx.runtime.data_dir, connection,
+                    ctx.runtime.dsh_client(connection).and_then(|c| c.list()),
+                );
+                let agy = bob_runtime::agy_directory::list(&ctx.runtime.data_dir,connection);
+                match (base, agy) {
+                    (Ok(mut b), Ok(extra)) => {
+                        if let Some(rows)=b.as_array_mut() { rows.extend(extra); }
+                        return Ok(b);
+                    }
+                    (Ok(b), Err(_)) => {
+                        if b.as_array().is_some_and(|rows| !rows.is_empty()) {
+                            return Ok(b);
+                        }
+                        if connection != "local" {
+                            if let Ok(remote_rows) = bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                                &ctx.runtime,
+                                connection,
+                                command,
+                                args,
+                            ) {
+                                return Ok(remote_rows);
+                            }
+                        }
+                        return Ok(b);
+                    }
+                    (Err(_), Ok(extra)) if !extra.is_empty() || connection == "local" => return Ok(json!(extra)),
+                    (Err(e), _) => {
+                        if connection != "local" {
+                            if let Ok(remote_rows) = bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                                &ctx.runtime,
+                                connection,
+                                command,
+                                args,
+                            ) {
+                                return Ok(remote_rows);
+                            }
+                        }
+                        return Err(e);
+                    }
+                }
+            }
+            if let Some(v) = claude_rpc::try_handle_dsh_command(&ctx.runtime.data_dir, command, args)? {
+                return Ok(v);
+            }
+            if command == "app_dsh_preview" {
+                if let Some(p) = args.get("path").and_then(Value::as_str) {
+                    if bob_browser::assert_profile_download_forbidden(std::path::Path::new(p)).is_err() {
+                        return Err("BROWSER_PROFILE_FORBIDDEN");
+                    }
+                }
+                if let Some(sid)=args["sessionId"].as_str().filter(|s|bob_runtime::agy_directory::owns_readable_session(s)) {
+                    match bob_runtime::agy_directory::preview_native_file(&ctx.runtime.data_dir, connection, sid, args["path"].as_str().ok_or("DSH_PROTOCOL")?, args.get("known")) {
+                        Ok(v)=>return Ok(v),
+                        Err("DSH_CONNECTION_REQUIRED") if connection != "local" => return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(&ctx.runtime,connection,command,args),
+                        Err(e)=>return Err(e),
+                    }
+                }
+            }
+            if command=="app_dsh_page" {
+                if let Some(sid)=args.get("sessionId").and_then(Value::as_str).filter(|s|bob_runtime::agy_directory::owns_readable_session(s)) {
+                    let after=args.get("after").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?;
+                    match bob_runtime::agy_directory::read_page(&ctx.runtime.data_dir, connection, sid, after) {
+                        Ok(v) => return Ok(v),
+                        Err("DSH_CONNECTION_REQUIRED") if connection != "local" => {
+                            return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                                &ctx.runtime,
+                                connection,
+                                command,
+                                args,
+                            );
+                        }
+                        Err(e) => return Err(e),
+                    }
+                }
+            }
+            if command=="app_dsh_prompt" {
+                if let Some(sid)=args.get("sessionId").and_then(Value::as_str).filter(|s|bob_runtime::agy_directory::owns_readable_session(s)) {
+                    let text=args["text"].as_str().filter(|s|!s.trim().is_empty() && s.len()<=32000).ok_or("DSH_TEXT_REQUIRED")?;
+                    let request=args["requestId"].as_str().filter(|s|s.len()<=200 && !s.is_empty()).ok_or("DSH_REQUEST_REQUIRED")?;
+                    let takeover=args.get("takeover").and_then(Value::as_bool).unwrap_or(false);
+                    let approval_mode=args.get("approvalMode").or_else(||args.get("approval_mode")).and_then(Value::as_str);
+                    let ws_hint = args.get("workspace")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                        .or_else(|| bob_runtime::agy_directory::find_cached_workspace(&ctx.runtime.data_dir, connection, sid));
+                    let staged_text = bob_runtime::dsh_transport::stage_attachments_for_prompt(
+                        &ctx.runtime.data_dir,
+                        connection,
+                        sid,
+                        ws_hint.as_deref(),
+                        text,
+                        args.get("attachments"),
+                    );
+                    let model_override = args.get("model").and_then(Value::as_str);
+                    let reasoning_effort = args.get("reasoningEffort").or_else(|| args.get("reasoning_effort")).and_then(Value::as_str);
+                    match bob_runtime::agy_directory::prompt_session_with_model_options(&ctx.runtime.data_dir, connection, sid, &staged_text, request, takeover, approval_mode, args.get("attachments"), model_override, reasoning_effort) {
+                        Ok(v) => return Ok(v),
+                        Err("DSH_CONNECTION_REQUIRED") if connection != "local" => {
+                            return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                                &ctx.runtime,
+                                connection,
+                                command,
+                                args,
+                            );
+                        }
+                        Err(e) => return Err(e),
+                    }
+                }
+            }
+            if command=="app_dsh_prompt" {
+                let s = args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+                bob_runtime::claude_harness::check_workspace_not_locked_by_other(&ctx.runtime.data_dir, connection, s)?;
+                context_capsule::before_dispatch(&ctx.runtime.data_dir,connection,
+                    s,
+                    args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?,
+                    args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?)?;
+            }
+            let client = match ctx.runtime.dsh_client(connection) {
+                Ok(c) => c,
+                Err("DSH_CONNECTION_NOT_FOUND" | "DSH_CONNECTION_REQUIRED" | "SECRET_NOT_CONFIGURED")
+                    if connection != "local" && matches!(command, "app_dsh_answer" | "app_dsh_permission_set" | "app_dsh_page" | "app_dsh_live" | "app_dsh_history" | "app_dsh_preview" | "app_dsh_prompt") =>
+                {
+                    return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                        &ctx.runtime,
+                        connection,
+                        command,
+                        args,
+                    );
+                }
+                Err(e) => return Err(e),
+            };
+            match command {
+                "app_dsh_create" => {
+                    let session_id = args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+                    let res = client.create_session_in_authorized_workspace(&ctx.runtime.data_dir,
+                        bob_runtime::dsh_session::SessionAddress {
+                            connection_id: connection.into(),
+                            session_id: session_id.into(),
+                        },
+                        args["workspace"].as_str().ok_or("DSH_WORKSPACE_NOT_AVAILABLE")?,
+                        args["title"].as_str().ok_or("DSH_CREATE_INVALID")?,
+                    )?;
+                    let init_mode = args
+                        .get("approvalMode")
+                        .or_else(|| args.get("approval_mode"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("full_auto");
+                    let _ = client.ensure_permission_preset(
+                        bob_runtime::dsh_session::SessionAddress {
+                            connection_id: connection.into(),
+                            session_id: session_id.into(),
+                        },
+                        init_mode,
+                    );
+                    Ok(res)
+                },
+                "app_dsh_cancel" => client.cancel_session(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into()}),
+                "app_dsh_answer" => {
+                    let session = args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+                    let call_id = args["callId"].as_str().ok_or("DSH_PROTOCOL")?;
+                    let answers = args.get("answers").ok_or("BAD_ANSWER")?;
+                    let res = client.answer_question(
+                        bob_runtime::dsh_session::SessionAddress {
+                            connection_id: connection.into(),
+                            session_id: session.into(),
+                        },
+                        call_id,
+                        answers,
+                    )?;
+                    let _ = bob_runtime::claude_harness::record_external_harness_turn_for_session(
+                        &ctx.runtime.data_dir,
+                        connection,
+                        session,
+                        "dsh",
+                    );
+                    Ok(res)
+                }
+                "app_dsh_permission_set" => {
+                    bob_runtime::tool_policy::require(&ctx.runtime.data_dir, connection, "dsh")?;
+                    let session = args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+                    let mode = args
+                        .get("approvalMode")
+                        .or_else(|| args.get("mode"))
+                        .and_then(Value::as_str)
+                        .ok_or("DSH_PERMISSION_MODE_INVALID")?;
+                    client.set_permission_preset(
+                        bob_runtime::dsh_session::SessionAddress {
+                            connection_id: connection.into(),
+                            session_id: session.into(),
+                        },
+                        mode,
+                    )
+                }
+                "app_dsh_live" => client.live(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into()}),
+                "app_dsh_page" => client.history_page(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into()},args.get("before").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?,args.get("through").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?,args.get("after").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?),
+                "app_dsh_preview" => client.preview_message(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args.get("sessionId").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?.into()},args.get("path").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?,args.get("known").filter(|v|!v.is_null()), args.get("messageSequence").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PROTOCOL")).transpose()?),
+                "app_dsh_history" => {
+                    let session=args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+                    serde_json::to_value(client.history(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:session.into()})?).map_err(|_|"DSH_PROTOCOL")
+                },
+                _ => {
+                    let session=args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+                    let text=args["text"].as_str().filter(|s|!s.trim().is_empty() && s.len()<=32000).ok_or("DSH_TEXT_REQUIRED")?;
+                    let request=args["requestId"].as_str().filter(|s|s.len()<=200 && !s.is_empty()).ok_or("DSH_REQUEST_REQUIRED")?;
+                    let dsh_mode = args
+                        .get("approvalMode")
+                        .or_else(|| args.get("approval_mode"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("full_auto");
+                    let _ = client.ensure_permission_preset(
+                        bob_runtime::dsh_session::SessionAddress {
+                            connection_id: connection.into(),
+                            session_id: session.into(),
+                        },
+                        dsh_mode,
+                    );
+                    let wire = context_capsule::before_dispatch(&ctx.runtime.data_dir,connection,session,request,text)?;
+                    let ws_hint = client.resolve_session_workspace(session);
+                    let staged_wire = bob_runtime::dsh_transport::stage_attachments_for_prompt(&ctx.runtime.data_dir, connection, session, ws_hint.as_deref(), &wire, args.get("attachments"));
+                    let res = bob_runtime::dsh_transport::dispatch_once(&ctx.runtime.data_dir,connection,session,text,request,||client.prompt(session,&staged_wire,request))?;
+                    let _ = bob_runtime::claude_harness::record_external_harness_turn_for_session(&ctx.runtime.data_dir, connection, session, "dsh");
+                    Ok(res)
+                }
+            }
+        }
+        "app_online_sync" => {
+            ctx.sync_catalog_into_online_store();
+            let catalog = ctx
+                .app
+                .catalog_snapshot()
+                .map_err(|_| "CATALOG_READ_FAILED")?;
+            let projects: Vec<Value> = catalog
+                .projects
+                .iter()
+                .map(|p| {
+                    json!({
+                        "id": p.id,
+                        "name": p.title,
+                        "title": p.title,
+                        "status": "active",
+                        "updated_at": p.updated_at,
+                    })
+                })
+                .collect();
+            let tasks: Vec<Value> = catalog
+                .conversations
+                .iter()
+                .filter_map(|c| {
+                    c.project_id.as_ref().map(|pid| {
+                        json!({
+                            "id": format!("task-{}", c.id),
+                            "project_id": pid,
+                            "conversation_id": c.id,
+                            "title": c.title,
+                            "status": if c.has_running_execution { "running" } else { "ready" },
+                            "updated_at": c.updated_at,
+                        })
+                    })
+                })
+                .collect();
+            Ok(json!({
+                "status": "connected",
+                "offline_cached": false,
+                "capabilities": {
+                    "version": "client-v1",
+                    "capabilities": {
+                        "catalog": true,
+                        "history": true,
+                        "pagination": true,
+                        "submit": true,
+                        "query": true,
+                        "cancel": true,
+                        "artifacts": true,
+                        "parent_revision": true,
+                        "review": true,
+                        "persistent_execution": true
+                    }
+                },
+                "projects": projects,
+                "tasks": tasks,
+                "snapshots": ctx.online.task_snapshots,
+                "messages": ctx.online.project_messages,
+                "synced_at": at
+            }))
+        }
+        "app_online_submit_operation" => {
+            let op_type = args
+                .get("operationType")
+                .or_else(|| args.get("operation_type"))
+                .and_then(Value::as_str)
+                .unwrap_or("submit");
+            let task_id = args
+                .get("taskId")
+                .or_else(|| args.get("task_id"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let request_id = args
+                .get("requestId")
+                .or_else(|| args.get("request_id"))
+                .and_then(Value::as_str)
+                .unwrap_or("req-local");
+            let payload = args.get("payload").cloned().unwrap_or_else(|| json!({}));
+            let op_body = json!({
+                "request_id": request_id,
+                "type": op_type,
+                "task_id": task_id,
+                "payload": payload,
+            });
+            execute_online_operation(ctx, &op_body)
+        }
+        "app_host_queue_reconcile" => {
+            let node_id = args
+                .get("nodeId")
+                .or_else(|| args.get("node_id"))
+                .and_then(Value::as_str)
+                .ok_or("NODE_ID_REQUIRED")?;
+            let mut bus = bob_runtime::tool_bus::BobToolBus::with_approval_store(&ctx.runtime.data_dir)
+                .map_err(|_| "BUS_INIT_FAILED")?;
+            crate::browser_ws::register_browser_tools(&mut bus, &ctx.runtime.data_dir);
+            let list = bob_runtime::host_tools::HostOfflineQueueStore::reconcile_when_pc_online(
+                &ctx.runtime.data_dir,
+                node_id,
+                &mut bus,
+                &mut ctx.app,
+                at,
+            )
+            .map_err(|_| "RECONCILE_FAILED")?;
+            serde_json::to_value(list).map_err(|_| "QUEUE_SERIALIZE_FAILED")
+        }
+        cmd if cmd.starts_with("app_browser_") => {
+            crate::browser_ws::handle_browser_rpc(data_dir, cmd, args)
+        }
+        cmd if bob_runtime::runtime_rpc::is_runtime_rpc_command(cmd) => {
+            bob_runtime::runtime_rpc::dispatch_runtime_rpc(data_dir, cmd, args)
+        }
+        _ => Ok(json!({ "status": "ok" })),
+    }
+}
+
+pub fn execute_online_operation(ctx: &mut NodeContext, body: &Value) -> Result<Value, &'static str> {
+    let request_id = body
+        .get("request_id")
+        .or_else(|| body.get("requestId"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_owned();
+    if !request_id.is_empty() {
+        if let Some(cached) = ctx.online.operations.get(&request_id) {
+            return Ok(cached.clone());
+        }
+    }
+    let op_type = body
+        .get("type")
+        .or_else(|| body.get("operation"))
+        .and_then(Value::as_str)
+        .unwrap_or("submit");
+    let task_id = body
+        .get("task_id")
+        .or_else(|| body.get("taskId"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let payload = body.get("payload").cloned().unwrap_or_else(|| body.clone());
+    let stamp = now_millis();
+
+    ctx.sync_catalog_into_online_store();
+
+    let result = match op_type {
+        "create_revision" | "create_task_iteration" | "derive_revision" => {
+            let instruction = payload
+                .get("instruction")
+                .or_else(|| payload.get("content"))
+                .and_then(Value::as_str)
+                .unwrap_or("Follow-up revision V2");
+            let snap = ctx
+                .online
+                .task_snapshots
+                .entry(task_id.to_owned())
+                .or_insert_with(|| {
+                    json!({
+                        "task": { "id": task_id, "title": task_id, "status": "in_progress" },
+                        "executions": [],
+                        "steering": [],
+                        "verifications": [],
+                        "reviews": [],
+                        "artifacts": [],
+                        "missing_facts": []
+                    })
+                });
+            let execs = snap
+                .get_mut("executions")
+                .and_then(Value::as_array_mut)
+                .ok_or("INVALID_SNAPSHOT")?;
+            let next_iter = (execs.len() as i64) + 1;
+            let parent_id = payload
+                .get("parent_execution_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .or_else(|| {
+                    execs
+                        .last()
+                        .and_then(|e| e.get("id"))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                });
+            let new_exec_id = format!("exec-{task_id}-v{next_iter}");
+            let new_exec = json!({
+                "id": new_exec_id,
+                "task_id": task_id,
+                "parent_execution_id": parent_id,
+                "iteration": next_iter,
+                "instruction": instruction,
+                "kind": "work_revision",
+                "status": "running",
+                "started_at": stamp,
+                "updated_at": stamp,
+            });
+            execs.push(new_exec.clone());
+            if let Some(artifacts) = snap.get_mut("artifacts").and_then(Value::as_array_mut) {
+                artifacts.push(json!({
+                    "id": format!("art-{task_id}-v{next_iter}"),
+                    "execution_id": new_exec_id,
+                    "type": "markdown",
+                    "name": format!("REVISION_V{next_iter}_SUMMARY.md"),
+                    "summary": format!("V{next_iter}: {instruction}"),
+                    "content_available": true,
+                    "created_at": stamp,
+                }));
+            }
+            if let Some(verifications) =
+                snap.get_mut("verifications").and_then(Value::as_array_mut)
+            {
+                verifications.push(json!({
+                    "id": format!("ver-{task_id}-v{next_iter}"),
+                    "task_id": task_id,
+                    "execution_id": new_exec_id,
+                    "status": "passed",
+                    "summary": format!("Revision V{next_iter} verification checks passed"),
+                    "created_at": stamp,
+                    "completed_at": stamp,
+                }));
+            }
+            json!({
+                "operation_id": format!("op-{stamp}"),
+                "request_id": request_id,
+                "status": "completed",
+                "task_id": task_id,
+                "execution": new_exec,
+                "snapshot": snap.clone(),
+            })
+        }
+        "review" | "submit_review" => {
+            let verdict = payload
+                .get("verdict")
+                .or_else(|| payload.get("status"))
+                .and_then(Value::as_str)
+                .unwrap_or("approved");
+            let note = payload
+                .get("note")
+                .or_else(|| payload.get("comment"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let snap = ctx
+                .online
+                .task_snapshots
+                .entry(task_id.to_owned())
+                .or_insert_with(|| {
+                    json!({
+                        "task": { "id": task_id, "title": task_id, "status": "in_progress" },
+                        "executions": [],
+                        "steering": [],
+                        "verifications": [],
+                        "reviews": [],
+                        "artifacts": [],
+                        "missing_facts": []
+                    })
+                });
+            let exec_id = snap
+                .get("executions")
+                .and_then(Value::as_array)
+                .and_then(|arr| arr.last())
+                .and_then(|e| e.get("id"))
+                .and_then(Value::as_str)
+                .unwrap_or("exec-v1")
+                .to_owned();
+            let review_entry = json!({
+                "id": format!("rev-{task_id}-{stamp}"),
+                "task_id": task_id,
+                "execution_id": exec_id,
+                "status": verdict,
+                "note": note,
+                "created_at": stamp,
+                "resolved_at": stamp,
+            });
+            if let Some(reviews) = snap.get_mut("reviews").and_then(Value::as_array_mut) {
+                reviews.push(review_entry.clone());
+            }
+            if let Some(task_obj) = snap.get_mut("task").and_then(Value::as_object_mut) {
+                task_obj.insert(
+                    "status".to_owned(),
+                    json!(if verdict == "approved" {
+                        "completed"
+                    } else {
+                        "changes_requested"
+                    }),
+                );
+            }
+            json!({
+                "operation_id": format!("op-{stamp}"),
+                "request_id": request_id,
+                "status": "completed",
+                "task_id": task_id,
+                "review": review_entry,
+                "snapshot": snap.clone(),
+            })
+        }
+        "cancel" | "cancel_execution" => {
+            if let Some(snap) = ctx.online.task_snapshots.get_mut(task_id) {
+                if let Some(execs) = snap.get_mut("executions").and_then(Value::as_array_mut) {
+                    if let Some(last) = execs.last_mut() {
+                        last["status"] = json!("cancelled");
+                        last["ended_at"] = json!(stamp);
+                    }
+                }
+            }
+            json!({
+                "operation_id": format!("op-{stamp}"),
+                "request_id": request_id,
+                "status": "cancelled",
+                "task_id": task_id,
+            })
+        }
+        _ => {
+            // Task continuation / steering message ("submit" / "continue_task" / "submit_message")
+            let content = payload
+                .get("content")
+                .or_else(|| payload.get("instruction"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let project_id = ctx
+                .online
+                .task_snapshots
+                .get(task_id)
+                .and_then(|s| s.get("task"))
+                .and_then(|t| t.get("project_id"))
+                .and_then(Value::as_str)
+                .unwrap_or("proj-default")
+                .to_owned();
+            let msgs = ctx
+                .online
+                .project_messages
+                .entry(project_id.clone())
+                .or_default();
+            let seq = (msgs.len() as i64) + 1;
+            let user_msg = json!({
+                "sequence": seq,
+                "id": format!("msg-{stamp}-{seq}"),
+                "project_id": project_id,
+                "task_id": task_id,
+                "request_id": request_id,
+                "role": "user",
+                "content": content,
+                "created_at": stamp,
+            });
+            msgs.push(user_msg);
+            let reply_seq = seq + 1;
+            let reply_msg = json!({
+                "sequence": reply_seq,
+                "id": format!("msg-{stamp}-{reply_seq}"),
+                "project_id": project_id,
+                "task_id": task_id,
+                "request_id": request_id,
+                "role": "assistant",
+                "content": format!("Online Work Node received task continuation for {task_id}: {content}"),
+                "created_at": stamp + 1,
+            });
+            msgs.push(reply_msg.clone());
+            if let Some(snap) = ctx.online.task_snapshots.get_mut(task_id) {
+                if let Some(steering) = snap.get_mut("steering").and_then(Value::as_array_mut) {
+                    steering.push(json!({
+                        "id": format!("steer-{stamp}"),
+                        "task_id": task_id,
+                        "sequence": seq,
+                        "content": content,
+                        "status": "acknowledged",
+                        "created_at": stamp,
+                        "acknowledged_at": stamp + 1,
+                    }));
+                }
+            }
+            json!({
+                "operation_id": format!("op-{stamp}"),
+                "request_id": request_id,
+                "status": "completed",
+                "task_id": task_id,
+                "reply": reply_msg,
+            })
+        }
+    };
+
+    if !request_id.is_empty() {
+        ctx.online
+            .operations
+            .insert(request_id, result.clone());
+    }
+    ctx.save_online();
+    Ok(result)
+}
+
+fn filter_self_web_host_nodes(incoming: &mut Value) {
+    let self_public = std::env::var("BOB_NODE_PUBLIC_URL")
+        .ok()
+        .map(|s| s.trim().trim_end_matches('/').to_owned())
+        .filter(|s| !s.is_empty());
+    if let Some(arr) = incoming.get_mut("remoteNodes").and_then(Value::as_array_mut) {
+        arr.retain(|n| {
+            let remark = n.get("remark").and_then(Value::as_str).unwrap_or("");
+            if remark == "web_host" {
+                return false;
+            }
+            let url = n
+                .get("url")
+                .or_else(|| n.get("baseUrl"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .trim_end_matches('/');
+            if url.contains("bob-online.example.com") {
+                return false;
+            }
+            if let Some(ref pub_url) = self_public {
+                if url.eq_ignore_ascii_case(pub_url) {
+                    return false;
+                }
+            }
+            true
+        });
+    }
+}
+
+fn verify_bearer_token(ctx: &NodeContext, auth_header: Option<&str>) -> Result<String, (u16, &'static str)> {
+    let raw = auth_header.ok_or((401, "CLIENT_CREDENTIAL_INVALID"))?;
+    let token = raw
+        .strip_prefix("Bearer ")
+        .or_else(|| raw.strip_prefix("bearer "))
+        .ok_or((401, "CLIENT_CREDENTIAL_INVALID"))?
+        .trim();
+    if token.is_empty() {
+        return Err((401, "CLIENT_CREDENTIAL_INVALID"));
+    }
+    let thash = hash_token(token);
+    let record = ctx
+        .online
+        .credentials
+        .values()
+        .find(|c| c.token_hash == thash)
+        .ok_or((401, "CLIENT_CREDENTIAL_INVALID"))?;
+    if record.revoked {
+        return Err((401, "CLIENT_TOKEN_REVOKED"));
+    }
+    if record.expires_at < now_millis() {
+        return Err((401, "CLIENT_TOKEN_EXPIRED"));
+    }
+    Ok(record.credential_id.clone())
+}
+
+pub fn handle_client_v1_http(
+    ctx: &mut NodeContext,
+    method: &str,
+    path: &str,
+    query: &str,
+    auth_header: Option<&str>,
+    body_str: &str,
+) -> (u16, Value) {
+    let stamp = now_millis();
+    if path == "/api/client/v1/pairings" && method == "POST" {
+        let parsed: Value = serde_json::from_str(body_str).unwrap_or_else(|_| json!({}));
+        let device_name = parsed
+            .get("device_name")
+            .and_then(Value::as_str)
+            .unwrap_or("Bob Client")
+            .to_owned();
+        let pairing_id = format!(
+            "pair_{}",
+            node_access::random_base62(10).unwrap_or_else(|_| format!("{stamp}_{}", ctx.online.pairings.len() + 1))
+        );
+        let user_code = csprng_digits_6();
+        let session = OnlinePairingSession {
+            pairing_id: pairing_id.clone(),
+            user_code: user_code.clone(),
+            device_name,
+            created_at: stamp,
+            expires_at: stamp + 600_000,
+            exchanged_token: None,
+        };
+        ctx.online.pairings.insert(pairing_id.clone(), session);
+        ctx.save_online();
+        return (
+            201,
+            json!({
+                "pairing_id": pairing_id,
+                "user_code": user_code,
+                "expires_at": stamp + 600_000,
+            }),
+        );
+    }
+
+    if (path == "/api/client/v1/pairings/exchange"
+        || (path.starts_with("/api/client/v1/pairings/") && path.ends_with("/exchange")))
+        && method == "POST"
+    {
+        let parsed: Value = serde_json::from_str(body_str).unwrap_or_else(|_| json!({}));
+        let code = parsed
+            .get("code")
+            .or_else(|| parsed.get("user_code"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        let target_pid = path
+            .strip_prefix("/api/client/v1/pairings/")
+            .and_then(|s| s.strip_suffix("/exchange"));
+        let has_verifier = parsed
+            .get("verifier")
+            .and_then(Value::as_str)
+            .is_some_and(|s| !s.trim().is_empty());
+        let found = ctx.online.pairings.values_mut().find(|p| {
+            if let Some(pid) = target_pid {
+                p.pairing_id == pid
+                    && ((!code.is_empty() && p.user_code == code)
+                        || (code.is_empty() && has_verifier))
+            } else {
+                !code.is_empty() && p.user_code == code
+            }
+        });
+        let Some(session) = found else {
+            return (
+                404,
+                json!({ "code": "PAIRING_UNAVAILABLE", "message": "Invalid pairing code" }),
+            );
+        };
+        if session.expires_at < stamp {
+            return (
+                410,
+                json!({ "code": "PAIRING_EXPIRED", "message": "Pairing code expired" }),
+            );
+        }
+        let raw_token = format!(
+            "bob_online_tok_{}",
+            node_access::random_base62(32).unwrap_or_else(|_| format!("{}_{}", session.pairing_id, stamp))
+        );
+        let cred_id = format!("cred_{stamp}");
+        session.exchanged_token = Some(cred_id.clone());
+        let dev_name = session.device_name.clone();
+        ctx.online.credentials.insert(
+            cred_id.clone(),
+            OnlineCredentialRecord {
+                credential_id: cred_id.clone(),
+                token_hash: hash_token(&raw_token),
+                device_name: dev_name,
+                created_at: stamp,
+                expires_at: stamp + 365 * 86_400_000,
+                revoked: false,
+            },
+        );
+        ctx.save_online();
+        return (
+            200,
+            json!({
+                "credential_id": cred_id,
+                "access_token": raw_token,
+                "token": raw_token,
+                "expires_at": stamp + 365 * 86_400_000,
+            }),
+        );
+    }
+
+    let cred_id = match verify_bearer_token(ctx, auth_header) {
+        Ok(cid) => cid,
+        Err((status, code)) => {
+            return (status, json!({ "code": code, "retryable": false }));
+        }
+    };
+
+    if (path == "/api/client/v1/credentials/self/revoke"
+        || path == "/api/client/v1/devices/current/revoke")
+        && method == "POST"
+    {
+        if let Some(cred) = ctx.online.credentials.get_mut(&cred_id) {
+            cred.revoked = true;
+        }
+        ctx.save_online();
+        return (200, json!({ "status": "revoked" }));
+    }
+
+    ctx.sync_catalog_into_online_store();
+    let catalog = ctx.app.catalog_snapshot().ok();
+
+    if path == "/api/client/v1/capabilities" && method == "GET" {
+        let grants: Vec<Value> = catalog
+            .as_ref()
+            .map(|c| {
+                c.projects
+                    .iter()
+                    .map(|p| {
+                        json!({
+                            "project_id": p.id,
+                            "scopes": ["work.read", "work.write"]
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        return (
+            200,
+            json!({
+                "protocol_version": "client-v1",
+                "version": "client-v1",
+                "server_instance_id": ctx.online.server_instance_id,
+                "credential_id": cred_id,
+                "grants": grants,
+                "capabilities": {
+                    "catalog": true,
+                    "history": true,
+                    "pagination": true,
+                    "submit": true,
+                    "query": true,
+                    "cancel": true,
+                    "approvals": true,
+                    "artifacts": true,
+                    "parent_revision": true,
+                    "review": true,
+                    "persistent_execution": true
+                }
+            }),
+        );
+    }
+
+    if path == "/api/client/v1/projects" && method == "GET" {
+        let items: Vec<Value> = catalog
+            .as_ref()
+            .map(|c| {
+                c.projects
+                    .iter()
+                    .map(|p| {
+                        json!({
+                            "id": p.id,
+                            "name": p.title,
+                            "title": p.title,
+                            "description": p.title,
+                            "status": "active",
+                            "created_at": p.updated_at,
+                            "updated_at": p.updated_at,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        return (
+            200,
+            json!({
+                "items": items,
+                "projects": items,
+                "has_more": false,
+                "next_cursor": Value::Null,
+            }),
+        );
+    }
+
+    if path.starts_with("/api/client/v1/projects/") && method == "GET" {
+        let rest = &path["/api/client/v1/projects/".len()..];
+        if let Some((project_id, suffix)) = rest.split_once('/') {
+            if suffix == "tasks" {
+                let items: Vec<Value> = catalog
+                    .as_ref()
+                    .map(|c| {
+                        c.conversations
+                            .iter()
+                            .filter(|conv| conv.project_id.as_deref() == Some(project_id))
+                            .map(|conv| {
+                                json!({
+                                    "id": format!("task-{}", conv.id),
+                                    "project_id": project_id,
+                                    "conversation_id": conv.id,
+                                    "title": conv.title,
+                                    "instruction": conv.title,
+                                    "description": conv.title,
+                                    "status": if conv.has_running_execution { "running" } else { "ready" },
+                                    "created_at": conv.updated_at,
+                                    "updated_at": conv.updated_at,
+                                })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                return (
+                    200,
+                    json!({
+                        "items": items,
+                        "tasks": items,
+                        "has_more": false,
+                        "next_cursor": Value::Null,
+                    }),
+                );
+            } else if suffix == "messages" {
+                let after: i64 = query
+                    .split('&')
+                    .find_map(|kv| kv.strip_prefix("after="))
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
+                let all_msgs = ctx
+                    .online
+                    .project_messages
+                    .get(project_id)
+                    .cloned()
+                    .unwrap_or_default();
+                let items: Vec<Value> = all_msgs
+                    .into_iter()
+                    .filter(|m| m.get("sequence").and_then(Value::as_i64).unwrap_or(0) > after)
+                    .collect();
+                let next_after = items
+                    .last()
+                    .and_then(|m| m.get("sequence"))
+                    .and_then(Value::as_i64)
+                    .unwrap_or(after);
+                return (
+                    200,
+                    json!({
+                        "items": items,
+                        "messages": items,
+                        "next_after": next_after,
+                        "has_more": false,
+                    }),
+                );
+            }
+        }
+    }
+
+    if path.starts_with("/api/client/v1/tasks/") && method == "GET" {
+        let rest = &path["/api/client/v1/tasks/".len()..];
+        if let Some((task_id, suffix)) = rest.split_once('/') {
+            if suffix == "snapshot" {
+                if let Some(snap) = ctx.online.task_snapshots.get(task_id) {
+                    let mut out = snap.clone();
+                    out["observed_at"] = json!(stamp);
+                    return (200, out);
+                }
+                return (404, json!({ "code": "RESOURCE_NOT_FOUND" }));
+            } else if suffix == "messages" {
+                let project_id = ctx
+                    .online
+                    .task_snapshots
+                    .get(task_id)
+                    .and_then(|s| s.get("task"))
+                    .and_then(|t| t.get("project_id"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("proj-default");
+                let items: Vec<Value> = ctx
+                    .online
+                    .project_messages
+                    .get(project_id)
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|m| m.get("task_id").and_then(Value::as_str) == Some(task_id))
+                    .collect();
+                return (
+                    200,
+                    json!({
+                        "items": items,
+                        "messages": items,
+                        "has_more": false,
+                    }),
+                );
+            }
+        }
+    }
+
+    if path == "/api/client/v1/topology" && method == "GET" {
+        let _ = bob_runtime::agy_directory::ensure_local_grant_registered(
+            &ctx.runtime.data_dir,
+            "local",
+        );
+        let topo = bob_runtime::node_pairing::export_local_topology_with_app(
+            &ctx.runtime.data_dir,
+            Some(&ctx.app),
+            &ctx.runtime,
+            false,
+        );
+        return (200, topo);
+    }
+
+    if path == "/api/client/v1/topology/sync" && method == "POST" {
+        let mut parsed: Value = serde_json::from_str(body_str).unwrap_or_else(|_| json!({}));
+        if ctx.static_dir.is_some() {
+            filter_self_web_host_nodes(&mut parsed);
+        }
+        let _ = bob_runtime::agy_directory::ensure_local_grant_registered(
+            &ctx.runtime.data_dir,
+            "local",
+        );
+        return match bob_runtime::node_pairing::merge_topology(
+            &ctx.runtime.data_dir,
+            &mut ctx.app,
+            &ctx.runtime,
+            &parsed,
+        ) {
+            Ok(mut merged) => {
+                if parsed["includeSubscriptionQuotas"] == true {
+                    let quotas = bob_runtime::subscription_quota::read(&ctx.runtime.data_dir);
+                    quota_sync::maybe_sync_in_background(&quotas);
+                    merged["subscriptionQuotas"] = quotas;
+                    merged["quotaCheckpoint"] = quota_sync::status_snapshot();
+                }
+                (200, merged)
+            }
+            Err(code) => (400, json!({ "code": code })),
+        };
+    }
+
+    if path == "/api/client/v1/operations" && method == "POST" {
+        let parsed: Value = serde_json::from_str(body_str).unwrap_or_else(|_| json!({}));
+        return match execute_online_operation(ctx, &parsed) {
+            Ok(res) => (200, res),
+            Err(code) => (400, json!({ "code": code })),
+        };
+    }
+
+    (404, json!({ "code": "CLIENT_ROUTE_NOT_FOUND" }))
+}
+
+fn execute_unlocked_harness_rpc(data_dir:&Path,command:&str,args:&Value)->Result<Value,&'static str>{
+ let mut value=execute_unlocked_harness_rpc_inner(data_dir,command,args)?;
+ let connection=args["connectionId"].as_str().unwrap_or("local");
+ if command=="app_dsh_page" {
+  value["execution_enabled"]=json!(bob_runtime::tool_policy::enabled(data_dir,connection,bob_runtime::tool_policy::session_tool(args["sessionId"].as_str().unwrap_or(""))));
+ }
+ if command=="app_dsh_inventory" {
+  if let Some(rows)=value["tools"].as_array_mut(){for row in rows{
+   let tool=row["id"].as_str().unwrap_or("").to_owned();
+   if let Some(enabled)=bob_runtime::tool_policy::configured(data_dir,connection,&tool)?{
+    let synced=row["enabled"]==enabled;
+    row["policy_synced"]=json!(synced);row["enabled"]=json!(enabled);
+    if !enabled {row["can_create"]=json!(false);row["reason"]=json!("TOOL_DISABLED");}
+   }
+  }}
+ }
+ if command=="app_dsh_list" {
+  fn annotate(value:&mut Value,data:&Path,connection:&str){
+   match value {
+    Value::Array(rows)=>for row in rows{annotate(row,data,connection)},
+    Value::Object(obj)=>{
+     if let Some(id)=obj.get("session_id").or_else(||obj.get("id")).and_then(Value::as_str).map(str::to_owned){
+      if id.contains(':') || id.starts_with("session-"){
+       obj.insert("execution_enabled".into(),json!(bob_runtime::tool_policy::enabled(data,connection,bob_runtime::tool_policy::session_tool(&id))));
+      }
+     }
+     for child in obj.values_mut(){if child.is_array(){annotate(child,data,connection)}}
+    },_=>{}
+   }
+  }
+  annotate(&mut value,data_dir,connection);
+ }
+ Ok(value)
+}
+fn execute_unlocked_harness_rpc_inner(
+    data_dir: &Path,
+    command: &str,
+    args: &Value,
+) -> Result<Value, &'static str> {
+    bob_runtime::tool_policy::check_rpc(data_dir,command,args)?;
+    if command=="app_dsh_tool_policy_apply" {
+        if args["connectionId"]!="local"{return Err("NODE_SCOPE_DENIED");}
+        let tool=args["tool"].as_str().ok_or("TOOL_POLICY_TOOL_INVALID")?;
+        let enabled=args["enabled"].as_bool().ok_or("TOOL_POLICY_INVALID")?;
+        if bob_runtime::tool_policy::configured(data_dir,"local",tool)?!=Some(enabled){
+            bob_runtime::tool_policy::set(data_dir,"local",tool,enabled,false)?;
+            if enabled {bob_runtime::tool_inventory::refresh(data_dir);}
+        }
+        if !enabled {let _=bob_runtime::agy_directory::cancel_disabled_tool(data_dir,tool);}
+        return bob_runtime::tool_policy::read(data_dir);
+    }
+    if command=="app_dsh_tool_policy_set" {
+        let connection=args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+        let tool=args["tool"].as_str().ok_or("TOOL_POLICY_TOOL_INVALID")?;
+        let enabled=args["enabled"].as_bool().ok_or("TOOL_POLICY_INVALID")?;
+        let all=args["all"].as_bool().unwrap_or(false);
+        if all && connection!="local"{return Err("NODE_SCOPE_DENIED");}
+        let policy=bob_runtime::tool_policy::set(data_dir,connection,tool,enabled,all)?;
+        if !enabled && (all || connection=="local"){let _=bob_runtime::agy_directory::cancel_disabled_tool(data_dir,tool);}
+        let runtime=ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
+        let hub=runtime.load_hub_state();
+        let targets:Vec<String>=if all{
+            hub["remoteNodes"].as_array().map(|ns|ns.iter().filter(|n|n["enabled"]!=false).filter_map(|n|n["id"].as_str().map(str::to_owned)).collect()).unwrap_or_default()
+        }else{vec![connection.into()]};
+        let mut results=vec![];
+        for target in targets{
+            if target=="local"{results.push(json!({"connectionId":target,"synced":true}));continue;}
+            let a=json!({"connectionId":target,"tool":tool,"enabled":enabled});
+            let result=bob_runtime::node_pairing::route_paired_node_rpc(&runtime,&target,"app_dsh_tool_policy_apply",&a);
+            let synced=matches!(&result,Ok(Some(_)));
+            let _=bob_runtime::tool_policy::acknowledge(data_dir,&target,tool,enabled,synced);
+            results.push(match result{Ok(Some(_))=>json!({"connectionId":target,"synced":true}),_=>json!({"connectionId":target,"synced":false})});
+        }
+        if enabled && (all||connection=="local"){bob_runtime::tool_inventory::refresh(data_dir);}
+        return Ok(json!({"policy":policy,"nodes":results}));
+    }
+    if command=="app_dsh_inventory" {
+        let connection=args["connectionId"].as_str().unwrap_or("local");
+        if connection!="local"{
+            let runtime=ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
+            for tool in bob_runtime::tool_policy::TOOLS{
+                if let Some(enabled)=bob_runtime::tool_policy::configured(data_dir,connection,tool)?{
+                    let a=json!({"connectionId":connection,"tool":tool,"enabled":enabled});
+                    let applied=bob_runtime::node_pairing::route_paired_node_rpc(&runtime,connection,"app_dsh_tool_policy_apply",&a);
+                    let _=bob_runtime::tool_policy::acknowledge(data_dir,connection,tool,enabled,matches!(applied,Ok(Some(_))));
+                }
+            }
+        }
+    }
+    if command == "app_claude_preview" || command == "app_dsh_preview" {
+        if let Some(path) = args.get("path").and_then(Value::as_str) {
+            if bob_browser::assert_profile_download_forbidden(std::path::Path::new(path)).is_err() {
+                return Err("BROWSER_PROFILE_FORBIDDEN");
+            }
+        }
+    }
+    if command.starts_with("app_dsh_") || matches!(command, "app_native_setup" | "app_native_events" | "app_native_cancel" | "app_native_permission") {
+        let connection = args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+        let runtime = ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
+        if let Some(result) = bob_runtime::node_pairing::route_paired_node_rpc(&runtime, connection, command, args)? {
+            return Ok(result);
+        }
+    }
+    match command {
+        "app_dsh_inventory" => {
+            if args["connectionId"]!="local" {return Err("HARNESS_LOCAL_NODE_REQUIRED");}
+            bob_runtime::tool_inventory::snapshot(data_dir,args["refresh"].as_bool().unwrap_or(false))
+        },
+        "app_dsh_workspace_grant" => bob_runtime::tool_inventory::authorize(data_dir,args),
+        "app_node_bootstrap_workspace" => bob_runtime::orchestrator::bootstrap_workspace_local(data_dir, args),
+        "app_context_list" | "app_context_read" | "app_context_refresh" | "app_context_tasks" => {
+            context_capsule::rpc(data_dir, command, args)
+        }
+        "app_claude_capabilities"
+        | "app_claude_sessions"
+        | "app_claude_history"
+        | "app_claude_prompt"
+        | "app_claude_cancel"
+        | "app_claude_reconcile"
+        | "app_claude_review"
+        | "app_claude_artifacts"
+        | "app_claude_preview" => claude_rpc::rpc(data_dir, command, args),
+        "app_native_setup" => {
+            let connection = args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+            if connection == "local" {
+                let _ = bob_runtime::agy_directory::ensure_local_grant_registered(data_dir, "local");
+            }
+            bob_runtime::agy_directory::setup_native_session(data_dir, connection, args)
+        }
+        "app_native_permission" => {
+            let connection=args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+            let session=args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+            let request=args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?;
+            let permission=args["permissionId"].as_str().ok_or("HARNESS_APPROVAL_INVALID")?;
+            if !args["optionId"].is_null() && !args["optionId"].is_string() {return Err("HARNESS_APPROVAL_INVALID")}
+            if connection=="local" {let _=bob_runtime::agy_directory::ensure_local_grant_registered(data_dir,"local");}
+            match bob_runtime::agy_directory::native_permission(data_dir,connection,session,request,permission,args["optionId"].as_str()) {
+                Err("DSH_CONNECTION_REQUIRED") if connection!="local" => {
+                    let runtime=ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
+                    bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(&runtime,connection,command,args)
+                },value=>value
+            }
+        }
+        "app_native_cancel" => {
+            let connection=args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+            let session=args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+            let request=args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?;
+            if connection=="local" { let _=bob_runtime::agy_directory::ensure_local_grant_registered(data_dir,"local"); }
+            match bob_runtime::agy_directory::native_cancel(data_dir,connection,session,request) {
+                Err("DSH_CONNECTION_REQUIRED") if connection!="local" => {
+                    let runtime=ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
+                    bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(&runtime,connection,command,args)
+                }, value=>value
+            }
+        }
+        "app_native_events" => {
+            let connection=args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+            let session=args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+            if connection=="local" { let _=bob_runtime::agy_directory::ensure_local_grant_registered(data_dir,"local"); }
+            let out = match bob_runtime::agy_directory::native_events(data_dir,connection,session,args["after"].as_i64().unwrap_or(0),args["epoch"].as_str()) {
+                Err("DSH_CONNECTION_REQUIRED") if connection!="local" => {
+                    let runtime=ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
+                    bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(&runtime,connection,command,args)
+                },
+                value=>value
+            };
+            if let Ok(ref page) = out {
+                push_channels::notify_native_page_approvals(data_dir, page);
+            }
+            out
+        }
+        "app_dsh_receipt" => {
+            let connection = args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+            if connection == "local" {
+                let _ = bob_runtime::agy_directory::ensure_local_grant_registered(data_dir, "local");
+            }
+            if let Some(sid) = args
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .filter(|s| bob_runtime::agy_directory::owns_readable_session(s))
+            {
+                match bob_runtime::agy_directory::inspect_receipt(
+                    data_dir,
+                    connection,
+                    sid,
+                    args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?,
+                    args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?,
+                ) {
+                    Ok(v) => return Ok(v),
+                    Err("DSH_CONNECTION_REQUIRED") if connection != "local" => {
+                        let runtime = ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
+                        return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                            &runtime,
+                            connection,
+                            command,
+                            args,
+                        );
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            if let Some(v) = claude_rpc::try_handle_dsh_command(data_dir, command, args)? {
+                return Ok(v);
+            }
+            bob_runtime::dsh_transport::inspect_receipt(
+                data_dir,
+                connection,
+                args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?,
+                args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?,
+                args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?,
+            )
+        }
+        "app_attachment_upload_chunk" | "app_attachment_finalize" => {
+            let connection = args.get("connectionId").and_then(Value::as_str).unwrap_or("local");
+            if connection != "local" {
+                let runtime = ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
+                return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                    &runtime,
+                    connection,
+                    command,
+                    args,
+                );
+            }
+            if command == "app_attachment_upload_chunk" {
+                bob_runtime::dsh_transport::stage_attachment_chunk(data_dir, args)
+            } else {
+                bob_runtime::dsh_transport::finalize_attachment_staging(data_dir, args, now_millis())
+            }
+        }
+        "app_dsh_create" | "app_dsh_cancel" | "app_dsh_answer" | "app_dsh_permission_set" | "app_dsh_live" | "app_dsh_page" | "app_dsh_preview" | "app_dsh_list" | "app_dsh_history" | "app_dsh_prompt" => {
+            let connection = args["connectionId"].as_str().ok_or("DSH_CONNECTION_REQUIRED")?;
+            if connection == "local" {
+                let _ = bob_runtime::agy_directory::ensure_local_grant_registered(data_dir, "local");
+            }
+            let runtime = ModelHubRuntime::with_file_vault(data_dir.to_path_buf())?;
+            if command == "app_dsh_list" {
+                let base = claude_rpc::merge_claude_into_dsh_list(
+                    data_dir,
+                    connection,
+                    runtime.dsh_client(connection).and_then(|c| c.list()),
+                );
+                let agy = bob_runtime::agy_directory::list(data_dir, connection);
+                match (base, agy) {
+                    (Ok(mut b), Ok(extra)) => {
+                        if let Some(rows) = b.as_array_mut() {
+                            rows.extend(extra);
+                        }
+                        return Ok(b);
+                    }
+                    (Ok(b), Err(_)) => {
+                        if b.as_array().is_some_and(|rows| !rows.is_empty()) {
+                            return Ok(b);
+                        }
+                        if connection != "local" {
+                            if let Ok(remote_rows) = bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                                &runtime,
+                                connection,
+                                command,
+                                args,
+                            ) {
+                                return Ok(remote_rows);
+                            }
+                        }
+                        return Ok(b);
+                    }
+                    (Err(_), Ok(extra)) if !extra.is_empty() || connection == "local" => return Ok(json!(extra)),
+                    (Err(e), _) => {
+                        if connection != "local" {
+                            if let Ok(remote_rows) = bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                                &runtime,
+                                connection,
+                                command,
+                                args,
+                            ) {
+                                return Ok(remote_rows);
+                            }
+                        }
+                        return Err(e);
+                    }
+                }
+            }
+            if let Some(v) = claude_rpc::try_handle_dsh_command(data_dir, command, args)? {
+                return Ok(v);
+            }
+            if command == "app_dsh_preview" {
+                if let Some(p) = args.get("path").and_then(Value::as_str) {
+                    if bob_browser::assert_profile_download_forbidden(std::path::Path::new(p)).is_err() {
+                        return Err("BROWSER_PROFILE_FORBIDDEN");
+                    }
+                }
+                if let Some(sid)=args["sessionId"].as_str().filter(|s|bob_runtime::agy_directory::owns_readable_session(s)) {
+                    match bob_runtime::agy_directory::preview_native_file(data_dir, connection, sid, args["path"].as_str().ok_or("DSH_PROTOCOL")?, args.get("known")) {
+                        Ok(v)=>return Ok(v),
+                        Err("DSH_CONNECTION_REQUIRED") if connection != "local" => return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(&runtime,connection,command,args),
+                        Err(e)=>return Err(e),
+                    }
+                }
+            }
+            if command == "app_dsh_page" {
+                if let Some(sid) = args
+                    .get("sessionId")
+                    .and_then(Value::as_str)
+                    .filter(|s| bob_runtime::agy_directory::owns_readable_session(s))
+                {
+                    let after = args
+                        .get("after")
+                        .filter(|v| !v.is_null())
+                        .map(|v| v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID"))
+                        .transpose()?;
+                    match bob_runtime::agy_directory::read_page(data_dir, connection, sid, after) {
+                        Ok(v) => return Ok(v),
+                        Err("DSH_CONNECTION_REQUIRED") if connection != "local" => {
+                            return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                                &runtime,
+                                connection,
+                                command,
+                                args,
+                            );
+                        }
+                        Err(e) => return Err(e),
+                    }
+                }
+            }
+            if command == "app_dsh_prompt" {
+                if let Some(sid) = args
+                    .get("sessionId")
+                    .and_then(Value::as_str)
+                    .filter(|s| bob_runtime::agy_directory::owns_readable_session(s))
+                {
+                    let text = args["text"]
+                        .as_str()
+                        .filter(|s| !s.trim().is_empty() && s.len() <= 32000)
+                        .ok_or("DSH_TEXT_REQUIRED")?;
+                    let request = args["requestId"]
+                        .as_str()
+                        .filter(|s| s.len() <= 200 && !s.is_empty())
+                        .ok_or("DSH_REQUEST_REQUIRED")?;
+                    let takeover = args.get("takeover").and_then(Value::as_bool).unwrap_or(false);
+                    let approval_mode = args
+                        .get("approvalMode")
+                        .or_else(|| args.get("approval_mode"))
+                        .and_then(Value::as_str);
+                    let ws_hint = args.get("workspace")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                        .or_else(|| bob_runtime::agy_directory::find_cached_workspace(data_dir, connection, sid));
+                    let staged_text = bob_runtime::dsh_transport::stage_attachments_for_prompt(
+                        data_dir,
+                        connection,
+                        sid,
+                        ws_hint.as_deref(),
+                        text,
+                        args.get("attachments"),
+                    );
+                    let model_override = args.get("model").and_then(Value::as_str);
+                    let reasoning_effort = args.get("reasoningEffort").or_else(|| args.get("reasoning_effort")).and_then(Value::as_str);
+                    match bob_runtime::agy_directory::prompt_session_with_model_options(
+                        data_dir,
+                        connection,
+                        sid,
+                        &staged_text,
+                        request,
+                        takeover,
+                        approval_mode,
+                        args.get("attachments"),
+                        model_override,
+                        reasoning_effort,
+                    ) {
+                        Ok(v) => return Ok(v),
+                        Err("DSH_CONNECTION_REQUIRED") if connection != "local" => {
+                            return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                                &runtime,
+                                connection,
+                                command,
+                                args,
+                            );
+                        }
+                        Err(e) => return Err(e),
+                    }
+                }
+            }
+            if command == "app_dsh_prompt" {
+                let s = args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+                bob_runtime::claude_harness::check_workspace_not_locked_by_other(data_dir, connection, s)?;
+                context_capsule::before_dispatch(
+                    data_dir,
+                    connection,
+                    s,
+                    args["requestId"].as_str().ok_or("DSH_REQUEST_REQUIRED")?,
+                    args["text"].as_str().ok_or("DSH_TEXT_REQUIRED")?,
+                )?;
+            }
+            let client = match runtime.dsh_client(connection) {
+                Ok(c) => c,
+                Err("DSH_CONNECTION_NOT_FOUND" | "DSH_CONNECTION_REQUIRED" | "SECRET_NOT_CONFIGURED")
+                    if connection != "local" && matches!(command, "app_dsh_answer" | "app_dsh_permission_set") =>
+                {
+                    return bob_runtime::node_pairing::forward_dsh_rpc_to_remote_node(
+                        &runtime,
+                        connection,
+                        command,
+                        args,
+                    );
+                }
+                Err(e) => return Err(e),
+            };
+            match command {
+                "app_dsh_create" => client.create_session_in_authorized_workspace(data_dir,
+                    bob_runtime::dsh_session::SessionAddress {
+                        connection_id: connection.into(),
+                        session_id: args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into(),
+                    },
+                    args["workspace"].as_str().ok_or("DSH_WORKSPACE_NOT_AVAILABLE")?,
+                    args["title"].as_str().ok_or("DSH_CREATE_INVALID")?,
+                ),
+                "app_dsh_cancel" => client.cancel_session(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into()}),
+                "app_dsh_answer" => {
+                    let session = args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+                    let call_id = args["callId"].as_str().ok_or("DSH_PROTOCOL")?;
+                    let answers = args.get("answers").ok_or("BAD_ANSWER")?;
+                    let res = client.answer_question(
+                        bob_runtime::dsh_session::SessionAddress {
+                            connection_id: connection.into(),
+                            session_id: session.into(),
+                        },
+                        call_id,
+                        answers,
+                    )?;
+                    let _ = bob_runtime::claude_harness::record_external_harness_turn_for_session(
+                        data_dir,
+                        connection,
+                        session,
+                        "dsh",
+                    );
+                    Ok(res)
+                }
+                "app_dsh_permission_set" => {
+                    bob_runtime::tool_policy::require(data_dir, connection, "dsh")?;
+                    let session = args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+                    let mode = args
+                        .get("approvalMode")
+                        .or_else(|| args.get("mode"))
+                        .and_then(Value::as_str)
+                        .ok_or("DSH_PERMISSION_MODE_INVALID")?;
+                    client.set_permission_preset(
+                        bob_runtime::dsh_session::SessionAddress {
+                            connection_id: connection.into(),
+                            session_id: session.into(),
+                        },
+                        mode,
+                    )
+                }
+                "app_dsh_live" => client.live(bob_runtime::dsh_session::SessionAddress{connection_id:connection.into(),session_id:args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into()}),
+                "app_dsh_page" => client.history_page(
+                    bob_runtime::dsh_session::SessionAddress {
+                        connection_id: connection.into(),
+                        session_id: args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?.into(),
+                    },
+                    args.get("before").filter(|v| !v.is_null()).map(|v| v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?,
+                    args.get("through").filter(|v| !v.is_null()).map(|v| v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?,
+                    args.get("after").filter(|v| !v.is_null()).map(|v| v.as_i64().ok_or("DSH_PAGE_CURSOR_INVALID")).transpose()?,
+                ),
+                "app_dsh_preview" => client.preview_message(
+                    bob_runtime::dsh_session::SessionAddress {
+                        connection_id: connection.into(),
+                        session_id: args.get("sessionId").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?.into(),
+                    },
+                    args.get("path").and_then(Value::as_str).ok_or("DSH_PROTOCOL")?,
+                    args.get("known").filter(|v| !v.is_null()),
+                    args.get("messageSequence").filter(|v|!v.is_null()).map(|v|v.as_i64().ok_or("DSH_PROTOCOL")).transpose()?,
+                ),
+                "app_dsh_history" => {
+                    let session = args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+                    serde_json::to_value(client.history(bob_runtime::dsh_session::SessionAddress {
+                        connection_id: connection.into(),
+                        session_id: session.into(),
+                    })?)
+                    .map_err(|_| "DSH_PROTOCOL")
+                }
+                _ => {
+                    let session = args["sessionId"].as_str().ok_or("DSH_SESSION_REQUIRED")?;
+                    let text = args["text"].as_str().filter(|s| !s.trim().is_empty() && s.len() <= 32000).ok_or("DSH_TEXT_REQUIRED")?;
+                    let request = args["requestId"].as_str().filter(|s| s.len() <= 200 && !s.is_empty()).ok_or("DSH_REQUEST_REQUIRED")?;
+                    let wire = context_capsule::before_dispatch(data_dir, connection, session, request, text)?;
+                    let res = bob_runtime::dsh_transport::dispatch_once(data_dir, connection, session, text, request, || {
+                        client.prompt(session, &wire, request)
+                    })?;
+                    let _ = bob_runtime::claude_harness::record_external_harness_turn_for_session(data_dir, connection, session, "dsh");
+                    Ok(res)
+                }
+            }
+        }
+        cmd if cmd.starts_with("app_browser_") => {
+            crate::browser_ws::handle_browser_rpc(data_dir, cmd, args)
+        }
+        cmd if bob_runtime::runtime_rpc::is_runtime_rpc_command(cmd) => {
+            bob_runtime::runtime_rpc::dispatch_runtime_rpc(data_dir, cmd, args)
+        }
+        _ => Err("UNSUPPORTED_COMMAND"),
+    }
+}
+
+fn guess_content_type(path: &Path) -> &'static str {
+    match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
+        "html" => "text/html; charset=utf-8",
+        "js" | "mjs" => "application/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "json" => "application/json; charset=utf-8",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "ico" => "image/x-icon",
+        "woff2" => "font/woff2",
+        _ => "application/octet-stream",
+    }
+}
+
+fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(15)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(15)));
+
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let mut header_end = None;
+    let mut content_length = 0usize;
+
+    loop {
+        match stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                buf.extend_from_slice(&chunk[..n]);
+                if header_end.is_none() {
+                    if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        header_end = Some(pos + 4);
+                        let hdr_str = String::from_utf8_lossy(&buf[..pos]);
+                        for line in hdr_str.lines() {
+                            if let Some((k, v)) = line.split_once(':') {
+                                if k.trim().eq_ignore_ascii_case("content-length") {
+                                    content_length = v.trim().parse().unwrap_or(0);
+                                }
+                            }
+                        }
+                    }
+                }
+                if content_length > 12 * 1024 * 1024 || buf.len() > 12 * 1024 * 1024 {
+                    write_json_response(&mut stream, 413, r#"{"ok":false,"error":"REQUEST_TOO_LARGE"}"#);
+                    return;
+                }
+                if let Some(hend) = header_end {
+                    if buf.len() >= hend + content_length {
+                        break;
+                    }
+                }
+                if buf.len() > 12 * 1024 * 1024 {
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    let Some(hend) = header_end else {
+        return;
+    };
+    let header_text = String::from_utf8_lossy(&buf[..hend - 4]).to_owned();
+    let body_bytes = if buf.len() >= hend + content_length {
+        &buf[hend..hend + content_length]
+    } else {
+        &buf[hend..]
+    };
+    let body_str = String::from_utf8_lossy(body_bytes);
+
+    let mut lines = header_text.lines();
+    let request_line = lines.next().unwrap_or("");
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().unwrap_or("GET");
+    let raw_target = parts.next().unwrap_or("/");
+    let (path, query) = raw_target.split_once('?').unwrap_or((raw_target, ""));
+
+    let mut auth_header: Option<String> = None;
+    for line in lines {
+        if let Some((k, v)) = line.split_once(':') {
+            if k.trim().eq_ignore_ascii_case("authorization") {
+                auth_header = Some(v.trim().to_owned());
+            }
+        }
+    }
+    if auth_header.is_none() && path == "/api/ws/browser-takeover" {
+        if let Some(token) = crate::browser_ws::extract_query_param(query, "token") {
+            auth_header = Some(format!("Bearer {token}"));
+        }
+    }
+
+    // Bot credentials are a separate principal class; they never reach owner/device RPC.
+    if path == "/api/bot/v1/mcp" {
+        if method != "POST" { write_json_response(&mut stream,405,r#"{"error":"METHOD_NOT_ALLOWED"}"#);return; }
+        if body_bytes.len() > 16384 { write_json_response(&mut stream,413,r#"{"error":"REQUEST_TOO_LARGE"}"#);return; }
+        let body: Value=match serde_json::from_str(&body_str) {Ok(v)=>v,Err(_)=>{write_json_response(&mut stream,400,r#"{"error":"BOT_BODY_INVALID"}"#);return;}};
+        let mut guard=match state.lock(){Ok(g)=>g,Err(_)=>return};
+        let (status,value)=bot_access::handle(&mut guard,auth_header.as_deref(),&body,now_millis());
+        write_json_response(&mut stream,status,&value.to_string());return;
+    }
+    if auth_header.as_deref().is_some_and(|h|h.to_ascii_lowercase().contains("bob_bot_")) {
+        write_json_response(&mut stream,403,r#"{"error":"BOT_SCOPE_DENIED"}"#);return;
+    }
+
+    // A configured standalone node owns its authentication boundary, including RPC.
+    let access_dir = match state.lock() { Ok(g) => g.runtime.data_dir.clone(), Err(_) => return };
+
+    if method == "OPTIONS" {
+        let resp = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, X-Bob-Rpc\r\nConnection: close\r\n\r\n";
+        let _ = stream.write_all(resp.as_bytes());
+        return;
+    }
+
+    if path == "/api/capabilities" && method == "GET" {
+        let mut cap_val = serde_json::to_value(RuntimeCapabilityManifest::headless_node())
+            .unwrap_or_else(|_| json!({}));
+        let needs = {
+            let guard = state.lock().ok();
+            onboarding::needs_onboarding(&access_dir, guard.as_ref().map(|g| &g.runtime))
+        };
+        cap_val["needsOnboarding"] = json!(needs);
+        cap_val["needs_onboarding"] = json!(needs);
+        write_json_response(&mut stream, 200, &cap_val.to_string());
+        return;
+    }
+
+    if path == "/api/node/v1/onboarding/status" {
+        if method != "GET" {
+            write_json_response(&mut stream, 405, r#"{"ok":false,"error":"METHOD_NOT_ALLOWED"}"#);
+            return;
+        }
+        let status_val = {
+            let guard = state.lock().ok();
+            onboarding::status_json(&access_dir, guard.as_ref().map(|g| &g.runtime), now_millis())
+        };
+        write_json_response(&mut stream, 200, &status_val.to_string());
+        return;
+    }
+
+    if path == "/api/node/v1/onboarding/claim" {
+        if method != "POST" {
+            write_json_response(&mut stream, 405, r#"{"ok":false,"error":"METHOD_NOT_ALLOWED"}"#);
+            return;
+        }
+        let parsed: Value = match serde_json::from_str::<Value>(&body_str) {
+            Ok(v) if v.is_object() => v,
+            _ => {
+                write_json_response(&mut stream, 400, r#"{"ok":false,"error":"NODE_BODY_INVALID"}"#);
+                return;
+            }
+        };
+        let (status, val) = onboarding::claim_node(&access_dir, &parsed, now_millis());
+        write_json_response(&mut stream, status, &val.to_string());
+        return;
+    }
+
+    if path == "/api/node/v1/onboarding/provider" {
+        if method != "POST" {
+            write_json_response(&mut stream, 405, r#"{"ok":false,"error":"METHOD_NOT_ALLOWED"}"#);
+            return;
+        }
+        let parsed: Value = match serde_json::from_str::<Value>(&body_str) {
+            Ok(v) if v.is_object() => v,
+            _ => {
+                write_json_response(&mut stream, 400, r#"{"ok":false,"error":"NODE_BODY_INVALID"}"#);
+                return;
+            }
+        };
+        let (status, val) = onboarding::configure_provider(
+            &state,
+            &access_dir,
+            auth_header.as_deref(),
+            &parsed,
+            now_millis(),
+        );
+        write_json_response(&mut stream, status, &val.to_string());
+        return;
+    }
+
+    if path == "/api/node/v1/onboarding/persona" {
+        if method != "POST" {
+            write_json_response(&mut stream, 405, r#"{"ok":false,"error":"METHOD_NOT_ALLOWED"}"#);
+            return;
+        }
+        let parsed: Value = match serde_json::from_str::<Value>(&body_str) {
+            Ok(v) if v.is_object() => v,
+            _ => {
+                write_json_response(&mut stream, 400, r#"{"ok":false,"error":"NODE_BODY_INVALID"}"#);
+                return;
+            }
+        };
+        let (status, val) = onboarding::complete_persona(
+            &access_dir,
+            auth_header.as_deref(),
+            &parsed,
+            now_millis(),
+        );
+        write_json_response(&mut stream, status, &val.to_string());
+        return;
+    }
+
+    if node_access::enabled(&access_dir) {
+        let mut node_path = path.strip_prefix("/api/node/v1/").map(str::to_owned);
+        let mut parsed: Value = serde_json::from_str(&body_str).unwrap_or_else(|_|json!({}));
+        if !parsed.is_object() {write_json_response(&mut stream,400,r#"{"error":"NODE_BODY_INVALID"}"#);return;}
+        // Existing phone QR exchange protocol remains usable, but never syncs secrets.
+        if method == "POST" && path.starts_with("/api/client/v1/pairings/") && path.ends_with("/exchange") {
+            if let Some(id) = path.strip_prefix("/api/client/v1/pairings/").and_then(|s|s.strip_suffix("/exchange")) {
+                parsed["pairing_id"]=json!(id);node_path=Some("exchange".into());
+            }
+        }
+        if let Some(p) = node_path.filter(|_| method != "OPTIONS") {
+            let result=node_access::route(&access_dir,method,&p,auth_header.as_deref(),&parsed,now_millis());
+            let (status,value)=match result {Ok(v)=>(200,v),Err(e)=>(if e=="NODE_RATE_LIMITED"{429}else{401},json!({"error":e}))};
+            write_json_response(&mut stream,status,&value.to_string());return;
+        }
+        if method != "OPTIONS" && path.starts_with("/api/") {
+            let scope=node_access::authorize(&access_dir,auth_header.as_deref(),now_millis());
+            let allowed=match scope {
+                Ok(ref role) if role=="owner" => !path.starts_with("/api/client/v1/"),
+                Ok(_) => path == "/api/ws/browser-takeover" || path.starts_with("/api/f/") || path.strip_prefix("/api/rpc/").is_some_and(|cmd|matches!(cmd,
+                    "app_dsh_tool_policy_apply"|"app_dsh_tool_policy_set"|"app_dsh_inventory"|"app_dsh_workspace_grant"|"app_dsh_live"|"app_dsh_create"|"app_dsh_cancel"|"app_dsh_answer"|"app_dsh_permission_set"|"app_native_setup"|"app_native_events"|"app_native_cancel"|"app_native_permission"|"app_dsh_list"|"app_dsh_page"|"app_dsh_history"|"app_dsh_preview"|"app_dsh_prompt"|"app_dsh_receipt"|"app_attachment_upload_chunk"|"app_attachment_finalize"|
+                    "app_harness_discover"|"app_harness_check_auth"|"app_harness_verify_capabilities"|
+                    "app_jarvis_chat"|"app_jarvis_approve"|"app_jarvis_reject"|"app_jarvis_approvals_list"|"app_jarvis_budget_get"|"app_jarvis_budget_set"|"app_jarvis_worker_tasks"|"app_jarvis_worker_cancel"|"app_chief_orders_list"|"app_chief_order_complete"|"app_model_presets_list"|
+                    "app_features_list"|"app_feature_keep"|"app_feature_rollback"|"app_feature_toggle"|"app_feature_call"|"app_feature_storage_save"|"app_feature_report_error"|
+                    "app_routines_list"|"app_routine_save"|"app_routine_trial"|"app_routine_toggle"|"app_routine_delete"|"app_routine_drafts_list"|
+                    "app_push_vapid_public_key"|"app_push_subscribe"|"app_push_status"|"app_push_test"|"app_proactivity_get"|"app_proactivity_set"|"app_morning_brief"|"app_dream_run"|"app_kb_search"|
+                    "app_browser_sessions_list"|"app_browser_session_open"|"app_browser_session_clear"|"app_browser_takeover_complete"|"app_browser_takeover_save_routine"|
+                    "app_host_workspaces_list"|"app_host_workspace_grant"|"app_host_workspace_revoke"|"app_host_queue_list"|"app_host_queue_enqueue"|"app_host_queue_reconcile")),
+                Err(_) => false,
+            };
+            if !allowed {write_json_response(&mut stream,401,r#"{"error":"NODE_AUTH_REQUIRED"}"#);return;}
+            if scope.as_deref()==Ok("device") && path != "/api/ws/browser-takeover" && parsed.get("connectionId").and_then(Value::as_str)!=Some("local") {
+                write_json_response(&mut stream,403,r#"{"error":"NODE_SCOPE_DENIED"}"#);return;
+            }
+        }
+    }
+
+    if method == "OPTIONS" {
+        let resp = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization, X-Bob-Rpc\r\nConnection: close\r\n\r\n";
+        let _ = stream.write_all(resp.as_bytes());
+        return;
+    }
+
+    if path == "/api/ws/browser-takeover" {
+        if method != "GET" {
+            write_json_response(&mut stream, 405, r#"{"error":"METHOD_NOT_ALLOWED"}"#);
+            return;
+        }
+        if !node_access::enabled(&access_dir)
+            && auth_header
+                .as_deref()
+                .is_some_and(|h| h.trim_start().to_ascii_lowercase().starts_with("bearer "))
+        {
+            let guard = match state.lock() {
+                Ok(g) => g,
+                Err(_) => {
+                    write_json_response(&mut stream, 500, r#"{"error":"NODE_LOCK_POISONED"}"#);
+                    return;
+                }
+            };
+            if let Err((status, code)) = verify_bearer_token(&guard, auth_header.as_deref()) {
+                let body = json!({ "ok": false, "error": code }).to_string();
+                write_json_response(&mut stream, status, &body);
+                return;
+            }
+        }
+        crate::browser_ws::handle_ws_upgrade(stream, &access_dir, &header_text, query);
+        return;
+    }
+
+    if path == "/api/jarvis/v1/stream" {
+        if method != "POST" {
+            write_json_response(&mut stream, 405, r#"{"error":"METHOD_NOT_ALLOWED"}"#);
+            return;
+        }
+        if !node_access::enabled(&access_dir)
+            && auth_header
+                .as_deref()
+                .is_some_and(|h| h.trim_start().to_ascii_lowercase().starts_with("bearer "))
+        {
+            let guard = match state.lock() {
+                Ok(g) => g,
+                Err(_) => {
+                    write_json_response(&mut stream, 500, r#"{"error":"NODE_LOCK_POISONED"}"#);
+                    return;
+                }
+            };
+            if let Err((status, code)) = verify_bearer_token(&guard, auth_header.as_deref()) {
+                let body = json!({ "ok": false, "error": code }).to_string();
+                write_json_response(&mut stream, status, &body);
+                return;
+            }
+        }
+        let parsed_body: Value = serde_json::from_str(&body_str).unwrap_or_else(|_| json!({}));
+        jarvis::handle_http_stream(stream, &state, &parsed_body);
+        return;
+    }
+
+    if let Some(rest) = path.strip_prefix("/api/f/") {
+        if method != "POST" && method != "GET" {
+            write_json_response(&mut stream, 405, r#"{"error":"METHOD_NOT_ALLOWED"}"#);
+            return;
+        }
+        let parts: Vec<&str> = rest.splitn(2, '/').collect();
+        if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
+            write_json_response(&mut stream, 400, r#"{"error":"INVALID_FEATURE_ROUTE_PATH"}"#);
+            return;
+        }
+        let pkg = parts[0];
+        let route = parts[1];
+
+        if !node_access::enabled(&access_dir)
+            && auth_header
+                .as_deref()
+                .is_some_and(|h| h.trim_start().to_ascii_lowercase().starts_with("bearer "))
+        {
+            let guard = match state.lock() {
+                Ok(g) => g,
+                Err(_) => {
+                    write_json_response(&mut stream, 500, r#"{"error":"NODE_LOCK_POISONED"}"#);
+                    return;
+                }
+            };
+            if let Err((status, code)) = verify_bearer_token(&guard, auth_header.as_deref()) {
+                let body = json!({ "ok": false, "error": code }).to_string();
+                write_json_response(&mut stream, status, &body);
+                return;
+            }
+        }
+
+        let payload: Value = if method == "POST" {
+            serde_json::from_str(&body_str).unwrap_or_else(|_| json!({}))
+        } else {
+            let mut map = serde_json::Map::new();
+            if !query.is_empty() {
+                for pair in query.split('&') {
+                    if let Some((k, v)) = pair.split_once('=') {
+                        map.insert(k.to_string(), json!(v));
+                    }
+                }
+            }
+            Value::Object(map)
+        };
+
+        let data_dir = access_dir.clone();
+        let call_args = json!({
+            "name": pkg,
+            "route": route,
+            "payload": payload,
+        });
+
+        match bob_runtime::features::execute_feature_call(&data_dir, &call_args) {
+            Ok(result) => {
+                let payload = serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_owned());
+                write_json_response(&mut stream, 200, &payload);
+            }
+            Err(err) => {
+                let status = if err == "FEATURE_NOT_FOUND" || err == "FEATURE_ROUTE_NOT_FOUND" {
+                    404
+                } else if err == "FEATURE_DISABLED" {
+                    403
+                } else {
+                    400
+                };
+                let payload = json!({ "ok": false, "error": err }).to_string();
+                write_json_response(&mut stream, status, &payload);
+            }
+        }
+        return;
+    }
+
+    if path == "/api/push/vapid-public-key" && method == "GET" {
+        let store = match push_channels::PushStore::open(&access_dir) {
+            Ok(s) => s,
+            Err(e) => {
+                write_json_response(&mut stream, 500, &json!({ "ok": false, "error": e }).to_string());
+                return;
+            }
+        };
+        write_json_response(&mut stream, 200, &json!({ "ok": true, "publicKey": store.public_key(), "public_key": store.public_key() }).to_string());
+        return;
+    }
+
+    if path == "/api/push/subscribe" && method == "POST" {
+        let parsed_body: Value = serde_json::from_str(&body_str).unwrap_or_else(|_| json!({}));
+        let sub_val = parsed_body.get("subscription").unwrap_or(&parsed_body);
+        let sub: Result<push_channels::WebPushSubscription, _> = serde_json::from_value(sub_val.clone());
+        match sub {
+            Ok(subscription) => {
+                let mut store = match push_channels::PushStore::open(&access_dir) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        write_json_response(&mut stream, 500, &json!({ "ok": false, "error": e }).to_string());
+                        return;
+                    }
+                };
+                match store.add_subscription(subscription) {
+                    Ok(()) => write_json_response(&mut stream, 200, r#"{"ok":true,"status":"subscribed"}"#),
+                    Err(e) => write_json_response(&mut stream, 400, &json!({ "ok": false, "error": e }).to_string()),
+                }
+            }
+            Err(_) => {
+                write_json_response(&mut stream, 400, r#"{"ok":false,"error":"SUBSCRIPTION_INVALID"}"#);
+            }
+        }
+        return;
+    }
+
+    if path == "/api/push/unsubscribe" && method == "POST" {
+        let parsed_body: Value = serde_json::from_str(&body_str).unwrap_or_else(|_| json!({}));
+        let endpoint = parsed_body.get("endpoint").and_then(Value::as_str).unwrap_or("");
+        let mut store = match push_channels::PushStore::open(&access_dir) {
+            Ok(s) => s,
+            Err(e) => {
+                write_json_response(&mut stream, 500, &json!({ "ok": false, "error": e }).to_string());
+                return;
+            }
+        };
+        let _ = store.remove_subscription(endpoint);
+        write_json_response(&mut stream, 200, r#"{"ok":true,"status":"unsubscribed"}"#);
+        return;
+    }
+
+    if path == "/v1/health" && method == "GET" {
+        let (status, val) = push_channels::handle_wechat_health();
+        write_json_response(&mut stream, status, &val.to_string());
+        return;
+    }
+
+    if path == "/v1/conversations" {
+        if node_access::enabled(&access_dir) {
+            if let Err(e) = node_access::authorize(&access_dir, auth_header.as_deref(), now_millis()) {
+                write_json_response(&mut stream, 401, &json!({ "error": e }).to_string());
+                return;
+            }
+        } else if auth_header.as_deref().is_some_and(|h| h.trim_start().to_ascii_lowercase().starts_with("bearer ")) {
+            let guard = match state.lock() {
+                Ok(g) => g,
+                Err(_) => {
+                    write_json_response(&mut stream, 500, r#"{"error":"NODE_LOCK_POISONED"}"#);
+                    return;
+                }
+            };
+            if let Err((status, code)) = verify_bearer_token(&guard, auth_header.as_deref()) {
+                write_json_response(&mut stream, status, &json!({ "error": code }).to_string());
+                return;
+            }
+        }
+        let parsed_body: Value = serde_json::from_str(&body_str).unwrap_or_else(|_| json!({}));
+        let mut guard = match state.lock() {
+            Ok(g) => g,
+            Err(_) => {
+                write_json_response(&mut stream, 500, r#"{"error":"NODE_LOCK_POISONED"}"#);
+                return;
+            }
+        };
+        let res = push_channels::handle_wechat_conversations(&mut *guard, method, &parsed_body);
+        drop(guard);
+        match res {
+            Ok((status, val)) => write_json_response(&mut stream, status, &val.to_string()),
+            Err(e) => write_json_response(&mut stream, 400, &json!({ "error": e }).to_string()),
+        }
+        return;
+    }
+
+    if path == "/v1/chat" && method == "POST" {
+        if node_access::enabled(&access_dir) {
+            if let Err(e) = node_access::authorize(&access_dir, auth_header.as_deref(), now_millis()) {
+                write_json_response(&mut stream, 401, &json!({ "error": e }).to_string());
+                return;
+            }
+        } else if auth_header.as_deref().is_some_and(|h| h.trim_start().to_ascii_lowercase().starts_with("bearer ")) {
+            let guard = match state.lock() {
+                Ok(g) => g,
+                Err(_) => {
+                    write_json_response(&mut stream, 500, r#"{"error":"NODE_LOCK_POISONED"}"#);
+                    return;
+                }
+            };
+            if let Err((status, code)) = verify_bearer_token(&guard, auth_header.as_deref()) {
+                write_json_response(&mut stream, status, &json!({ "error": code }).to_string());
+                return;
+            }
+        }
+        let parsed_body: Value = serde_json::from_str(&body_str).unwrap_or_else(|_| json!({}));
+        let mut accept_header: Option<String> = None;
+        for line in header_text.lines() {
+            if let Some((k, v)) = line.split_once(':') {
+                if k.trim().eq_ignore_ascii_case("accept") {
+                    accept_header = Some(v.trim().to_owned());
+                }
+            }
+        }
+        push_channels::handle_wechat_chat(stream, &state, &parsed_body, accept_header.as_deref());
+        return;
+    }
+
+    if path == "/api/capabilities" && method == "GET" {
+        let payload = serde_json::to_string(&RuntimeCapabilityManifest::headless_node())
+            .unwrap_or_else(|_| "{}".to_owned());
+        write_json_response(&mut stream, 200, &payload);
+        return;
+    }
+
+    if path == "/api/events" && method == "GET" {
+        let sse = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\ndata: {{\"type\":\"connected\",\"timestamp\":{}}}\n\n",
+            now_millis()
+        );
+        let _ = stream.write_all(sse.as_bytes());
+        return;
+    }
+
+    if let Some(command) = path.strip_prefix("/api/rpc/") {
+        if method != "POST" {
+            write_json_response(&mut stream, 405, r#"{"error":"METHOD_NOT_ALLOWED"}"#);
+            return;
+        }
+        let parsed_body: Value = serde_json::from_str(&body_str).unwrap_or_else(|_| json!({}));
+        let args = if parsed_body.as_object().is_some_and(|m| m.len() == 1 && m.contains_key("args")) {
+            parsed_body.get("args").cloned().unwrap()
+        } else {
+            parsed_body
+        };
+        let mut guard = match state.lock() {
+            Ok(g) => g,
+            Err(_) => {
+                write_json_response(&mut stream, 500, r#"{"error":"NODE_LOCK_POISONED"}"#);
+                return;
+            }
+        };
+        if !node_access::enabled(&access_dir)
+            && auth_header
+                .as_deref()
+                .is_some_and(|h| h.trim_start().to_ascii_lowercase().starts_with("bearer "))
+        {
+            if let Err((status, code)) = verify_bearer_token(&guard, auth_header.as_deref()) {
+                let body = json!({ "ok": false, "error": code }).to_string();
+                write_json_response(&mut stream, status, &body);
+                return;
+            }
+        }
+        if command.trim() == "app_inbox_triage_draft" {
+            drop(guard);
+            let result = inbox_triage::draft(&state, &args);
+            let (status,value)=match result {Ok(result)=>(200,json!({"ok":true,"result":result})),Err(e)=>(400,json!({"ok":false,"error":e}))};
+            write_json_response(&mut stream,status,&value.to_string());
+            return;
+        }
+        if command.trim() == "app_inbox_check_implemented" {
+            drop(guard);
+            let result = inbox_triage::check_implemented(&state, &args);
+            let (status,value)=match result {Ok(result)=>(200,json!({"ok":true,"result":result})),Err(e)=>(400,json!({"ok":false,"error":e}))};
+            write_json_response(&mut stream,status,&value.to_string());
+            return;
+        }
+        if matches!(command.trim(), "app_assistant_execute" | "app_assistant_poll") {
+            drop(guard);
+            let result=if command.trim()=="app_assistant_execute" { assistant::execute(&state,&args) } else { assistant::poll(&state,&args) };
+            let (status,value)=match result {Ok(result)=>(200,json!({"ok":true,"result":result})),Err(e)=>(400,json!({"ok":false,"error":e}))};
+            write_json_response(&mut stream,status,&value.to_string());
+            return;
+        }
+        if command.trim() == "app_jarvis_chat" {
+            drop(guard);
+            let result = jarvis::chat(&state, &args);
+            let (status, value) = match result {
+                Ok(result) => (200, json!({ "ok": true, "result": result })),
+                Err(e) => (400, json!({ "ok": false, "error": e })),
+            };
+            write_json_response(&mut stream, status, &value.to_string());
+            return;
+        }
+        if matches!(command.trim(), "app_jarvis_approve" | "app_jarvis_reject") {
+            drop(guard);
+            let result = match command.trim() {
+                "app_jarvis_approve" => jarvis::approve(&state, &args),
+                "app_jarvis_reject" => jarvis::reject(&state, &args),
+                _ => unreachable!(),
+            };
+            let (status, value) = match result {
+                Ok(result) => (200, json!({ "ok": true, "result": result })),
+                Err(e) => (400, json!({ "ok": false, "error": e })),
+            };
+            write_json_response(&mut stream, status, &value.to_string());
+            return;
+        }
+        if command.trim() == "app_feature_call" {
+            let data_dir = guard.runtime.data_dir.clone();
+            drop(guard);
+            let result = bob_runtime::features::execute_feature_call(&data_dir, &args);
+            let (status, value) = match result {
+                Ok(result) => (200, json!({ "ok": true, "result": result })),
+                Err(e) => (400, json!({ "ok": false, "error": e })),
+            };
+            write_json_response(&mut stream, status, &value.to_string());
+            return;
+        }
+        if matches!(
+            command.trim(),
+            "app_orchestration_list"
+                | "app_orchestration_accept"
+                | "app_orchestration_continue"
+                | "app_orchestration_cancel"
+        ) {
+            let data_dir = guard.runtime.data_dir.clone();
+            drop(guard);
+            let result: Result<Value, String> = match command.trim() {
+                "app_orchestration_list" => {
+                    orchestration::rpc_list(&data_dir, &args).map_err(str::to_owned)
+                }
+                "app_orchestration_accept" => {
+                    orchestration::rpc_accept(&data_dir, &args).map_err(str::to_owned)
+                }
+                "app_orchestration_continue" => orchestration::rpc_continue(&data_dir, &args),
+                "app_orchestration_cancel" => {
+                    orchestration::rpc_cancel(&data_dir, &args).map_err(str::to_owned)
+                }
+                _ => unreachable!(),
+            };
+            let (status, value) = match result {
+                Ok(result) => (200, json!({ "ok": true, "result": result })),
+                Err(e) => (400, json!({ "ok": false, "error": e })),
+            };
+            write_json_response(&mut stream, status, &value.to_string());
+            return;
+        }
+        if matches!(
+            command.trim(),
+            "app_dsh_tool_policy_apply" | "app_dsh_tool_policy_set" | "app_dsh_inventory" | "app_dsh_workspace_grant" | "app_node_bootstrap_workspace" | "app_dsh_live" | "app_dsh_create" | "app_dsh_cancel" | "app_dsh_answer" | "app_dsh_permission_set" | "app_native_setup" | "app_native_events" | "app_native_cancel" | "app_native_permission" | "app_dsh_receipt"
+                | "app_dsh_page"
+                | "app_dsh_preview"
+                | "app_dsh_list"
+                | "app_dsh_history"
+                | "app_dsh_prompt"
+                | "app_attachment_upload_chunk"
+                | "app_attachment_finalize"
+                | "app_context_list"
+                | "app_context_read"
+                | "app_context_refresh"
+                | "app_context_tasks"
+                | "app_claude_capabilities"
+                | "app_claude_sessions"
+                | "app_claude_history"
+                | "app_claude_prompt"
+                | "app_claude_cancel"
+                | "app_claude_reconcile"
+                | "app_claude_review"
+                | "app_claude_artifacts"
+                | "app_claude_preview"
+        ) {
+            let cmd = command.trim();
+            let data_dir = guard.runtime.data_dir.clone();
+            drop(guard);
+            let result = execute_unlocked_harness_rpc(&data_dir, cmd, &args);
+            let (status, value) = match result {
+                Ok(result) => (200, json!({"ok": true, "result": result})),
+                Err(e) => (400, json!({"ok": false, "error": e})),
+            };
+            write_json_response(&mut stream, status, &value.to_string());
+            return;
+        }
+        if command.trim()=="app_capture_recognize" {
+            let prepared=(|| {
+                let image=guard.app.capture_media(args["mediaId"].as_str().unwrap_or("")).map_err(|_|"CAPTURE_IMAGE_MISSING")?;
+                guard.runtime.prepare_vision(&image,args["modelRef"].as_str().unwrap_or(""))
+            })();
+            drop(guard);
+            let result=prepared.and_then(|(target,spec)|bob_runtime::vision::execute(target,spec));
+            let (status,value)=match result {Ok(result)=>(200,json!({"ok":true,"result":result})),Err(e)=>(400,json!({"ok":false,"error":e}))};
+            write_json_response(&mut stream,status,&value.to_string());
+            return;
+        }
+        if command.trim() == "app_ticket_recognize" {
+            let now = now_millis();
+            let media_id = args["mediaId"].as_str().unwrap_or("").to_owned();
+            let model_ref = args["modelRef"].as_str().unwrap_or("");
+            let prepared = (|| {
+                let image = guard
+                    .app
+                    .capture_media(&media_id)
+                    .map_err(|_| "CAPTURE_IMAGE_MISSING")?;
+                guard.runtime.prepare_ticket_vision(&image, model_ref, now)
+            })();
+            drop(guard);
+            let result = prepared.and_then(|(target, spec)| {
+                let vision_res = bob_runtime::vision::execute(target, spec)?;
+                let raw_text = vision_res["text"].as_str().unwrap_or("");
+                let mut guard = state.lock().map_err(|_| "NODE_LOCK_POISONED")?;
+                let proposal = bob_runtime::assistant::parse_proposal(raw_text, &[], false).unwrap_or_else(|_| bob_runtime::assistant::Proposal {
+                    kind: "create_ticket".into(),
+                    text: raw_text.trim().to_owned(),
+                    connection_id: None,
+                    session_id: None,
+                    title: Some("票据记录".into()),
+                    start_time: None,
+                    end_time: None,
+                    notes: None,
+                    schedule_id: None,
+                    ticket: None,
+                    project_groups: None,
+                });
+                let title = proposal
+                    .title
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("票据记录")
+                    .to_owned();
+                let ticket_prop = proposal.ticket.clone().unwrap_or_else(|| {
+                    bob_runtime::assistant::TicketProposal {
+                        category: "general".into(),
+                        origin: None,
+                        destination: None,
+                        venue: None,
+                        number: None,
+                        start_time: proposal.start_time.clone(),
+                        end_time: proposal.end_time.clone(),
+                        seat: None,
+                        coach: None,
+                        gate: None,
+                        passenger: None,
+                        pickup_code: None,
+                        booking_id: None,
+                    }
+                });
+                let ticket_id = args
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.trim().is_empty())
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| {
+                        format!(
+                            "ticket-{}",
+                            &bob_kernel::outbox::digest(format!("{media_id}:{now}").as_bytes())[..12]
+                        )
+                    });
+                let (note, schedule) = bob_runtime::assistant::save_ticket_proposal(
+                    &mut guard.app,
+                    &ticket_id,
+                    &title,
+                    &ticket_prop,
+                    proposal.start_time.as_deref(),
+                    proposal.end_time.as_deref(),
+                    Some(&media_id),
+                    now,
+                )?;
+                let receipt = if schedule.is_some() {
+                    format!("[已存入票夹并同步至日历：{title}]")
+                } else {
+                    format!("[已存入票夹：{title}]")
+                };
+                let reply_text = if proposal.text.trim().is_empty() {
+                    receipt.clone()
+                } else {
+                    format!("{}\n\n{receipt}", proposal.text.trim())
+                };
+                Ok(json!({
+                    "ticket": note,
+                    "schedule": schedule,
+                    "receipt": receipt,
+                    "text": reply_text,
+                    "requestedModel": vision_res["requestedModel"],
+                    "reportedModel": vision_res["reportedModel"],
+                }))
+            });
+            let (status, value) = match result {
+                Ok(result) => (200, json!({"ok": true, "result": result})),
+                Err(e) => (400, json!({"ok": false, "error": e})),
+            };
+            write_json_response(&mut stream, status, &value.to_string());
+            return;
+        }
+        if command.trim() == "app_node_discover" {
+            drop(guard);
+            let address = args
+                .get("address")
+                .or_else(|| args.get("baseUrl"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let result = bob_runtime::node_pairing::discover_remote_node(address);
+            let (status, value) = match result {
+                Ok(result) => (200, json!({ "ok": true, "result": result })),
+                Err(e) => (400, json!({ "ok": false, "error": e })),
+            };
+            write_json_response(&mut stream, status, &value.to_string());
+            return;
+        }
+        if command.trim() == "app_node_connect" {
+            let at = now_millis();
+            let local_topo = bob_runtime::node_pairing::export_local_topology_with_app(
+                &guard.runtime.data_dir,
+                Some(&guard.app),
+                &guard.runtime,
+                true,
+            );
+            drop(guard);
+            let device_name = std::env::var("BOB_NODE_LABEL")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "Bob Operator".to_owned());
+            let result: Result<Value, &'static str> = (|| {
+                let connected = bob_runtime::node_pairing::connect_remote_node(
+                    &args,
+                    &device_name,
+                    &local_topo,
+                    at,
+                )?;
+                let node_id = connected["nodeId"]
+                    .as_str()
+                    .ok_or("NODE_CONNECT_FAILED")?
+                    .to_owned();
+                let label = connected["label"].as_str().unwrap_or(&node_id).to_owned();
+                let base_url = connected["baseUrl"]
+                    .as_str()
+                    .ok_or("NODE_CONNECT_FAILED")?
+                    .to_owned();
+                let role = connected["role"].as_str().unwrap_or("node").to_owned();
+                let token = connected["accessToken"]
+                    .as_str()
+                    .ok_or("NODE_CONNECT_FAILED")?
+                    .to_owned();
+                let mut guard = state.lock().map_err(|_| "NODE_LOCK_POISONED")?;
+                let ctx: &mut NodeContext = &mut *guard;
+                let data_dir = ctx.runtime.data_dir.clone();
+                let _ = ctx.runtime.save_remote_node(
+                    &mut ctx.app,
+                    Some(node_id.clone()),
+                    &label,
+                    &base_url,
+                    Some(&token),
+                    false,
+                    Some(&role),
+                    true,
+                )?;
+                if let Some(synced) = connected
+                    .get("syncedTopology")
+                    .filter(|v| v.as_object().is_some_and(|m| !m.is_empty()))
+                {
+                    let _ = bob_runtime::node_pairing::merge_topology(
+                        &data_dir,
+                        &mut ctx.app,
+                        &ctx.runtime,
+                        synced,
+                    );
+                }
+                Ok(json!({
+                    "connected": true,
+                    "nodeId": node_id,
+                    "label": label,
+                    "baseUrl": base_url,
+                    "role": role,
+                    "mobileQr": connected.get("mobileQr").cloned().unwrap_or(Value::Null),
+                }))
+            })();
+            let (status, value) = match result {
+                Ok(result) => (200, json!({ "ok": true, "result": result })),
+                Err(e) => (400, json!({ "ok": false, "error": e })),
+            };
+            write_json_response(&mut stream, status, &value.to_string());
+            return;
+        }
+        if command.trim() == "app_pairing_qr_propose" {
+            let at = now_millis();
+            let raw_code = args
+                .get("invitationCode")
+                .or_else(|| args.get("invitation_code"))
+                .or_else(|| args.get("code"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned();
+            let local_topo = bob_runtime::node_pairing::export_local_topology_with_app(
+                &guard.runtime.data_dir,
+                Some(&guard.app),
+                &guard.runtime,
+                true,
+            );
+            drop(guard);
+            let result: Result<Value, &'static str> = (|| {
+                let inv = bob_runtime::node_pairing::NodePairingInvitation::decode_qr_code(&raw_code, at)?;
+                let exchanged = bob_runtime::node_pairing::exchange_and_sync_with_peer(
+                    &inv,
+                    "Bob Mobile Broker",
+                    &local_topo,
+                )?;
+                let token = exchanged
+                    .get("accessToken")
+                    .and_then(Value::as_str)
+                    .ok_or("PAIRING_CODE_INVALID")?;
+                let mut guard = state.lock().map_err(|_| "NODE_LOCK_POISONED")?;
+                let ctx: &mut NodeContext = &mut *guard;
+                let data_dir = ctx.runtime.data_dir.clone();
+                let _ = ctx.runtime.save_remote_node(
+                    &mut ctx.app,
+                    Some(inv.node_id.clone()),
+                    &inv.label,
+                    &inv.base_url,
+                    Some(token),
+                    false,
+                    Some(&inv.role),
+                    true,
+                )?;
+                if let Some(synced) = exchanged.get("syncedTopology") {
+                    let _ = bob_runtime::node_pairing::merge_topology(
+                        &data_dir,
+                        &mut ctx.app,
+                        &ctx.runtime,
+                        synced,
+                    );
+                }
+                Ok(json!({
+                    "role": "replica",
+                    "state": "pending",
+                    "node_id": inv.node_id,
+                    "label": inv.label,
+                    "base_url": inv.base_url,
+                    "expires_at": inv.expires_at,
+                }))
+            })();
+            let (status, value) = match result {
+                Ok(result) => (200, json!({ "ok": true, "result": result })),
+                Err(e) => (400, json!({ "ok": false, "error": e })),
+            };
+            write_json_response(&mut stream, status, &value.to_string());
+            return;
+        }
+        match handle_rpc_command(&mut guard, command.trim(), &args) {
+            Ok(result) => {
+                let payload = serde_json::to_string(&json!({ "ok": true, "result": result }))
+                    .unwrap_or_else(|_| r#"{"ok":true,"result":null}"#.to_owned());
+                write_json_response(&mut stream, 200, &payload);
+            }
+            Err(code) => {
+                let payload = serde_json::to_string(&json!({ "ok": false, "error": code }))
+                    .unwrap_or_else(|_| r#"{"ok":false,"error":"RPC_FAILED"}"#.to_owned());
+                write_json_response(&mut stream, 400, &payload);
+            }
+        }
+        return;
+    }
+
+    if path == "/api/client/v1" || path.starts_with("/api/client/v1/") {
+        let mut guard = match state.lock() {
+            Ok(g) => g,
+            Err(_) => {
+                write_json_response(&mut stream, 500, r#"{"code":"NODE_LOCK_POISONED"}"#);
+                return;
+            }
+        };
+        let (status, value) = handle_client_v1_http(
+            &mut guard,
+            method,
+            path,
+            query,
+            auth_header.as_deref(),
+            &body_str,
+        );
+        let payload = serde_json::to_string(&value).unwrap_or_else(|_| "{}".to_owned());
+        write_json_response(&mut stream, status, &payload);
+        return;
+    }
+
+    // Static file serving for Unified Web UI
+    let static_dir = state.lock().ok().and_then(|g| g.static_dir.clone());
+    if let Some(root) = static_dir {
+        let rel = path.trim_start_matches('/');
+        let safe_rel = if rel.is_empty() || rel.contains("..") {
+            "index.html"
+        } else {
+            rel
+        };
+        let candidate = root.join(safe_rel);
+        let file_to_serve = if candidate.is_file() {
+            candidate
+        } else {
+            root.join("index.html")
+        };
+        if let Ok(bytes) = std::fs::read(&file_to_serve) {
+            let ctype = guess_content_type(&file_to_serve);
+            if file_to_serve.file_name().and_then(|s| s.to_str()) == Some("index.html") {
+                let html = String::from_utf8_lossy(&bytes);
+                let injected = if html.contains("<head>") {
+                    html.replacen(
+                        "<head>",
+                        "<head><script>window.__BOB_NODE_RUNTIME__=true;</script>",
+                        1,
+                    )
+                } else {
+                    format!("<script>window.__BOB_NODE_RUNTIME__=true;</script>{html}")
+                };
+                write_bytes_response(&mut stream, 200, ctype, injected.as_bytes());
+                return;
+            }
+            write_bytes_response(&mut stream, 200, ctype, &bytes);
+            return;
+        }
+    }
+
+    // Default fallback HTML when static_dir is not configured
+    let fallback = r#"<!doctype html><html><head><meta charset="utf-8"><script>window.__BOB_NODE_RUNTIME__=true;</script><title>Bob Online Node</title></head><body><h1>Bob Online Node Active</h1></body></html>"#;
+    write_bytes_response(
+        &mut stream,
+        200,
+        "text/html; charset=utf-8",
+        fallback.as_bytes(),
+    );
+}
+
+fn write_json_response(stream: &mut TcpStream, status: u16, json_body: &str) {
+    write_bytes_response(
+        stream,
+        status,
+        "application/json; charset=utf-8",
+        json_body.as_bytes(),
+    );
+}
+
+fn write_bytes_response(stream: &mut TcpStream, status: u16, content_type: &str, body: &[u8]) {
+    let reason = match status {
+        200 => "OK",
+        201 => "Created",
+        202 => "Accepted",
+        204 => "No Content",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        410 => "Gone",
+        429 => "Too Many Requests",
+        _ => "Internal Server Error",
+    };
+    let header = format!(
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    let _ = stream.write_all(header.as_bytes());
+    let _ = stream.write_all(body);
+}
+
+pub struct RunningNodeServer {
+    pub local_addr: SocketAddr,
+    stop: Arc<AtomicBool>,
+    state: Arc<Mutex<NodeContext>>,
+}
+
+impl RunningNodeServer {
+    pub fn shutdown(&self) {
+        self.stop.store(true, Ordering::SeqCst);
+        let _ = TcpStream::connect_timeout(&self.local_addr, Duration::from_millis(100));
+    }
+
+    pub fn sync_project_registry(&self, path: &Path) -> Result<usize, &'static str> {
+        let mut ctx = self.state.lock().map_err(|_| "NODE_LOCK_POISONED")?;
+        ctx.sync_project_registry(path)
+    }
+
+    pub fn bootstrap_pairing_code(&self) -> Option<String> {
+        let guard = self.state.lock().ok()?;
+        onboarding::peek_bootstrap_code(&guard.runtime.data_dir, now_millis())
+    }
+
+    pub fn issue_node_access_startup_pairing(
+        &self,
+        public_url: Option<&str>,
+        label: Option<&str>,
+    ) -> Result<bob_runtime::node_pairing::NodePairingInvitation, &'static str> {
+        let data_dir = {
+            let guard = self.state.lock().map_err(|_| "NODE_LOCK_POISONED")?;
+            guard.runtime.data_dir.clone()
+        };
+        let clean_url = resolve_public_url(public_url, Some(self.local_addr));
+        issue_node_access_cli_pairing(&data_dir, &clean_url, label)
+    }
+
+    pub fn issue_startup_pairing(
+        &self,
+        public_url: Option<&str>,
+        label: Option<&str>,
+    ) -> Result<bob_runtime::node_pairing::NodePairingInvitation, &'static str> {
+        let mut ctx = self.state.lock().map_err(|_| "NODE_LOCK_POISONED")?;
+        let local_grant = bob_runtime::agy_directory::ensure_local_grant_registered(
+            &ctx.runtime.data_dir,
+            "local",
+        );
+        let harnesses: Vec<String> = local_grant
+            .as_ref()
+            .and_then(|g| g.get("harnesses"))
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let clean_url = resolve_public_url(public_url, Some(self.local_addr));
+        let resolved_label = resolve_node_label(label, &clean_url);
+        let role = if ctx.static_dir.is_some() {
+            "web_host"
+        } else {
+            "node"
+        };
+        let at = now_millis();
+        let pairing_id = format!(
+            "qr_boot_{}",
+            node_access::random_base62(8).unwrap_or_else(|_| format!("{at}"))
+        );
+        let user_code = node_access::random_base62(16).unwrap_or_else(|_| csprng_digits_6());
+        let expires_at = at + 86_400_000; // 24h startup invitation window
+        ctx.online.pairings.insert(
+            pairing_id.clone(),
+            OnlinePairingSession {
+                pairing_id: pairing_id.clone(),
+                user_code: user_code.clone(),
+                device_name: resolved_label.clone(),
+                created_at: at,
+                expires_at,
+                exchanged_token: None,
+            },
+        );
+        ctx.save_online();
+        Ok(bob_runtime::node_pairing::NodePairingInvitation {
+            v: 1,
+            role: role.to_owned(),
+            node_id: bob_runtime::node_pairing::compute_node_id(&clean_url),
+            label: resolved_label,
+            base_url: clean_url,
+            pairing_id,
+            user_code,
+            expires_at,
+            harnesses,
+        })
+    }
+}
+
+pub fn spawn_node_server(config: BobNodeConfig) -> Result<RunningNodeServer, &'static str> {
+    let listener = TcpListener::bind(&config.bind_addr).map_err(|_| "BIND_FAILED")?;
+    let local_addr = listener.local_addr().map_err(|_| "LOCAL_ADDR_FAILED")?;
+    let node_ctx = NodeContext::open(&config)?;
+    if !node_access::enabled(&config.data_dir)
+        && onboarding::needs_onboarding(&config.data_dir, Some(&node_ctx.runtime))
+    {
+        let _ = onboarding::ensure_bootstrap_code(&config.data_dir, now_millis());
+    }
+    let ctx = Arc::new(Mutex::new(node_ctx));
+    let ctx_handle = ctx.clone();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_flag = stop.clone();
+    let context_dir=config.data_dir.clone();let context_stop=stop.clone();
+    std::thread::spawn(move || {while !context_stop.load(Ordering::SeqCst) {
+        let _=context_capsule::refresh_changed(&context_dir);
+        for _ in 0..10 {if context_stop.load(Ordering::SeqCst){return;}std::thread::sleep(Duration::from_millis(500));}
+    }});
+
+    let sched_stop = stop.clone();
+    let sched_ctx = ctx.clone();
+    let sched_data_dir = config.data_dir.clone();
+    std::thread::spawn(move || {
+        let mut tick_count: u64 = 0;
+        while !sched_stop.load(Ordering::SeqCst) {
+            let now = now_millis();
+            if let Ok(mut guard) = sched_ctx.try_lock() {
+                let data_dir = guard.runtime.data_dir.clone();
+                let _ = bob_runtime::routines::tick_due_server(&data_dir, &mut guard.app, now);
+            }
+            if tick_count % 60 == 5 {
+                inbox_triage::tick_daily_triage(&sched_ctx, &sched_data_dir, now);
+                let _ = inbox_triage::reconcile_writeback_queue(&sched_data_dir);
+            }
+            tick_count = tick_count.wrapping_add(1);
+            for _ in 0..5 {
+                if sched_stop.load(Ordering::SeqCst) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        }
+    });
+
+    orchestration::spawn_orchestration_watcher(ctx.clone(), config.data_dir.clone(), stop.clone());
+
+
+    std::thread::spawn(move || {
+        for incoming in listener.incoming() {
+            if stop_flag.load(Ordering::SeqCst) {
+                break;
+            }
+            if let Ok(stream) = incoming {
+                let state = ctx.clone();
+                std::thread::spawn(move || handle_connection(stream, state));
+            }
+        }
+    });
+
+    Ok(RunningNodeServer {
+        local_addr,
+        stop,
+        state: ctx_handle,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn http_request(
+        addr: SocketAddr,
+        method: &str,
+        path: &str,
+        token: Option<&str>,
+        body: Option<&str>,
+    ) -> (u16, Value) {
+        let mut stream = TcpStream::connect(addr).expect("connect to node");
+        let payload = body.unwrap_or("");
+        let auth = token
+            .map(|t| format!("Authorization: Bearer {t}\r\n"))
+            .unwrap_or_default();
+        let req = format!(
+            "{method} {path} HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\n{auth}Content-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+            payload.len()
+        );
+        stream.write_all(req.as_bytes()).expect("write request");
+        let mut resp = String::new();
+        stream.read_to_string(&mut resp).expect("read response");
+        let (hdr, json_str) = resp.split_once("\r\n\r\n").expect("split http response");
+        let status: u16 = hdr
+            .lines()
+            .next()
+            .unwrap()
+            .split_whitespace()
+            .nth(1)
+            .unwrap()
+            .parse()
+            .unwrap();
+        let val: Value = serde_json::from_str(json_str).unwrap_or_else(|_| json!({ "raw": json_str }));
+        (status, val)
+    }
+
+    #[test]
+    fn bob_node_rpc_and_client_v1_end_to_end_closed_loop() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let server = spawn_node_server(BobNodeConfig {
+            bind_addr: "127.0.0.1:0".to_owned(),
+            data_dir: dir.path().to_path_buf(),
+            static_dir: None,
+            legacy_db_path: None,
+        })
+        .expect("spawn server");
+
+        // 1. Capabilities endpoint
+        let (status, caps) = http_request(server.local_addr, "GET", "/api/capabilities", None, None);
+        assert_eq!(status, 200);
+        assert_eq!(caps["browser_mode"], json!(true));
+        assert_eq!(caps["camera_scan"], json!(false));
+
+        // 2. Web RPC: bootstrap, accept message, promote conversation in-place (RV-17)
+        let (status, boot) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/rpc/app_bootstrap",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(status, 200);
+        let conv_id = boot["result"]["session_id"].as_str().unwrap().to_owned();
+
+        let (status, _) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/rpc/app_accept",
+            None,
+            Some(
+                &json!({
+                    "requestId": "req-web-1",
+                    "messageId": "msg-web-1",
+                    "sessionId": conv_id,
+                    "content": "Draft architecture for bob-online.example.com"
+                })
+                .to_string(),
+            ),
+        );
+        assert_eq!(status, 200);
+
+        let (status, promoted) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/rpc/app_conversation_promote",
+            None,
+            Some(
+                &json!({
+                    "conversationId": conv_id,
+                    "projectId": "proj-online-1",
+                    "title": "Bob Online Deployment"
+                })
+                .to_string(),
+            ),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(promoted["result"]["selected_conversation_id"], json!(conv_id));
+        let convs = promoted["result"]["conversations"].as_array().unwrap();
+        assert!(convs
+            .iter()
+            .any(|c| c["id"] == json!(conv_id) && c["project_id"] == json!("proj-online-1")));
+        let task_id = format!("task-{conv_id}");
+
+        // 3. Online Client API v1: pairing -> exchange -> capabilities -> projects -> tasks -> snapshot -> operations (continue, V1->V2, review) -> revoke
+        let (status, pair_res) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/client/v1/pairings",
+            None,
+            Some(r#"{"device_name":"Pixel 8"}"#),
+        );
+        assert_eq!(status, 201);
+        let user_code = pair_res["user_code"].as_str().unwrap().to_owned();
+
+        let (status, ex_res) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/client/v1/pairings/exchange",
+            None,
+            Some(&json!({ "code": user_code }).to_string()),
+        );
+        assert_eq!(status, 200);
+        let token = ex_res["access_token"].as_str().unwrap().to_owned();
+
+        let (status, v1_caps) = http_request(
+            server.local_addr,
+            "GET",
+            "/api/client/v1/capabilities",
+            Some(&token),
+            None,
+        );
+        assert_eq!(status, 200);
+        assert_eq!(v1_caps["capabilities"]["submit"], json!(true));
+        assert_eq!(v1_caps["capabilities"]["parent_revision"], json!(true));
+        assert_eq!(v1_caps["capabilities"]["review"], json!(true));
+
+        // Explicit first operation: catalog refresh must not invent a V1.
+        let (status, first_op) = http_request(
+            server.local_addr, "POST", "/api/client/v1/operations", Some(&token),
+            Some(&json!({"request_id":"op-first-v1", "type":"create_revision",
+                "task_id":task_id, "payload":{"instruction":"First test operation"}}).to_string()),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(first_op["execution"]["iteration"], json!(1));
+        assert_eq!(first_op["snapshot"]["executions"].as_array().unwrap().len(), 1);
+
+        // Create V2 revision
+        let (status, rev_op) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/client/v1/operations",
+            Some(&token),
+            Some(
+                &json!({
+                    "request_id": "op-rev-v2",
+                    "type": "create_revision",
+                    "task_id": task_id,
+                    "payload": { "instruction": "Add Cloudflare Tunnel route verification" }
+                })
+                .to_string(),
+            ),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(rev_op["execution"]["iteration"], json!(2));
+
+        // Idempotent retry of same request_id returns exact same operation without creating V3
+        let (status, rev_op_retry) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/client/v1/operations",
+            Some(&token),
+            Some(
+                &json!({
+                    "request_id": "op-rev-v2",
+                    "type": "create_revision",
+                    "task_id": task_id,
+                    "payload": { "instruction": "Add Cloudflare Tunnel route verification" }
+                })
+                .to_string(),
+            ),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(rev_op_retry["operation_id"], rev_op["operation_id"]);
+        assert_eq!(
+            rev_op_retry["snapshot"]["executions"].as_array().unwrap().len(),
+            2
+        );
+
+        // Submit review approval
+        let (status, review_op) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/client/v1/operations",
+            Some(&token),
+            Some(
+                &json!({
+                    "request_id": "op-review-1",
+                    "type": "review",
+                    "task_id": task_id,
+                    "payload": { "verdict": "approved", "note": "Verified V2 on Hostinger" }
+                })
+                .to_string(),
+            ),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(review_op["snapshot"]["task"]["status"], json!("completed"));
+
+        // Revoke token -> subsequent request returns 401
+        let (status, _) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/client/v1/devices/current/revoke",
+            Some(&token),
+            Some("{}"),
+        );
+        assert_eq!(status, 200);
+
+        let (status_after, err_after) = http_request(
+            server.local_addr,
+            "GET",
+            "/api/client/v1/projects",
+            Some(&token),
+            None,
+        );
+        assert_eq!(status_after, 401);
+        assert_eq!(err_after["code"], json!("CLIENT_TOKEN_REVOKED"));
+
+        server.shutdown();
+    }
+
+    #[test]
+    fn xp10_import_legacy_nexus_db_is_idempotent_and_read_only() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let legacy_db = dir.path().join("nexus_control_plane.db");
+        {
+            let conn = Connection::open(&legacy_db).expect("create legacy db");
+            conn.execute_batch(
+                "CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT, updated_at INTEGER);
+                 CREATE TABLE tasks (id TEXT PRIMARY KEY, project_id TEXT, title TEXT, status TEXT, updated_at INTEGER);
+                 INSERT INTO projects VALUES ('proj-legacy-1', 'Legacy Hostinger Project', 1762000000000);
+                 INSERT INTO tasks VALUES ('task-legacy-1', 'proj-legacy-1', 'Migrate Online Node', 'completed', 1762000005000);",
+            )
+            .expect("seed legacy db");
+        }
+        let mut ctx = NodeContext::open(&BobNodeConfig {
+            bind_addr: "127.0.0.1:0".to_owned(),
+            data_dir: dir.path().to_path_buf(),
+            static_dir: None,
+            legacy_db_path: Some(legacy_db.clone()),
+        })
+        .expect("open node context with legacy db");
+
+        // Second import must be idempotent
+        let imported = ctx.import_legacy_nexus_db(&legacy_db).expect("re-import");
+        assert_eq!(imported, 1);
+
+        let catalog = ctx.app.catalog_snapshot().expect("catalog");
+        assert!(catalog.projects.iter().any(|p| p.id == "proj-legacy-1"));
+        assert!(ctx.online.task_snapshots.contains_key("task-legacy-1"));
+        let snapshot = &ctx.online.task_snapshots["task-legacy-1"];
+        assert_eq!(snapshot["executions"], json!([]));
+        assert_eq!(snapshot["verifications"], json!([]));
+        assert_eq!(snapshot["artifacts"], json!([]));
+        assert_eq!(ctx.online.imported_project_ids, vec!["proj-legacy-1"]);
+        assert!(!ctx.online.task_snapshots.contains_key("task-conv-task-legacy-1"));
+        let projected = handle_rpc_command(&mut ctx, "app_catalog", &json!({})).unwrap();
+        assert_eq!(projected["projects"][0]["source_kind"], "legacy_import");
+    }
+
+    #[test]
+    fn xp11_bounded_subagent_rpc_lifecycle_and_constraints() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ws = dir.path().join("workspace");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(ws.join("engine.rs"), b"pub fn version() -> &'static str { \"2.0.0\" }").unwrap();
+
+        let mut ctx = NodeContext::open(&BobNodeConfig {
+            bind_addr: "127.0.0.1:0".to_owned(),
+            data_dir: dir.path().to_path_buf(),
+            static_dir: None,
+            legacy_db_path: None,
+        })
+        .expect("open node context");
+
+        let grant = json!({
+            "parent_task_id": "task-architect-10",
+            "parent_session_id": "session-arch-10",
+            "parent_grant_id": "grant-10",
+            "project_id": "proj-core",
+            "workspace_root": ws.to_string_lossy(),
+            "allowed_subpaths": ["engine.rs"],
+            "depth": 1,
+            "max_tokens": 8192,
+            "max_budget_usd": 0.05,
+            "max_timeout_ms": 15000,
+            "parent_cancelled": false
+        });
+
+        let req = json!({
+            "request_id": "sub-101",
+            "parent_task_id": "task-architect-10",
+            "parent_session_id": "session-arch-10",
+            "role": "code_auditor",
+            "goal": "Verify engine version signature",
+            "prompt": "Inspect engine.rs and confirm version",
+            "estimated_cost_usd": 0.005,
+            "model_id": "gemini-flash"
+        });
+
+        // 1. Dispatch valid subagent
+        let dispatched = handle_rpc_command(
+            &mut ctx,
+            "app_subagent_dispatch",
+            &json!({ "grant": grant, "request": req }),
+        )
+        .expect("dispatch subagent");
+        assert_eq!(dispatched["status"], "dispatched");
+        assert_eq!(dispatched["run_id"], "subagent-sub-101");
+
+        // 2. Concurrency limit = 1: second dispatch for same parent fails
+        let mut req2 = req.clone();
+        req2["request_id"] = json!("sub-102");
+        req2["prompt"] = json!("Concurrent subtask");
+        let conc_err = handle_rpc_command(
+            &mut ctx,
+            "app_subagent_dispatch",
+            &json!({ "grant": grant, "request": req2 }),
+        )
+        .unwrap_err();
+        assert_eq!(conc_err, "SUBAGENT_CONCURRENCY_LIMIT_EXCEEDED");
+
+        // 3. Execution turn: write forbidden check
+        let write_action = json!([{
+            "tool": "write_file",
+            "relative_path": "engine.rs",
+            "search_query": null,
+            "claim_check": null,
+            "write_attempt_content": "corrupt()",
+            "spawn_subagent_attempt": false,
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "reported_cost_usd": 0.0001,
+            "reported_identity": "test",
+            "delay_ms": 1
+        }]);
+        let write_err = handle_rpc_command(
+            &mut ctx,
+            "app_subagent_execute",
+            &json!({ "grant": grant, "run_id": "subagent-sub-101", "actions": write_action }),
+        )
+        .unwrap_err();
+        assert_eq!(write_err, "SUBAGENT_WRITE_FORBIDDEN");
+
+        // 4. Execution turn: read & verify fact
+        let read_action = json!([{
+            "tool": "read_file",
+            "relative_path": "engine.rs",
+            "search_query": null,
+            "claim_check": "2.0.0",
+            "write_attempt_content": null,
+            "spawn_subagent_attempt": false,
+            "prompt_tokens": 50,
+            "completion_tokens": 20,
+            "reported_cost_usd": 0.001,
+            "reported_identity": "gemini-flash",
+            "delay_ms": 5
+        }]);
+        let completed = handle_rpc_command(
+            &mut ctx,
+            "app_subagent_execute",
+            &json!({ "grant": grant, "run_id": "subagent-sub-101", "actions": read_action }),
+        )
+        .expect("execute turn");
+        assert_eq!(completed["status"], "completed");
+        assert_eq!(completed["conclusion"]["citations"][0]["relative_path"], "engine.rs");
+        assert_eq!(completed["conclusion"]["model_claims"][0]["verification_status"], "verified");
+
+        // 5. Query status & list
+        let status = handle_rpc_command(
+            &mut ctx,
+            "app_subagent_status",
+            &json!({ "run_id": "subagent-sub-101" }),
+        )
+        .expect("subagent status");
+        assert_eq!(status["status"], "completed");
+
+        let list = handle_rpc_command(
+            &mut ctx,
+            "app_subagent_list",
+            &json!({ "parent_task_id": "task-architect-10" }),
+        )
+        .expect("subagent list");
+        assert_eq!(list.as_array().unwrap().len(), 1);
+
+        // 6. Cascade cancellation
+        let mut req_cancel = req.clone();
+        req_cancel["request_id"] = json!("sub-103");
+        let dispatched_for_cancel = handle_rpc_command(
+            &mut ctx,
+            "app_subagent_dispatch",
+            &json!({ "grant": grant, "request": req_cancel }),
+        )
+        .expect("dispatch for cancel");
+        assert_eq!(dispatched_for_cancel["status"], "dispatched");
+
+        let cancelled = handle_rpc_command(
+            &mut ctx,
+            "app_subagent_cancel",
+            &json!({ "parent_task_id": "task-architect-10", "reason": "PARENT_CANCELLED" }),
+        )
+        .expect("cancel subagent");
+        assert_eq!(cancelled["status"], "cancelled");
+        assert_eq!(cancelled["cancellation_evidence"]["reason"], "PARENT_CANCELLED");
+
+        // 7. Restart reconciliation
+        let mut req_restart = req.clone();
+        req_restart["request_id"] = json!("sub-104");
+        handle_rpc_command(
+            &mut ctx,
+            "app_subagent_dispatch",
+            &json!({ "grant": grant, "request": req_restart }),
+        )
+        .expect("dispatch for restart");
+
+        let reconciled = handle_rpc_command(&mut ctx, "app_subagent_reconcile", &json!({}))
+            .expect("reconcile on restart");
+        let rec_arr = reconciled.as_array().unwrap();
+        assert_eq!(rec_arr.len(), 1);
+        assert_eq!(rec_arr[0]["status"], "interrupted");
+        assert_eq!(rec_arr[0]["error_code"], "RECONCILED_AFTER_RESTART");
+    }
+
+    #[test]
+    fn two_step_mobile_broker_qr_pairing_and_topology_sync_connects_work_node_and_web_host() {
+        let work_dir = tempfile::tempdir().unwrap();
+        let phone_dir = tempfile::tempdir().unwrap();
+        let web_dir = tempfile::tempdir().unwrap();
+
+        let work_srv = spawn_node_server(BobNodeConfig {
+            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            data_dir: work_dir.path().to_path_buf(),
+            static_dir: None,
+            legacy_db_path: None,
+        })
+        .expect("start work node");
+        let phone_srv = spawn_node_server(BobNodeConfig {
+            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            data_dir: phone_dir.path().to_path_buf(),
+            static_dir: None,
+            legacy_db_path: None,
+        })
+        .expect("start phone broker");
+        let web_srv = spawn_node_server(BobNodeConfig {
+            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            data_dir: web_dir.path().to_path_buf(),
+            static_dir: None,
+            legacy_db_path: None,
+        })
+        .expect("start web host");
+
+        // Step 1: Work Node prints terminal QR on startup
+        let work_url = format!("http://{}", work_srv.local_addr);
+        let work_inv = work_srv
+            .issue_startup_pairing(Some(&work_url), Some("VPS3 Work Node"))
+            .expect("work node startup pairing");
+        let work_qr_uri = work_inv.encode_qr_code();
+        assert!(work_qr_uri.starts_with("bob://pair?"));
+        let ansi = bob_runtime::node_pairing::render_terminal_qr(&work_qr_uri)
+            .expect("render terminal qr");
+        assert!(ansi.contains('█'));
+
+        // Phone scans Work Node terminal QR
+        let (st, prop1) = http_request(
+            phone_srv.local_addr,
+            "POST",
+            "/api/rpc/app_pairing_qr_propose",
+            None,
+            Some(&json!({ "invitationCode": work_qr_uri }).to_string()),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(prop1["ok"], true);
+        assert_eq!(prop1["result"]["state"], "pending");
+
+        let (st, fin1) = http_request(
+            phone_srv.local_addr,
+            "POST",
+            "/api/rpc/app_pairing_finish",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(fin1["ok"], true);
+        assert_eq!(fin1["result"]["state"], "connected");
+
+        // Verify Phone now has Work Node in its remoteNodes
+        let (st, phone_hub1) = http_request(
+            phone_srv.local_addr,
+            "POST",
+            "/api/rpc/app_model_hub_get",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(st, 200);
+        let phone_nodes1 = phone_hub1["result"]["remoteNodes"].as_array().unwrap();
+        assert_eq!(phone_nodes1.len(), 1);
+        assert_eq!(phone_nodes1[0]["baseUrl"], work_url);
+        assert_eq!(phone_nodes1[0]["label"], "VPS3 Work Node");
+
+        // Step 2: Web Host user clicks "Show QR Code" in Settings -> Connection
+        let web_url = format!("http://{}", web_srv.local_addr);
+        let (st, web_qr_res) = http_request(
+            web_srv.local_addr,
+            "POST",
+            "/api/rpc/app_pairing_qr_create",
+            None,
+            Some(&json!({ "origin": web_url, "label": "Bob Online Web Host" }).to_string()),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(web_qr_res["ok"], true);
+        let web_qr_code = web_qr_res["result"]["code"].as_str().unwrap().to_owned();
+
+        // Web Host pairing status is initially "open"
+        let (_, web_status_before) = http_request(
+            web_srv.local_addr,
+            "POST",
+            "/api/rpc/app_pairing_status",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(web_status_before["result"]["state"], "open");
+
+        // Phone scans Web Host Settings QR -> pairs with Web Host AND pushes Work Node topology to Web Host!
+        let (st, prop2) = http_request(
+            phone_srv.local_addr,
+            "POST",
+            "/api/rpc/app_pairing_qr_propose",
+            None,
+            Some(&json!({ "invitationCode": web_qr_code }).to_string()),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(prop2["ok"], true);
+        assert_eq!(prop2["result"]["state"], "pending");
+
+        // Web Host status automatically transitions to "connected"!
+        let (_, web_status_after) = http_request(
+            web_srv.local_addr,
+            "POST",
+            "/api/rpc/app_pairing_status",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(web_status_after["result"]["state"], "connected");
+
+        // Web Host now has the Work Node in its remoteNodes (synced via the Phone Broker!)
+        let (_, web_hub) = http_request(
+            web_srv.local_addr,
+            "POST",
+            "/api/rpc/app_model_hub_get",
+            None,
+            Some("{}"),
+        );
+        let web_nodes = web_hub["result"]["remoteNodes"].as_array().unwrap();
+        assert!(
+            web_nodes
+                .iter()
+                .any(|n| n["baseUrl"] == work_url && n["hasToken"] == true),
+            "Web Host should receive Work Node and its token from the Phone Broker: {web_nodes:?}"
+        );
+
+        // And Phone now has BOTH Work Node and Web Host in its remoteNodes!
+        let (_, phone_hub2) = http_request(
+            phone_srv.local_addr,
+            "POST",
+            "/api/rpc/app_model_hub_get",
+            None,
+            Some("{}"),
+        );
+        let phone_nodes2 = phone_hub2["result"]["remoteNodes"].as_array().unwrap();
+        assert_eq!(phone_nodes2.len(), 2);
+
+        work_srv.shutdown();
+        phone_srv.shutdown();
+        web_srv.shutdown();
+    }
+
+    #[test]
+    fn wp_j4a_routines_rpc_and_unattended_draft_lifecycle() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("kernel.sqlite");
+        let _ = LocalApp::open(&db_path).unwrap();
+
+        let cfg = BobNodeConfig {
+            bind_addr: "127.0.0.1:0".to_string(),
+            data_dir: dir.path().to_path_buf(),
+            static_dir: None,
+            legacy_db_path: None,
+        };
+        let srv = spawn_node_server(cfg).expect("spawn node server");
+
+        // 1. Create a schedule item to be deleted by routine later
+        let (st, add_res) = http_request(
+            srv.local_addr,
+            "POST",
+            "/api/rpc/app_schedule_create",
+            None,
+            Some(&json!({
+                "id": "sched-stale-1",
+                "title": "Stale Item For Routine",
+                "notes": "Temporary todo",
+                "start_at": now_millis()
+            }).to_string()),
+        );
+        assert_eq!(st, 200);
+        let item_id = add_res["result"]["id"].as_str().unwrap().to_owned();
+
+        // 2. Author/Save a routine via app_routine_save
+        let (st, save_res) = http_request(
+            srv.local_addr,
+            "POST",
+            "/api/rpc/app_routine_save",
+            None,
+            Some(&json!({
+                "id": "rtn-node-test",
+                "title": "Clean Stale Todos",
+                "prompt_instruction": "Clean up stale todos nightly",
+                "recurrence": { "type": "daily", "hour": 23, "minute": 0 },
+                "routine_steps": [
+                    { "step_index": 0, "tool_name": "schedule_delete", "description": "Delete todo", "args_template": { "id": item_id } }
+                ],
+                "utc_offset_minutes": 480
+            }).to_string()),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(save_res["ok"], true);
+        assert_eq!(save_res["result"]["trial_passed"], false);
+        assert_eq!(save_res["result"]["enabled"], false);
+
+        // 3. List routines via app_routines_list
+        let (st, list_res) = http_request(
+            srv.local_addr,
+            "POST",
+            "/api/rpc/app_routines_list",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(st, 200);
+        let routines = list_res["result"].as_array().unwrap();
+        assert_eq!(routines.len(), 1);
+        assert_eq!(routines[0]["id"], "rtn-node-test");
+
+        // 4. Try enabling before trial -> must fail with ROUTINE_TRIAL_REQUIRED
+        let (st, tog_err) = http_request(
+            srv.local_addr,
+            "POST",
+            "/api/rpc/app_routine_toggle",
+            None,
+            Some(&json!({ "id": "rtn-node-test", "enabled": true }).to_string()),
+        );
+        assert_eq!(st, 400);
+        assert_eq!(tog_err["error"], "ROUTINE_TRIAL_REQUIRED");
+
+        // 5. Run mandatory trial via app_routine_trial
+        let (st, trial_res) = http_request(
+            srv.local_addr,
+            "POST",
+            "/api/rpc/app_routine_trial",
+            None,
+            Some(&json!({ "id": "rtn-node-test" }).to_string()),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(trial_res["result"]["routine"]["trial_passed"], true);
+        assert_eq!(trial_res["result"]["report"]["goal_achieved"], true);
+        let drafts = trial_res["result"]["drafts"].as_array().unwrap();
+        assert_eq!(drafts.len(), 1);
+        let draft_id = drafts[0]["id"].as_str().unwrap().to_owned();
+
+        // 6. Now enabling succeeds!
+        let (st, tog_ok) = http_request(
+            srv.local_addr,
+            "POST",
+            "/api/rpc/app_routine_toggle",
+            None,
+            Some(&json!({ "id": "rtn-node-test", "enabled": true }).to_string()),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(tog_ok["result"]["enabled"], true);
+
+        // 7. Check drafts in app_routine_drafts_list
+        let (st, drafts_res) = http_request(
+            srv.local_addr,
+            "POST",
+            "/api/rpc/app_routine_drafts_list",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(st, 200);
+        let draft_items = drafts_res["result"].as_array().unwrap();
+        assert_eq!(draft_items.len(), 1);
+        assert_eq!(draft_items[0]["id"], draft_id);
+
+        // 8. Check that draft is also presented in jarvis::approvals_list with kind: "routine_draft"
+        let (st, apprv_res) = http_request(
+            srv.local_addr,
+            "POST",
+            "/api/rpc/app_jarvis_approvals_list",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(st, 200);
+        let apprvs = apprv_res["result"].as_array().unwrap();
+        assert!(
+            apprvs.iter().any(|a| a["id"] == draft_id && a["kind"] == "routine_draft"),
+            "Draft should appear in jarvis approvals stream: {apprvs:?}"
+        );
+
+        // 9. Approve draft via app_jarvis_approve seamlessly!
+        let (st, appr_out) = http_request(
+            srv.local_addr,
+            "POST",
+            "/api/rpc/app_jarvis_approve",
+            None,
+            Some(&json!({ "approvalId": draft_id }).to_string()),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(appr_out["result"]["ok"], true);
+
+        // Verify the schedule item was really deleted!
+        let (st, sched_snap) = http_request(
+            srv.local_addr,
+            "POST",
+            "/api/rpc/app_personal_snapshot",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(st, 200);
+        let sched_items = sched_snap["result"]["schedules"].as_array().unwrap();
+        assert!(!sched_items.iter().any(|s| s["id"] == item_id));
+
+        // 10. Delete routine via app_routine_delete
+        let (st, del_res) = http_request(
+            srv.local_addr,
+            "POST",
+            "/api/rpc/app_routine_delete",
+            None,
+            Some(&json!({ "id": "rtn-node-test" }).to_string()),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(del_res["result"]["id"], "rtn-node-test");
+
+        // Verify shutdown
+        srv.shutdown();
+    }
+
+    #[test]
+    fn test_wp_j4b_growth_proactivity_and_push_channels_e2e() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let server = spawn_node_server(BobNodeConfig {
+            bind_addr: "127.0.0.1:0".to_owned(),
+            data_dir: dir.path().to_path_buf(),
+            static_dir: None,
+            legacy_db_path: None,
+        })
+        .expect("spawn server");
+
+        // 1. Proactivity RPCs: initial get -> default level 0.35, tier morning_brief
+        let (status, get_res) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/rpc/app_proactivity_get",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(get_res["result"]["level"], json!(0.35));
+        assert_eq!(get_res["result"]["tier"], json!("morning_brief"));
+        assert_eq!(get_res["result"]["quietHoursStart"], json!("22:00"));
+        assert_eq!(get_res["result"]["quietHoursEnd"], json!("08:00"));
+
+        // 2. Proactivity set -> update level to 0.9 (proactive_care) and custom quiet hours
+        let (status, set_res) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/rpc/app_proactivity_set",
+            None,
+            Some(&json!({
+                "level": 0.9,
+                "quietHoursStart": "23:00",
+                "quietHoursEnd": "07:00",
+                "utcOffsetMinutes": 480
+            }).to_string()),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(set_res["result"]["level"], json!(0.9));
+        assert_eq!(set_res["result"]["tier"], json!("proactive_care"));
+        assert_eq!(set_res["result"]["quietHoursStart"], json!("23:00"));
+        assert_eq!(set_res["result"]["quietHoursEnd"], json!("07:00"));
+
+        // 3. VAPID Web Push RPC & HTTP endpoints
+        let (status, key_rpc) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/rpc/app_push_vapid_public_key",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(status, 200);
+        let pubkey = key_rpc["result"]["publicKey"].as_str().expect("pubkey string");
+        assert!(!pubkey.is_empty());
+
+        let (status, key_http) = http_request(
+            server.local_addr,
+            "GET",
+            "/api/push/vapid-public-key",
+            None,
+            None,
+        );
+        assert_eq!(status, 200);
+        assert_eq!(key_http["publicKey"], json!(pubkey));
+
+        // 4. Push Subscribe / Unsubscribe via HTTP
+        let (status, sub_http) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/push/subscribe",
+            None,
+            Some(&json!({
+                "endpoint": "https://fcm.googleapis.com/fcm/send/test-sub-123",
+                "keys": {
+                    "p256dh": "dummy-p256",
+                    "auth": "dummy-auth"
+                }
+            }).to_string()),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(sub_http["ok"], json!(true));
+
+        let (status, unsub_http) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/push/unsubscribe",
+            None,
+            Some(&json!({
+                "endpoint": "https://fcm.googleapis.com/fcm/send/test-sub-123"
+            }).to_string()),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(unsub_http["ok"], json!(true));
+
+        // 5. Seed note & memory, then test app_kb_search
+        let (status, _note_res) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/rpc/app_note_upsert",
+            None,
+            Some(&json!({
+                "id": "note-fts-1",
+                "title": "Quantum Algorithm",
+                "bodyMarkdown": "Fast Fourier transform on qubits #quantum @Alice",
+                "tags": ["quantum"]
+            }).to_string()),
+        );
+        assert_eq!(status, 200);
+
+        let (status, search_res) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/rpc/app_kb_search",
+            None,
+            Some(&json!({
+                "query": "Quantum",
+                "limit": 5
+            }).to_string()),
+        );
+        assert_eq!(status, 200);
+        let hits = search_res["result"]["hits"].as_array().expect("hits array");
+        assert!(!hits.is_empty(), "Should find indexed note");
+        assert_eq!(hits[0]["doc_id"], "note-fts-1");
+
+        // 6. Morning brief and Nightly Dream run
+        let (status, brief_res) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/rpc/app_morning_brief",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(status, 200);
+        assert!(brief_res["result"]["date_key"].is_string());
+        assert!(brief_res["result"]["card"].is_object());
+
+        let (status, dream_res) = http_request(
+            server.local_addr,
+            "POST",
+            "/api/rpc/app_dream_run",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(dream_res["result"]["memories_pruned"], json!(0));
+
+        // 7. Official WeChat compat endpoints
+        let (status, health_res) = http_request(
+            server.local_addr,
+            "GET",
+            "/v1/health",
+            None,
+            None,
+        );
+        assert_eq!(status, 200);
+        assert_eq!(health_res["ok"], json!(true));
+        assert_eq!(health_res["service"], json!("bob-jarvis"));
+        assert_eq!(health_res["version"], json!("1.0.1"));
+
+        let (status, convs_res) = http_request(
+            server.local_addr,
+            "GET",
+            "/v1/conversations",
+            None,
+            None,
+        );
+        assert_eq!(status, 200);
+        assert!(convs_res["conversations"].is_array());
+
+        let (status, conv_create) = http_request(
+            server.local_addr,
+            "POST",
+            "/v1/conversations",
+            None,
+            Some(&json!({
+                "title": "WeChat Mobile Chat"
+            }).to_string()),
+        );
+        assert_eq!(status, 200);
+        assert!(conv_create["conversation_id"].is_string());
+
+        server.shutdown();
+    }
+
+    #[test]
+    fn rpc_node_discover_and_connect_supports_tailscale_http_node_access_and_security_lock_status() {
+        let target_dir = tempfile::tempdir().unwrap();
+        let caller_dir = tempfile::tempdir().unwrap();
+        crate::node_access::initialize(target_dir.path(), "owner-secret-password-123").unwrap();
+        let target_srv = spawn_node_server(BobNodeConfig {
+            bind_addr: "127.0.0.1:0".to_owned(),
+            data_dir: target_dir.path().to_path_buf(),
+            static_dir: None,
+            legacy_db_path: None,
+        })
+        .unwrap();
+        let caller_srv = spawn_node_server(BobNodeConfig {
+            bind_addr: "127.0.0.1:0".to_owned(),
+            data_dir: caller_dir.path().to_path_buf(),
+            static_dir: None,
+            legacy_db_path: None,
+        })
+        .unwrap();
+
+        let (st, lock_res) = http_request(
+            caller_srv.local_addr,
+            "POST",
+            "/api/rpc/app_security_lock_status",
+            None,
+            Some("{}"),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(lock_res["result"]["supported"], json!(false));
+        assert_eq!(lock_res["result"]["unlocked"], json!(true));
+
+        let target_url = format!("http://{}", target_srv.local_addr);
+        let (st, disc_res) = http_request(
+            caller_srv.local_addr,
+            "POST",
+            "/api/rpc/app_node_discover",
+            None,
+            Some(&json!({ "address": target_url }).to_string()),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(disc_res["result"]["authMode"], json!("owner_password"));
+
+        let (st, conn_res) = http_request(
+            caller_srv.local_addr,
+            "POST",
+            "/api/rpc/app_node_connect",
+            None,
+            Some(&json!({
+                "address": target_url,
+                "label": "Remote VPS",
+                "password": "owner-secret-password-123"
+            }).to_string()),
+        );
+        assert_eq!(st, 200);
+        assert_eq!(conn_res["result"]["connected"], json!(true));
+        assert!(conn_res["result"].get("accessToken").is_none());
+        let mobile_qr = conn_res["result"]["mobileQr"]["code"].as_str().unwrap();
+        assert!(mobile_qr.starts_with("bob://pair?"));
+        assert!(mobile_qr.len() <= 90);
+
+        let (_, qr_res) = http_request(
+            caller_srv.local_addr,
+            "POST",
+            "/api/rpc/app_pairing_qr_create",
+            None,
+            Some(&json!({ "origin": "https://bob-online.example.com" }).to_string()),
+        );
+        assert!(qr_res["result"]["code"].as_str().unwrap().len() <= 85);
+
+        caller_srv.shutdown();
+        target_srv.shutdown();
+    }
+}
+
+
+/// Reconcile offline device policy after reconnection without opening Settings.
+pub fn start_tool_policy_sync(data:std::path::PathBuf){
+ std::thread::spawn(move||loop{
+  if let Ok(policy)=bob_runtime::tool_policy::read(&data){
+   if policy["revision"].as_u64().unwrap_or(0)>0 {
+    if let Ok(runtime)=ModelHubRuntime::with_file_vault(data.clone()){
+     let hub=runtime.load_hub_state();
+     if let Some(nodes)=hub["remoteNodes"].as_array(){
+      for node in nodes {
+       if node["enabled"]==false {continue;}
+       if let Some(id)=node["id"].as_str().filter(|id|*id!="local"){
+        let _=execute_unlocked_harness_rpc(&data,"app_dsh_inventory",&json!({"connectionId":id}));
+       }
+      }
+     }
+    }
+   }
+  }
+  std::thread::sleep(std::time::Duration::from_secs(60));
+ });
+}

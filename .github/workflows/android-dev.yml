@@ -1,0 +1,195 @@
+name: Android development APK
+on:
+  workflow_dispatch:
+  push:
+    branches: ["1.0.1", "1.0.2"]
+    paths: [".github/workflows/android-dev.yml", "apps/bob-app/**", "crates/**", "Cargo.lock", "Cargo.toml"]
+permissions:
+  contents: read
+concurrency:
+  group: android-dev-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: apps/bob-app
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Require persistent signing configuration
+        env:
+          SIGNING_KEY: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          SIGNING_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SIGNING_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          test -n "$SIGNING_KEY" && test -n "$SIGNING_PASSWORD" && test -n "$SIGNING_ALIAS" || { echo "Persistent Android signing secrets are required; refusing random-signature output."; exit 1; }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Prepare declared tools
+        run: |
+          echo "CARGO_TARGET_DIR=$RUNNER_TEMP/bob-target" >> "$GITHUB_ENV"
+          echo "GRADLE_USER_HOME=$RUNNER_TEMP/bob-gradle" >> "$GITHUB_ENV"
+          corepack enable
+          corepack prepare pnpm@11.22.0 --activate
+          rustup target add aarch64-linux-android
+          test -n "$ANDROID_HOME"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+      - name: Restore Gradle dependency cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/bob-gradle/caches
+            ${{ runner.temp }}/bob-gradle/wrapper
+          key: bob-gradle-${{ runner.os }}-${{ hashFiles('apps/bob-app/src-tauri/Cargo.lock', 'apps/bob-app/package.json') }}
+          restore-keys: |
+            bob-gradle-${{ runner.os }}-
+      - name: Configure Gradle Maven Central mirror fallback
+        run: |
+          mkdir -p "$GRADLE_USER_HOME/init.d"
+          cat <<'EOF' > "$GRADLE_USER_HOME/init.d/maven-mirror.gradle"
+          import org.gradle.api.artifacts.repositories.MavenArtifactRepository
+
+          def gcsCentral = "https://maven-central.storage-download.googleapis.com/maven2"
+          def rewriteCentral = { repos ->
+              repos.all { repo ->
+                  if (repo instanceof MavenArtifactRepository && repo.url != null) {
+                      def u = repo.url.toString()
+                      if (u.startsWith("https://repo.maven.apache.org/maven2") || u.startsWith("https://repo1.maven.org/maven2")) {
+                          repo.setUrl(java.net.URI.create(gcsCentral))
+                      }
+                  }
+              }
+          }
+          def prependMirror = { repos ->
+              if (repos.findByName("GoogleMavenCentralMirror") == null) {
+                  def mirror = repos.maven {
+                      name = "GoogleMavenCentralMirror"
+                      url = java.net.URI.create(gcsCentral)
+                  }
+                  repos.remove(mirror)
+                  repos.addFirst(mirror)
+              }
+          }
+          gradle.settingsEvaluated { settings ->
+              def pmRepos = settings.pluginManagement.repositories
+              if (pmRepos.isEmpty()) {
+                  pmRepos.gradlePluginPortal()
+              }
+              rewriteCentral(pmRepos)
+              prependMirror(pmRepos)
+
+              def drmRepos = settings.dependencyResolutionManagement.repositories
+              rewriteCentral(drmRepos)
+              if (!drmRepos.isEmpty()) {
+                  prependMirror(drmRepos)
+              }
+          }
+          gradle.allprojects { project ->
+              rewriteCentral(project.buildscript.repositories)
+              rewriteCentral(project.repositories)
+              project.afterEvaluate {
+                  if (!project.buildscript.repositories.isEmpty()) {
+                      prependMirror(project.buildscript.repositories)
+                  }
+                  if (!project.repositories.isEmpty()) {
+                      prependMirror(project.repositories)
+                  }
+              }
+          }
+          EOF
+      - name: Install locked frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check controllers
+        run: |
+          node --test tests/*.test.mjs
+          python -m unittest discover -s tests -p 'test_android_scanner_stage.py'
+      - name: Generate Android shell
+        run: |
+          pnpm exec tauri android init --ci --skip-targets-install
+          python tests/stage-android-vault.py
+          python tests/stage-android-scanner.py
+          python tests/stage-android-branding.py
+      - name: Prepare verified Gradle distribution
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          wrapper=src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties
+          grep -Eq '^distributionUrl=.*gradle-8\.14\.3-bin\.zip$' "$wrapper"
+          archive="$RUNNER_TEMP/gradle-8.14.3-bin.zip"
+          checksum=bd71102213493060956ec229d946beee57158dbd89d0e62b91bca0fa2c5f3531
+          api="https://api.github.com/repos/gradle/gradle-distributions/releases/assets/269969095?run=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          if ! curl --fail --silent --show-error --location --retry 2 --max-time 200 \
+              -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$api" -o "$archive" \
+              || ! printf '%s  %s\n' "$checksum" "$archive" | sha256sum -c --status; then
+            curl --fail --silent --show-error --location --retry 2 --max-time 200 \
+              https://services.gradle.org/distributions/gradle-8.14.3-bin.zip -o "$archive"
+          fi
+          printf '%s  %s\n' "$checksum" "$archive" | sha256sum -c
+          sed -i '/^distributionUrl=/d; /^distributionSha256Sum=/d' "$wrapper"
+          printf '\ndistributionUrl=file://%s\ndistributionSha256Sum=%s\n' "$archive" "$checksum" >> "$wrapper"
+      - name: Build independent ARM64 APK
+        run: |
+          if [ "${{ github.ref_name }}" = "1.0.2" ]; then
+            pnpm exec tauri android build --target aarch64 --apk --ci
+          else
+            pnpm exec tauri android build --debug --target aarch64 --apk --ci
+          fi
+      - name: Verify packaged Bob branding
+        run: |
+          for apk in src-tauri/gen/android/app/build/outputs/apk/*/*/*.apk; do
+            "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" > "$RUNNER_TEMP/bob-badging.txt"
+            grep -q "application-label:'Bob'" "$RUNNER_TEMP/bob-badging.txt"
+            ! grep -q "Bob Dev" "$RUNNER_TEMP/bob-badging.txt"
+          done
+      - name: Sign APK with persistent certificate
+        env:
+          SIGNING_KEY: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          SIGNING_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SIGNING_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          umask 077
+          KEYSTORE="$RUNNER_TEMP/bob-signing.p12"
+          trap 'rm -f "$KEYSTORE"' EXIT
+          printf '%s' "$SIGNING_KEY" | base64 --decode > "$KEYSTORE"
+          mkdir -p "$RUNNER_TEMP/bob-apk"
+          VERSION=$(node -p "require('./package.json').version")
+          while IFS= read -r -d '' apk; do
+            base=$(basename "$apk" .apk)
+            clean_base=$(echo "$base" | sed 's/-unsigned$//')
+            aligned="$RUNNER_TEMP/bob-apk/${clean_base}-aligned.apk"
+            out="$RUNNER_TEMP/bob-apk/bob-${VERSION}-${clean_base}-signed.apk"
+            "$ANDROID_HOME/build-tools/36.0.0/zipalign" -f -P 16 4 "$apk" "$aligned"
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign --ks "$KEYSTORE" --ks-type PKCS12 --ks-key-alias "$SIGNING_ALIAS" --ks-pass env:SIGNING_PASSWORD --key-pass env:SIGNING_PASSWORD --out "$out" "$aligned"
+            rm -f "$aligned"
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$out"
+          done < <(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' -print0)
+      - name: Collect APK and provenance
+        run: |
+          test -n "$(find "$RUNNER_TEMP/bob-apk" -name '*.apk' -print -quit)"
+          for apk in "$RUNNER_TEMP/bob-apk/"*.apk; do
+            python3 tests/check-apk-alignment.py "$apk"
+            "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 "$apk"
+          done
+          cd "$RUNNER_TEMP/bob-apk"
+          sha256sum *.apk > SHA256SUMS
+          KIND="debug-not-release"
+          if [ "${{ github.ref_name }}" = "1.0.2" ]; then KIND="release"; fi
+          printf 'commit=%s\nrun=%s\npackage=org.bobagent.nextdev\nkind=%s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" "$KIND" > BUILD.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bob-android-${{ github.ref_name }}-${{ github.sha }}
+          path: ${{ runner.temp }}/bob-apk/
+          if-no-files-found: error
+          retention-days: 7

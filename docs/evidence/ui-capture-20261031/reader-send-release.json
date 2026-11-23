@@ -1,0 +1,20 @@
+{
+  "candidateStartup": "passed",
+  "productionCopyMigration": "passed",
+  "personalRead": "passed",
+  "binarySha256": "0620d5f06ccac0c6650307c10f24a6cc46402520a7890c9121c8690e74086d36",
+  "commit": "45d0cbf8e3614a7e21b91fdf2996f21417bbd716",
+  "deployed": true,
+  "backup": "/opt/bob-online/backups/reader-send-45d0cbf-1793435129",
+  "service": "bob-online.service",
+  "rollbackUsed": false,
+  "androidRun": 41184361439,
+  "androidArtifact": 13036301637,
+  "androidCI": "success",
+  "browser": "Actual deployed UI via temporary SSH tunnel; send label and quick capture checked; no public login or phone acceptance",
+  "jsTests": "49/49",
+  "linuxTests": "kernel/node/runtime passed; one existing ignored kernel test",
+  "dshNativeTransport": "not-connected",
+  "apkSha256": "b2e3070f6b9a1057e681e4c45218a11eef9b4a059b2d12c05ca6765ae869abc3",
+  "apk": "dist-release/reader-send-45d0cbf/app-universal-debug.apk"
+}

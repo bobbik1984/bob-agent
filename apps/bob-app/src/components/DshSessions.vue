@@ -1,0 +1,1749 @@
+<script setup>
+import {artifactPath} from '../artifact-path.mjs';
+import {isNotAcceptedReceipt} from '../native-receipt.mjs';
+import NativeActivity from './NativeActivity.vue';
+import {unconfirmActivity,settleNativeActivity,orderedNativeActivities,waitingNativeApproval} from '../native-activity.mjs';
+import { computed, ref, watch, onUnmounted, nextTick, provide, inject } from 'vue';
+import { useI18n } from 'vue-i18n';
+import { kernelBridge } from '../native-bridge.mjs';
+import MessageContent from './MessageContent.vue';
+import {createChatScroll} from '../chat-scroll.mjs';
+import DshFilePreview from './DshFilePreview.vue';
+import HarnessIcon from './HarnessIcon.vue';
+import CustomSelect from './CustomSelect.vue';
+import {readingCache,readingKey,connectionPrefix} from '../reading-cache.mjs';
+import {isTestOrScratchSession} from '../conversation-directory.mjs';
+import {createPersistentPreviewCache} from '../persistent-preview-cache.mjs';
+const props=defineProps({nodes:{type:Array,default:()=>[]}, target:{type:Object,default:null}});
+const {t}=useI18n();
+const connection=ref(''), sessions=ref([]), selected=ref(null), history=ref(null), search=ref(''), busy=ref(false), sending=ref(false), error=ref(''), notice=ref(''), draft=ref(''), pending=ref(null);
+const reader=ref(null), loadingOlder=ref(false);let lastTop=0;
+const awayFromLatest=ref(false),chatContent=ref(null);
+const chatScroll=createChatScroll(value=>{awayFromLatest.value=value;});
+watch([reader,chatContent],()=>chatScroll.bind(reader.value),{flush:'post'});
+const pullUpDistance=ref(0),attachments=ref([]),fileInput=ref(null);let touchStartY=null,wheelOverscroll=0,wheelResetTimer;
+const PERSISTED_APPROVAL_MODES = ['full_auto', 'workspace_auto', 'interactive', 'read_only', 'deny'];
+const APPROVAL_MODES = ['workspace_auto', 'interactive', 'full_auto', 'read_only', 'deny'];
+function readSavedApprovalMode() {
+  try {
+    const store = typeof localStorage !== 'undefined' ? localStorage : globalThis.localStorage;
+    const saved = store?.getItem?.('bob.dsh.approvalMode.v2');
+    if (saved && PERSISTED_APPROVAL_MODES.includes(saved)) return saved;
+  } catch {}
+  return 'full_auto';
+}
+const approvalMode=ref(readSavedApprovalMode()),sessionApprovalOverrides=ref({}),pendingPermissionElevation=ref(null),switchingPermissionMode=ref(false),takeoverPrompt=ref(null),terminalHolderOverride=ref(null),bobHolderOverride=ref(null),handoffCardOpen=ref(false),releasingHolder=ref(false),copiedCliCmd=ref(false);
+watch(approvalMode, val => {
+  try {
+    const store = typeof localStorage !== 'undefined' ? localStorage : globalThis.localStorage;
+    if (PERSISTED_APPROVAL_MODES.includes(val)) store?.setItem?.('bob.dsh.approvalMode.v2', val);
+  } catch {}
+});
+const composerInput = ref(null);
+async function cancelTakeover() {
+  if (sending.value) return;
+  const session = selected.value;
+  takeoverPrompt.value = null;
+  // Dismiss only: preserve draft/attachments and never send or cancel a remote task.
+  await nextTick();
+  if (selected.value === session) composerInput.value?.focus({ preventScroll: true });
+}
+
+const activeTerminalHolder=computed(()=>terminalHolderOverride.value||history.value?.terminal_holder||null);
+const holderHarness=computed(()=>{
+  const h=activeTerminalHolder.value?.harness;
+  if(h)return h;
+  const sid=String(selected.value?.id||'');
+  if(sid.startsWith('claude-jsonl:'))return 'claude';
+  if(sid.startsWith('codex:'))return 'codex';
+  if(sid.startsWith('agy:'))return 'agy';
+  return '';
+});
+const holderMode=computed(()=>activeTerminalHolder.value?.mode||'');
+const isRemoteProtected=computed(()=>Boolean(activeTerminalHolder.value?.busy&&activeTerminalHolder.value?.remote_control));
+const isClaudeRemoteControl=isRemoteProtected;
+const isExternalHolderBusy=computed(()=>Boolean(activeTerminalHolder.value?.busy&&!activeTerminalHolder.value?.remote_control));
+const isClaudeTerminalBusy=isExternalHolderBusy;
+const activeBobHolder=computed(()=>bobHolderOverride.value!==null?bobHolderOverride.value:(history.value?.bob_holder||null));
+const isBobBackgroundIdleHeld=computed(()=>Boolean(activeBobHolder.value?.held&&!activeBobHolder.value?.running));
+const holderBusyBadgeKey=computed(()=>{
+  if(holderMode.value==='codex_app_server')return 'codexAppServerBusyBadge';
+  if(holderMode.value==='codex_terminal'||holderHarness.value==='codex')return 'codexTerminalBusyBadge';
+  if(holderHarness.value==='agy')return 'agyTerminalBusyBadge';
+  return 'claudeTerminalBusyBadge';
+});
+const remoteProtectedTitleKey=computed(()=>(holderHarness.value==='agy'||holderMode.value==='agy_ide')?'agyIdeProtectedTitle':'claudeRemoteControlTitle');
+const remoteProtectedDescKey=computed(()=>(holderHarness.value==='agy'||holderMode.value==='agy_ide')?'agyIdeProtectedDesc':'claudeRemoteControlDesc');
+const TAKEOVER_KEY_MAP={
+  codex_app_server:{title:'codexHotTakeoverConfirmTitle',desc:'codexHotTakeoverConfirmDesc'},
+  codex_terminal:{title:'codexTakeoverConfirmTitle',desc:'codexTakeoverConfirmDesc'},
+  codex:{title:'codexTakeoverConfirmTitle',desc:'codexTakeoverConfirmDesc'},
+  agy_terminal:{title:'agyTakeoverConfirmTitle',desc:'agyTakeoverConfirmDesc'},
+  agy:{title:'agyTakeoverConfirmTitle',desc:'agyTakeoverConfirmDesc'},
+  claude:{title:'claudeTakeoverConfirmTitle',desc:'claudeTakeoverConfirmDesc'},
+};
+const activeTakeoverKeys=computed(()=>{
+  const p=takeoverPrompt.value;
+  const h=p?.harness||holderHarness.value;
+  const m=p?.mode||(p?.can_hot_interrupt&&h==='codex'?'codex_app_server':'')||holderMode.value;
+  return TAKEOVER_KEY_MAP[m]||TAKEOVER_KEY_MAP[h]||TAKEOVER_KEY_MAP.claude;
+});
+function canReadOrResume(s){return Boolean(s&&(s.historyReadable!==false||s.resumable===true));}
+const isInterruptedCliSession=computed(()=>Boolean(selected.value?.harness==='agy'&&(selected.value?.cliInterrupted===true||history.value?.cli_interrupted===true||(selected.value?.historyReadable===false&&selected.value?.resumable===true))));
+const isDshNativeSession=computed(()=>Boolean(selected.value?.id&&String(selected.value.id).startsWith('session-')));
+const supportsApprovalMode=computed(()=>/^(claude-jsonl|agy|copilot|kimi|qoder|zcode|workbuddy|goose|codex):|^session-/.test(selected.value?.id||''));
+function currentSessionKey(){return `${connection.value||''}:${selected.value?.id||''}`;}
+const effectiveApprovalMode=computed(()=>{
+  const ov=sessionApprovalOverrides.value[currentSessionKey()];
+  if(ov&&APPROVAL_MODES.includes(ov))return ov;
+  if(isDshNativeSession.value){
+    return ['full_auto','workspace_auto','read_only'].includes(approvalMode.value)?approvalMode.value:'full_auto';
+  }
+  return approvalMode.value;
+});
+const supportsTerminalHandoff=computed(()=>/^(claude-jsonl|codex|agy|copilot|kimi|qoder|zcode|workbuddy|goose):/.test(selected.value?.id||''));
+function shellQuoteArg(v){
+  const s=String(v||'').trim();
+  if(!s)return '';
+  return /^[A-Za-z0-9_./:~-]+$/.test(s)?s:`'${s.replace(/'/g,"'\\''")}'`;
+}
+function buildCliResumeCommand(s,h){
+  const sid=String(s?.id||'');
+  const ws=String(s?.workspace||h?.workspace||'').trim();
+  const prefix=ws?`cd ${shellQuoteArg(ws)} && `:'';
+  if(sid.startsWith('claude-jsonl:'))return `${prefix}claude --resume ${shellQuoteArg(sid.slice('claude-jsonl:'.length))}`;
+  if(sid.startsWith('codex:'))return `${prefix}codex resume ${shellQuoteArg(sid.slice('codex:'.length))}`;
+  if(sid.startsWith('agy:'))return `${prefix}agy`;
+  if(sid.startsWith('copilot:'))return `${prefix}copilot --resume ${shellQuoteArg(sid.slice('copilot:'.length))}`;
+  if(sid.startsWith('kimi:'))return `${prefix}kimi`;
+  if(sid.startsWith('qoder:'))return `${prefix}qodercli`;
+  if(sid.startsWith('zcode:'))return `${prefix}zcode`;
+  if(sid.startsWith('workbuddy:'))return `${prefix}workbuddy`;
+  if(sid.startsWith('goose:'))return `${prefix}goose`;
+  return '';
+}
+const cliResumeCommand=computed(()=>buildCliResumeCommand(selected.value,history.value));
+async function copyCliResumeCommand(){
+  const cmd=cliResumeCommand.value;
+  if(!cmd)return;
+  try{
+    await globalThis.navigator?.clipboard?.writeText?.(cmd);
+    copiedCliCmd.value=true;
+    setTimeout(()=>{copiedCliCmd.value=false;},1800);
+  }catch{}
+}
+async function handoffToTerminal(){
+  if(!selected.value||releasingHolder.value)return;
+  if(activeBobHolder.value?.held){
+    if(activeBobHolder.value?.running){notice.value=t('bobHolderBusyNotice');return;}
+    releasingHolder.value=true;
+    const conn=connection.value,sid=selected.value.id;
+    try{
+      const res=kernelBridge.nativeRelease
+        ?await kernelBridge.nativeRelease(conn,sid)
+        :await kernelBridge.nativeCancel(conn,sid,'__bob_release_holder__');
+      if(res?.status==='busy'||res?.released===false){
+        notice.value=t('bobHolderBusyNotice');
+        return;
+      }
+      bobHolderOverride.value={held:false,running:false,kind:null,pid:null};
+      if(history.value)history.value={...history.value,bob_holder:bobHolderOverride.value};
+      notice.value=t('bobHolderReleasedNotice');
+      handoffCardOpen.value=true;
+    }catch(e){
+      error.value=fault(e);
+    }finally{
+      releasingHolder.value=false;
+    }
+    return;
+  }
+  handoffCardOpen.value=!handoffCardOpen.value;
+}
+function confirmTakeoverSend(){
+  if(!draft.value.trim()&&!attachments.value.length)draft.value=t('agyResumeDefaultPrompt');
+  void send({takeover:true});
+}
+const permissionModeOptions=computed(()=>{
+  if(isDshNativeSession.value){
+    return [
+      { value: 'full_auto', label: t('permissionModeFullAuto') },
+      { value: 'workspace_auto', label: t('permissionModeWorkspaceAuto') },
+      { value: 'read_only', label: t('permissionModeReadOnly') },
+    ];
+  }
+  return [
+    { value: 'full_auto', label: t('permissionModeFullAuto') },
+    { value: 'workspace_auto', label: t('permissionModeWorkspaceAuto') },
+    { value: 'interactive', label: t('permissionModeInteractive') },
+    { value: 'read_only', label: t('permissionModeReadOnly') },
+    { value: 'deny', label: t('permissionModePlan') },
+  ];
+});
+async function applyDshPermissionMode(nextMode, isElevatedConfirm=false){
+  if(!selected.value||switchingPermissionMode.value)return;
+  const g=generation,sid=selected.value.id,cid=connection.value,key=`${cid||''}:${sid||''}`;
+  switchingPermissionMode.value=true;error.value='';
+  try{
+    if(typeof kernelBridge.dshPermissionSet==='function'){
+      await kernelBridge.dshPermissionSet(cid,sid,nextMode);
+    }
+    if(g!==generation||disposed)return;
+    sessionApprovalOverrides.value={...sessionApprovalOverrides.value,[key]:nextMode};
+    approvalMode.value=nextMode;
+    pendingPermissionElevation.value=null;
+    notice.value=t(isElevatedConfirm?'permissionElevateAppliedDsh':'permissionModeSwitchedNotice');
+  }catch{
+    if(g===generation)error.value=t('permissionElevateFailed');
+  }finally{
+    if(g===generation)switchingPermissionMode.value=false;
+  }
+}
+function onSelectApprovalMode(nextMode){
+  if(!APPROVAL_MODES.includes(nextMode)||!selected.value||switchingPermissionMode.value)return;
+  if(nextMode==='full_auto'){
+    if(effectiveApprovalMode.value==='full_auto')return;
+    pendingPermissionElevation.value={connectionId:connection.value,sessionId:selected.value.id};
+    return;
+  }
+  pendingPermissionElevation.value=null;
+  const key=currentSessionKey();
+  sessionApprovalOverrides.value={...sessionApprovalOverrides.value,[key]:nextMode};
+  approvalMode.value=nextMode;
+  if(!isDshNativeSession.value){
+    notice.value=t('permissionModeSwitchedNotice');
+    return;
+  }
+  void applyDshPermissionMode(nextMode,false);
+}
+
+const selectedModel = ref('');
+const selectedEffort = ref('');
+const safeInject = (key, fallback) => (typeof inject === 'function' ? inject(key, fallback) : fallback);
+const sessionConfigOpen = safeInject('remoteSessionConfigOpen', ref(false));
+const remoteSessionTitleOverride = safeInject('remoteSessionTitleOverride', ref(''));
+const remoteSessionSubtitle = safeInject('remoteSessionSubtitle', ref(''));
+const customSessionTitle = ref('');
+
+function sessionTitleStorageKey() {
+  const cid = connection.value || '';
+  const sid = selected.value?.id || '';
+  return cid && sid ? `bob.sessionTitle:${cid}:${sid}` : '';
+}
+
+function loadCustomSessionTitle() {
+  customSessionTitle.value = '';
+  try {
+    const key = sessionTitleStorageKey();
+    if (key && typeof localStorage !== 'undefined') {
+      const saved = localStorage.getItem(key);
+      if (saved && saved.trim()) customSessionTitle.value = saved.trim();
+    }
+  } catch {}
+  remoteSessionTitleOverride.value = customSessionTitle.value;
+}
+
+function saveCustomSessionTitle() {
+  const clean = customSessionTitle.value.trim();
+  remoteSessionTitleOverride.value = clean;
+  try {
+    const key = sessionTitleStorageKey();
+    if (!key || typeof localStorage === 'undefined') return;
+    if (clean) localStorage.setItem(key, clean);
+    else localStorage.removeItem(key);
+  } catch {}
+}
+
+function sessionPrefsStorageKey() {
+  const cid = connection.value || '';
+  const sid = selected.value?.id || '';
+  return cid && sid ? `bob.sessionModelPrefs:${cid}:${sid}` : '';
+}
+
+function loadSessionModelPrefs() {
+  selectedModel.value = '';
+  selectedEffort.value = '';
+  loadCustomSessionTitle();
+  try {
+    const key = sessionPrefsStorageKey();
+    if (!key || typeof localStorage === 'undefined') return;
+    const raw = localStorage.getItem(key);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.model === 'string') selectedModel.value = parsed.model;
+    if (typeof parsed?.effort === 'string') selectedEffort.value = parsed.effort;
+  } catch {}
+}
+
+function saveSessionModelPrefs() {
+  try {
+    const key = sessionPrefsStorageKey();
+    if (!key || typeof localStorage === 'undefined') return;
+    localStorage.setItem(key, JSON.stringify({ model: selectedModel.value, effort: selectedEffort.value }));
+  } catch {}
+}
+
+const sessionHarnessKind = computed(() => {
+  const sid = String(selected.value?.id || '');
+  if (sid.startsWith('codex:')) return 'codex';
+  if (sid.startsWith('claude-jsonl:')) return 'claude';
+  if (sid.startsWith('copilot:')) return 'copilot';
+  if (sid.startsWith('kimi:')) return 'kimi';
+  if (sid.startsWith('qoder:')) return 'qoder';
+  if (sid.startsWith('zcode:')) return 'zcode';
+  if (sid.startsWith('workbuddy:')) return 'workbuddy';
+  if (sid.startsWith('goose:')) return 'goose';
+  if (sid.startsWith('pi:')) return 'pi';
+  if (sid.startsWith('agy:')) return 'agy';
+  if (sid) return 'dsh';
+  return '';
+});
+
+const supportsModelOverride = computed(() => ['codex', 'claude', 'copilot', 'pi', 'dsh'].includes(sessionHarnessKind.value));
+const supportsEffortOverride = computed(() => ['codex', 'claude', 'pi', 'dsh'].includes(sessionHarnessKind.value));
+
+const NODE_MODELS_TTL_MS = 24 * 60 * 60 * 1000;
+const nodeModelsByConnection = ref({});
+
+async function ensureNodeModels(cid) {
+  if (!cid || nodeModelsByConnection.value[cid]) return;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(`bob.nodeModels:${cid}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.fetchedAt && Date.now() - parsed.fetchedAt < NODE_MODELS_TTL_MS && parsed.tools && Object.keys(parsed.tools).length > 0) {
+          nodeModelsByConnection.value = { ...nodeModelsByConnection.value, [cid]: parsed.tools };
+          return;
+        }
+      }
+    }
+  } catch {}
+  try {
+    const inv = await kernelBridge.dshInventory(cid, false);
+    const tools = {};
+    for (const row of inv?.tools || []) {
+      if (row?.id && Array.isArray(row.models) && row.models.length > 0) {
+        tools[row.id] = row.models;
+      }
+    }
+    if (Object.keys(tools).length > 0) {
+      nodeModelsByConnection.value = { ...nodeModelsByConnection.value, [cid]: tools };
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(`bob.nodeModels:${cid}`, JSON.stringify({ fetchedAt: Date.now(), tools }));
+        }
+      } catch {}
+    }
+  } catch {}
+}
+
+watch([connection, supportsModelOverride], ([cid, ok]) => {
+  if (cid && ok) ensureNodeModels(cid);
+}, { immediate: true });
+
+const modelOptions = computed(() => {
+  const def = [{ value: '', label: t('modelNodeDefault') }];
+  const dynamicList = nodeModelsByConnection.value[connection.value || '']?.[sessionHarnessKind.value];
+  if (Array.isArray(dynamicList) && dynamicList.length > 0) {
+    return [...def, ...dynamicList.map(m => ({ value: m.id, label: m.label || m.id }))];
+  }
+  switch (sessionHarnessKind.value) {
+    case 'codex':
+      return [...def, { value: 'gpt-6.2-sol', label: 'GPT-6.2-Sol' }, { value: 'gpt-6.2-astra', label: 'GPT-6.2-Astra' }, { value: 'gpt-6.1-sol', label: 'GPT-6.1-Sol' }, { value: 'gpt-6-sol', label: 'GPT-6-Sol' }];
+    case 'claude':
+      return [...def, { value: 'sonnet', label: 'Claude Sonnet' }, { value: 'opus', label: 'Claude Opus' }, { value: 'haiku', label: 'Claude Haiku' }];
+    case 'copilot':
+      return [...def, { value: 'claude-sonnet-4.5', label: 'Claude Sonnet 4.5' }, { value: 'gpt-5', label: 'GPT-5' }, { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' }];
+    case 'pi':
+    case 'dsh':
+      return [...def, { value: 'deepseek-chat', label: 'deepseek-chat' }, { value: 'deepseek-reasoner', label: 'deepseek-reasoner' }];
+    default:
+      return def;
+  }
+});
+
+const EFFORT_I18N_KEYS = {
+  low: 'effortLow',
+  medium: 'effortMedium',
+  high: 'effortHigh',
+  xhigh: 'effortXHigh',
+  max: 'effortMax',
+  ultra: 'effortUltra',
+};
+
+const effortOptions = computed(() => {
+  const def = { value: '', label: t('effortNodeDefault') };
+  const dynamicList = nodeModelsByConnection.value[connection.value || '']?.[sessionHarnessKind.value];
+  let efforts = ['low', 'medium', 'high'];
+  if (Array.isArray(dynamicList) && dynamicList.length > 0) {
+    const matched = dynamicList.find(m => m.id === selectedModel.value) || dynamicList[0];
+    if (Array.isArray(matched?.efforts) && matched.efforts.length > 0) {
+      efforts = matched.efforts;
+    }
+  }
+  return [
+    def,
+    ...efforts.map(e => ({
+      value: e,
+      label: EFFORT_I18N_KEYS[e] ? t(EFFORT_I18N_KEYS[e]) : e,
+    })),
+  ];
+});
+
+function onSelectSessionModel(val) {
+  selectedModel.value = String(val || '');
+  saveSessionModelPrefs();
+}
+
+function onSelectSessionEffort(val) {
+  selectedEffort.value = String(val || '');
+  saveSessionModelPrefs();
+}
+
+watch([selected, selectedModel, selectedEffort, () => modelOptions.value, () => effortOptions.value], () => {
+  if (!selected.value) {
+    remoteSessionSubtitle.value = '';
+    return;
+  }
+  const parts = [];
+  if (selectedModel.value) {
+    const m = modelOptions.value.find(o => o.value === selectedModel.value);
+    parts.push(m?.label || selectedModel.value);
+  }
+  if (selectedEffort.value) {
+    const e = effortOptions.value.find(o => o.value === selectedEffort.value);
+    parts.push((e?.label || selectedEffort.value).replace(/^(思考|Effort):\s*/i, ''));
+  }
+  remoteSessionSubtitle.value = parts.join(' · ');
+}, { immediate: true });
+
+const isSessionResumable = computed(() => Boolean(
+  history.value ||
+  selected.value?.resumable ||
+  /^(codex|claude-jsonl|copilot|kimi|qoder|zcode|workbuddy|goose|pi|agy|dsh):/.test(String(selected.value?.id || ''))
+));
+
+const sendDisabledReason = computed(() => {
+  if (sending.value) return t('dshSending');
+  if (attachments.value.some(a => a.status === 'uploading')) return t('sendDisabledUploading');
+  if (history.value?.execution_enabled === false || selected.value?.execution_enabled === false) return t('toolPolicyDisabled');
+  if (isClaudeRemoteControl.value) return t('claudeRemoteControlTitle');
+  if (pending.value) return t('sendDisabledPending');
+  if (nativeUnresolved.value) return t('nativeExecutionUnconfirmed');
+  if (dshQuestionBlocking.value) return t('dshQuestionWaiting');
+  if (!isSessionResumable.value) return t('sendDisabledLoadingHistory');
+  return '';
+});
+async function confirmPermissionElevation(){
+  if(!selected.value||switchingPermissionMode.value)return;
+  if(isDshNativeSession.value){
+    await applyDshPermissionMode('full_auto',true);
+    return;
+  }
+  const key=currentSessionKey();
+  sessionApprovalOverrides.value={...sessionApprovalOverrides.value,[key]:'full_auto'};
+  approvalMode.value='full_auto';
+  pendingPermissionElevation.value=null;
+  notice.value=t('permissionElevateAppliedNative');
+}
+function cancelPermissionElevation(){
+  pendingPermissionElevation.value=null;
+}
+const nodeActivity=ref(null),awaitingReply=ref(null),replying=ref(false);let activityChecked=0;
+const syncStatus=ref(''),hasNewMessages=ref(false),copiedSeq=ref(null),streamSeq=ref(null),rodIndex=ref(0);let syncTimer,copyTimer,rodTimer;
+const rodFrames=['|','/','-','\\'],stripDots=s=>String(s??'').replace(/\s*(?:…|\.{2,})\s*$/,'');
+const rodFrame=computed(()=>`\u2060${rodFrames[rodIndex.value%rodFrames.length]}\u2060`);
+const isSpinning=computed(()=>Boolean(busy.value||sending.value||replying.value||awaitingReply.value||nodeActivity.value?.running||syncStatus.value==='checking'||syncStatus.value==='syncing'));
+function updateRodTicker(){
+ if(typeof setInterval!=='function')return;
+ if(isSpinning.value&&!rodTimer){rodTimer=setInterval(()=>{rodIndex.value=(rodIndex.value+1)%rodFrames.length;},120);}
+ else if(!isSpinning.value&&rodTimer){if(typeof clearInterval==='function')clearInterval(rodTimer);rodTimer=null;}
+}
+watch(isSpinning,updateRodTicker);
+let syncPulseTimer;
+function emitTopbarPhase(overridePhase){
+ const fn=globalThis.__bobSetRemoteSyncPhase;if(typeof fn!=='function')return;
+ if(overridePhase){fn(overridePhase);return;}
+ if(!selected.value){fn('');return;}
+ if(syncStatus.value==='offline_cached'){fn('offline');return;}
+ if(syncStatus.value==='syncing'||sending.value||replying.value||nodeActivity.value?.running){fn('syncing');return;}
+ if(syncStatus.value==='checking'||(busy.value&&!history.value)){fn('checking');return;}
+ fn('synced');
+}
+watch([syncStatus,sending,replying,()=>nodeActivity.value?.running,busy],()=>emitTopbarPhase());
+const dshLiveState=ref(null);let dshLiveTimer,dshReadCursor=-1;
+const isNativeId=id=>/^(agy|claude-jsonl|codex|pi):/.test(id||'');
+const dshQuestionView=ref(null);
+const answeredDshCallIds=ref({});
+const dshQuestionDrafts=ref({});
+const dshQuestionBusy=ref({});
+const dshQuestionErrors=ref({});
+let checkedDshQuestions=false;
+const dshQuestions=computed(()=> (dshQuestionView.value?.pending_questions||[]).filter(q=>q&&!answeredDshCallIds.value[q.call_id]));
+const dshQuestionBlocking=computed(()=>dshQuestions.value.some(q=>q.state==='open'));
+const dshQuestionSource=computed(()=>{
+ try{const url=new URL(dshQuestionView.value?.question_source);return url.protocol==='https:'&&!url.username&&!url.password&&!url.search&&!url.hash&&url.pathname==='/'?url.href:null;}
+ catch{return null;}
+});
+function observeDshQuestions(page){
+ if(!Array.isArray(page.pending_questions)||page.cursor<(dshQuestionView.value?.cursor??-1))return;
+ const present=new Set(page.pending_questions.map(q=>q?.call_id).filter(Boolean));
+ const nextAnswered={};
+ for(const key of Object.keys(answeredDshCallIds.value)){if(present.has(key))nextAnswered[key]=true;}
+ answeredDshCallIds.value=nextAnswered;
+ dshQuestionView.value={cursor:page.cursor,pending_questions:page.pending_questions,question_source:page.question_source};
+}
+function dshAnswerKey(callId,questionId){return `${callId}\u0000${questionId}`;}
+function canAnswerDshRequest(request){
+ return Boolean(request&&typeof request.call_id==='string'&&request.call_id&&Array.isArray(request.questions)&&request.questions.length>0&&request.questions.every(q=>q&&typeof q.id==='string'&&q.id.trim().length>0)&&typeof kernelBridge.dshAnswer==='function');
+}
+function getDshAnswerDraft(callId,questionId){
+ const entry=dshQuestionDrafts.value[dshAnswerKey(callId,questionId)];
+ return {selected:Array.isArray(entry?.selected)?entry.selected:[],custom:typeof entry?.custom==='string'?entry.custom:''};
+}
+function isDshOptionSelected(callId,questionId,label){
+ return getDshAnswerDraft(callId,questionId).selected.includes(label);
+}
+function toggleDshOption(request,item,label){
+ if(!request?.call_id||!item?.id||dshQuestionBusy.value[request.call_id])return;
+ const key=dshAnswerKey(request.call_id,item.id);
+ const cur=getDshAnswerDraft(request.call_id,item.id);
+ const exists=cur.selected.includes(label);
+ const nextSelected=item.multi_select
+  ?(exists?cur.selected.filter(v=>v!==label):[...cur.selected,label])
+  :(exists?[]:[label]);
+ dshQuestionDrafts.value={...dshQuestionDrafts.value,[key]:{...cur,selected:nextSelected}};
+ if(dshQuestionErrors.value[request.call_id]){const nextErr={...dshQuestionErrors.value};delete nextErr[request.call_id];dshQuestionErrors.value=nextErr;}
+}
+function setDshCustomAnswer(request,item,value){
+ if(!request?.call_id||!item?.id||dshQuestionBusy.value[request.call_id])return;
+ const key=dshAnswerKey(request.call_id,item.id);
+ const cur=getDshAnswerDraft(request.call_id,item.id);
+ dshQuestionDrafts.value={...dshQuestionDrafts.value,[key]:{...cur,custom:String(value??'')}};
+ if(dshQuestionErrors.value[request.call_id]){const nextErr={...dshQuestionErrors.value};delete nextErr[request.call_id];dshQuestionErrors.value=nextErr;}
+}
+function canSubmitDshQuestion(request){
+ if(!canAnswerDshRequest(request)||dshQuestionBusy.value[request.call_id])return false;
+ return request.questions.every(item=>{
+  const entry=getDshAnswerDraft(request.call_id,item.id);
+  return entry.selected.length>0||entry.custom.trim().length>0;
+ });
+}
+function buildDshAnswersPayload(request){
+ return request.questions.map(item=>{
+  const entry=getDshAnswerDraft(request.call_id,item.id);
+  const out={id:item.id,selected:[...entry.selected]};
+  const custom=entry.custom.trim();
+  if(custom)out.custom=custom;
+  return out;
+ });
+}
+async function submitDshQuestion(request){
+ const id=selected.value?.id,cid=connection.value,g=generation;
+ if(!id||!request?.call_id||dshQuestionBusy.value[request.call_id]||!canSubmitDshQuestion(request))return;
+ const callId=request.call_id;
+ const answers=buildDshAnswersPayload(request);
+ let shouldRefresh=false;
+ dshQuestionBusy.value={...dshQuestionBusy.value,[callId]:true};
+ if(dshQuestionErrors.value[callId]){const nextErr={...dshQuestionErrors.value};delete nextErr[callId];dshQuestionErrors.value=nextErr;}
+ try{
+  await kernelBridge.dshAnswer(cid,id,callId,answers);
+  if(g!==generation||disposed)return;
+  answeredDshCallIds.value={...answeredDshCallIds.value,[callId]:true};
+  const nextDrafts={...dshQuestionDrafts.value};
+  const prefix=`${callId}\u0000`;
+  for(const key of Object.keys(nextDrafts)){if(key.startsWith(prefix))delete nextDrafts[key];}
+  dshQuestionDrafts.value=nextDrafts;
+  notice.value=t('dshQuestionSubmitted');
+  checkedDshQuestions=false;
+  shouldRefresh=true;
+ }catch(e){
+  if(g!==generation||disposed)return;
+  const raw=String(e?.message||e||'');
+  if(raw.includes('REPLY_QUEUED')){
+   answeredDshCallIds.value={...answeredDshCallIds.value,[callId]:true};
+   notice.value=t('dshQuestionSubmitted');
+   checkedDshQuestions=false;
+   shouldRefresh=true;
+  }else if(raw.includes('DSH_QUESTION_EXPIRED')){
+   dshQuestionErrors.value={...dshQuestionErrors.value,[callId]:t('dshQuestionExpired')};
+   checkedDshQuestions=false;
+   shouldRefresh=true;
+  }else{
+   dshQuestionErrors.value={...dshQuestionErrors.value,[callId]:typeof fault==='function'?fault(e):raw};
+  }
+ }finally{
+  if(!disposed){
+   const nextBusy={...dshQuestionBusy.value};delete nextBusy[callId];dshQuestionBusy.value=nextBusy;
+  }
+ }
+ if(shouldRefresh&&g===generation&&!disposed)await refresh();
+}
+const dshLiveMessages=computed(()=> (dshLiveState.value?.messages||[]).filter(m=>m.text&&(m.active||!Number.isSafeInteger(m.sequence)||m.sequence>(history.value?.cursor??-1))));
+async function refreshDshLive(){
+ const g=generation,id=selected.value?.id,cid=connection.value;
+ if(!id||isNativeId(id)||disposed||!kernelBridge.dshLive)return;
+ try{
+  const page=await kernelBridge.dshLive(cid,id);
+  if(g!==generation||disposed)return;
+  if(page.address?.session_id!==id||page.address?.connection_id!==cid||!Array.isArray(page.messages)||!Number.isSafeInteger(page.cursor))throw Error('DSH_IDENTITY_MISMATCH');
+  const el=reader.value,follow=el&&el.scrollHeight-el.scrollTop-el.clientHeight<80;
+  const changed=JSON.stringify(page.messages)!==JSON.stringify(dshLiveState.value?.messages||[]);
+  if(page.status==='live')dshLiveState.value=page;
+  else dshLiveState.value={...page,messages:(dshLiveState.value?.messages||[]).map(m=>({...m,active:false}))};
+  replying.value=page.status==='live'&&page.active===true;
+  const latest=Math.max(page.cursor,...page.messages.map(m=>Number.isSafeInteger(m.sequence)?m.sequence:-1));
+  if(history.value&&latest>history.value.cursor&&latest>dshReadCursor&&!busy.value&&!loadingOlder.value&&!preview.value){dshReadCursor=latest;void refresh();}
+  await nextTick();
+  if(g!==generation||disposed)return;
+  if(changed&&!preview.value){if(follow&&chatScroll.following)scrollToBottom();else hasNewMessages.value=true;}
+ }catch(e){if(g===generation&&!disposed){dshLiveState.value={...(dshLiveState.value||{}),status:'reconnecting',messages:(dshLiveState.value?.messages||[]).map(m=>({...m,active:false}))};replying.value=false;}}
+ finally{if(g===generation&&!disposed)dshLiveTimer=setTimeout(refreshDshLive,dshLiveState.value?.status==='live'?1000:3000);}
+}
+const cancelRequest=ref(null),cancelBusy=ref(false);
+const dshStop=ref(null);
+let dshStopTimer;
+const canStopDsh=computed(()=>!!selected.value&&!isNativeId(selected.value.id)&&
+ (dshStop.value!==null||(syncStatus.value!=='offline_cached'&&
+ (dshQuestionBlocking.value||nodeActivity.value?.running===true||replying.value))));
+function resetDshStop(){clearTimeout(dshStopTimer);dshStop.value=null;}
+function settleDshIdle(){
+ resetDshStop();replying.value=false;nodeActivity.value={running:false,at:Date.now()};
+ notice.value=t('dshStopIdle');
+}
+async function stopDsh(){
+ const id=selected.value?.id,cid=connection.value,g=generation;
+ if(!id||!canStopDsh.value||dshStop.value||sending.value)return;
+ dshStop.value={checking:false};notice.value='';
+ try{
+  const result=await kernelBridge.dshCancel(cid,id);
+  if(g!==generation||disposed)return;
+  if(result.address?.session_id!==id||result.address?.connection_id!==cid)throw Error('DSH_IDENTITY_MISMATCH');
+  if(result.status==='idle'){settleDshIdle();return;}
+  if(result.status!=='cancel_requested')throw Error('DSH_CANCEL_UNCONFIRMED');
+  dshStop.value={checking:true};activityChecked=0;notice.value=t('dshStopChecking');
+  dshStopTimer=setTimeout(()=>{if(g===generation&&dshStop.value){resetDshStop();notice.value=t('dshStopUnconfirmed');}},30000);
+ }catch{if(g===generation&&!disposed){resetDshStop();notice.value=t('dshStopUnconfirmed');}}
+ finally{if(g===generation&&!disposed)void refresh();}
+}
+const cancellableRequest=computed(()=>/^(codex|pi|agy|claude-jsonl):/.test(selected.value?.id||'')?Object.entries(nativeDrafts.value).find(([,v])=>v.active&&v.cancelSupported)?.[0]:null);
+async function cancelNative(){
+ const rid=cancellableRequest.value,g=generation;if(!rid||cancelBusy.value||cancelRequest.value===rid)return;
+ cancelBusy.value=true;
+ try{const result=await kernelBridge.nativeCancel(connection.value,selected.value.id,rid);
+  if(g!==generation)return;
+  if(result.request_id!==rid||result.session_id!==selected.value.id)throw Error('HARNESS_IDENTITY_UNCONFIRMED');
+  cancelRequest.value=result.status==='cancel_requested'?rid:null;
+  notice.value=t(result.status==='cancelled'?'nativeCancelled':result.status==='completed'?'dshSyncCompleted':'nativeCancelPending');
+ }catch{if(g===generation)notice.value=t('nativeCancelUnconfirmed');}
+ finally{cancelBusy.value=false;}
+}
+const nativeDrafts=ref({});
+const acknowledgedUnknownIds=ref({});
+function ackUnknownStorageKey(){const cid=connection.value||'',sid=selected.value?.id||'';return cid&&sid?`bob.ackUnknown:${cid}:${sid}`:'';}
+function loadAckUnknownIds(){acknowledgedUnknownIds.value={};try{const k=ackUnknownStorageKey();if(!k||typeof localStorage==='undefined')return;const raw=localStorage.getItem(k);if(raw){const arr=JSON.parse(raw);if(Array.isArray(arr)){const m={};for(const id of arr)m[id]=true;acknowledgedUnknownIds.value=m;}}}catch{}}
+async function dismissNativeUnresolved(){
+  const next={...acknowledgedUnknownIds.value};
+  for(const [k,v] of Object.entries(nativeDrafts.value)){if(v?.status==='unknown')next[k]=true;}
+  for(const v of (history.value?.request_results||[])){if(v?.status==='unknown'&&v.request_id)next[v.request_id]=true;}
+  acknowledgedUnknownIds.value=next;
+  try{const k=ackUnknownStorageKey();if(k&&typeof localStorage!=='undefined')localStorage.setItem(k,JSON.stringify(Object.keys(next)));}catch{}
+  if(connection.value&&selected.value?.id&&typeof kernelBridge.nativeAcknowledgeUnknown==='function'){
+    try{await kernelBridge.nativeAcknowledgeUnknown(connection.value,selected.value.id);}catch{}
+    void refresh();void refreshNativeEvents();
+  }
+}
+const nativeFailureText=computed(()=>{const rows=history.value?.request_results||[];const latest=[...rows].sort((a,b)=>(b.observed_at||0)-(a.observed_at||0))[0];if(!latest||!['error','not_accepted'].includes(latest.status))return '';const code=latest.error_code||'HARNESS_FAILED';return t(code==='HARNESS_SESSION_BUSY'?'nativeSessionWriterBusy':code==='HARNESS_STREAM_DISCONNECTED'?'nativeStreamDisconnected':'nativeExecutionFailed')+' · '+code;});
+const nativeUnresolved=computed(()=>{
+  const ack=acknowledgedUnknownIds.value;
+  const rows=history.value?.request_results||[];
+  const latestRowSettled=rows.filter(v=>['completed','cancelled','error'].includes(v.status)).reduce((m,v)=>Math.max(m,v.observed_at||0),0);
+  const latestDraftSettled=Object.values(nativeDrafts.value).filter(v=>v?.terminal).reduce((m,v)=>Math.max(m,v.timestamp||0),0);
+  const latestSettledAt=Math.max(latestRowSettled,latestDraftSettled);
+  const draftUnknown=Object.entries(nativeDrafts.value).some(([k,v])=>!k.startsWith('external-codex-')&&v.status==='unknown'&&!ack[k]&&(v.timestamp||0)>=latestSettledAt);
+  if(draftUnknown)return true;
+  return rows.some(v=>v.status==='unknown'&&!ack[v.request_id]&&(v.observed_at||0)>=latestSettledAt);
+});const isExternalCodexWaitingApproval=computed(()=>Object.entries(nativeDrafts.value).some(([k,v])=>k.startsWith('external-codex-')&&(v.activity?.approvals||[]).some(a=>a.status==='pending')));const isExternalCodexRunning=computed(()=>Object.entries(nativeDrafts.value).some(([k,v])=>k.startsWith('external-codex-')&&v.active));let nativeCursor=0,nativeEpoch='',nativeTimer,nativeMore=false;
+async function refreshNativeEvents(){
+ const g=generation,id=selected.value?.id;
+ nativeMore=false;
+ if(!id||! /^(agy|claude-jsonl|codex|pi):/.test(id)||disposed)return;
+ try{
+  const page=await kernelBridge.nativeEvents(connection.value,id,nativeCursor,nativeEpoch);
+  if(g!==generation||disposed||page.session_id!==id)return;
+  const el=reader.value,follow=el&&el.scrollHeight-el.scrollTop-el.clientHeight<80;
+  if(page.reset){
+   if(!Number.isSafeInteger(page.cursor)||typeof page.epoch!=='string'||!Array.isArray(page.snapshots)||page.snapshots.some(v=>v.session_id!==id))throw Error('HARNESS_EVENTS_INVALID');
+   const restored={};cancelRequest.value=null;
+   for(const v of page.snapshots){
+    restored[v.request_id]={status:v.status,activity:v.activity||null,text:v.text||'',unconfirmed:v.status==='unknown'&&v.code==='HARNESS_EXTERNAL_TURN_UNCONFIRMED',timestamp:v.observed_at,active:['accepted','running'].includes(v.status),completed:v.status==='completed',terminal:['completed','cancelled','error'].includes(v.status),cancelSupported:v.cancel_supported===true};
+    if(v.cancel_pending)cancelRequest.value=v.request_id;
+    if(v.request_id===awaitingReply.value&&['completed','cancelled','error'].includes(v.status))awaitingReply.value=null;
+   }
+   nativeDrafts.value=restored;nativeCursor=page.cursor;nativeEpoch=page.epoch;
+   replying.value=Object.values(restored).some(v=>v.active);
+   notice.value=t(page.snapshot_incomplete?'nativeRecoveryPartial':'nativeRecoveryRestored');
+   if(page.history_required&&!busy.value&&!loadingOlder.value&&!preview.value)void refresh();
+  }else if(page.epoch){
+   if(nativeEpoch&&page.epoch!==nativeEpoch)throw Error('HARNESS_EVENTS_EPOCH_CHANGED');
+   nativeEpoch=page.epoch;
+  }
+  for(const event of page.events||[]){
+   if(event.sequence<=nativeCursor||event.session_id!==id)continue;
+   nativeCursor=event.sequence;
+   const rid=event.request_id;
+   const settled=(history.value?.request_results||[]).find(r=>r.request_id===rid)?.status;
+   if(settled==='completed'||(['error','not_accepted','cancelled'].includes(settled)&&rid!==awaitingReply.value)){
+    const retained=settleNativeActivity(nativeDrafts.value[rid]||{timestamp:event.observed_at},settled,event.kind==='activity_snapshot'?event.payload.activity:undefined);
+    if(retained)retained.status=settled;
+    const next={...nativeDrafts.value};if(retained)next[rid]=retained;else delete next[rid];nativeDrafts.value=next;
+    if(rid===awaitingReply.value){awaitingReply.value=null;replying.value=false;}
+    continue;
+   }
+   const current=nativeDrafts.value[rid]||{text:'',timestamp:event.observed_at};
+   if(['accepted','running','completed','cancelled','error','unknown'].includes(event.kind))current.status=event.kind;
+   if(current.terminal&&!['message_snapshot','activity_snapshot'].includes(event.kind))continue;
+   if(['accepted','running','completed'].includes(event.kind))current.unconfirmed=false;
+   if(event.kind==='unknown'&&event.payload?.code==='HARNESS_EXTERNAL_TURN_UNCONFIRMED')current.unconfirmed=true;
+   if(event.kind==='activity_snapshot')current.activity=current.terminal?unconfirmActivity(event.payload.activity):event.payload.activity||null;
+   if(event.kind==='accepted')current.cancelSupported=event.payload.cancel_supported===true;
+    if(event.kind==='text_delta')current.text+=event.payload.text||'';
+   if(event.kind==='message_snapshot')current.text=event.payload.text||'';
+    if(event.kind==='cancel_requested'){cancelRequest.value=rid;notice.value=t('nativeCancelPending');}
+   if(['accepted','running','text_delta'].includes(event.kind)){current.active=true;replying.value=true;}
+   if(['completed','error','cancelled','unknown'].includes(event.kind)){
+    current.active=false;current.terminal=['completed','cancelled','error'].includes(event.kind);replying.value=false;
+    current.activity=unconfirmActivity(current.activity);
+     if(cancelRequest.value===rid){cancelRequest.value=null;notice.value=t(event.kind==='cancelled'?'nativeCancelled':event.kind==='completed'?'dshSyncCompleted':'nativeCancelUnconfirmed');}
+    if(awaitingReply.value===rid)awaitingReply.value=null;
+    if(event.kind==='error'||(event.kind==='unknown'&&!rid.startsWith('external-codex-')))error.value=t('nativeExecutionFailed')+' · '+String(event.payload.code||'HARNESS_FAILED');
+    if(event.kind==='completed'){current.completed=true;error.value='';}
+   }
+   nativeDrafts.value={...nativeDrafts.value,[rid]:current};
+  }
+   if(Number.isSafeInteger(page.cursor))nativeCursor=Math.max(nativeCursor,page.cursor);
+   nativeMore=page.has_more===true;
+   if(page.external_live && page.external_live!=='live'){
+    let touched=false;const next={...nativeDrafts.value};
+    for(const [key,value] of Object.entries(next))if(key.startsWith('external-codex-')&&value.active){next[key]={...value,active:false,activity:unconfirmActivity(value.activity)};touched=true;}
+    if(touched){nativeDrafts.value=next;replying.value=Object.values(next).some(v=>v.active);}
+   }
+   // History can settle a request before its terminal event reaches this poll.
+   // Derive the indicator from all retained executions, including empty replies.
+   replying.value=Object.values(nativeDrafts.value).some(v=>v.active===true);
+   if(pendingDecision.value){
+    const record=nativeDrafts.value[pendingDecision.value.request];
+    const approval=record?.activity?.approvals?.find(v=>v.permission_id===pendingDecision.value.permission);
+    if(approval&& !['pending','queued'].includes(approval.status)){
+     notice.value=t(approval.status==='denied'?'nativeApprovalDenied':approval.status==='approved'?'nativeApprovalApproved':'nativeApprovalUnconfirmed');
+     pendingDecision.value=null;
+    }
+   }
+   if(globalThis.__bobApprovalNotifications?.notifyPendingApproval){
+    for(const entry of pendingNativeApprovals.value){
+     const ttlText=t('nativeApprovalRemainingMin',{minutes:remainingBarMinutes(entry.approval)});
+     const rawTitle=entry.approval.title==='AskUserQuestion'?t('nativeQuestionTitle'):(entry.approval.title||t('nativeApprovalLocal'));
+     void globalThis.__bobApprovalNotifications.notifyPendingApproval({
+      id:entry.approval.permission_id,
+      title:t('approvalNotifyPushTitle'),
+      body:`${rawTitle} (${ttlText})`,
+     });
+    }
+   }
+   await nextTick();if(follow&&chatScroll.following&&g===generation)scrollToBottom();
+ }catch(e){if(g===generation){syncStatus.value='offline_cached';nativeEpoch='';replying.value=false;nativeDrafts.value=Object.fromEntries(Object.entries(nativeDrafts.value).map(([k,v])=>[k,{...v,active:false,activity:unconfirmActivity(v.activity)}]));}}
+ finally{if(g===generation&&!disposed)nativeTimer=setTimeout(refreshNativeEvents,nativeMore?0:replying.value||awaitingReply.value?400:5000);}
+}
+// A live turn can contain several assistant records separated by tool output.
+// Compare ordered paragraphs within one user-bounded run, never across turns.
+function nativeTextInHistory(text){
+ const normalize=value=>String(value??'').replace(/\s+/g,' ').trim();
+ const chunks=String(text??'').split(/\n\s*\n/).map(normalize).filter(Boolean);
+ if(!chunks.length)return false;
+ const runs=[];let run=[];
+ for(const m of history.value?.messages||[]){if(m.role==='user'){if(run.length)runs.push(run.join(' '));run=[];}else if(m.role==='assistant')run.push(normalize(m.text));}
+ if(run.length)runs.push(run.join(' '));
+ return runs.some(body=>{let offset=0;for(const chunk of chunks){const at=body.indexOf(chunk,offset);if(at<0)return false;offset=at+chunk.length;}return true;});
+}
+const nativeActivities=computed(()=>{
+ const ordered=orderedNativeActivities(nativeDrafts.value);
+ if(!ordered.length)return ordered;
+ const now=Date.now();
+ const liveOrWaiting=ordered.filter(({id,activity})=>{
+  const rec=nativeDrafts.value[id];
+  const isActive=rec?.active===true&&!rec?.terminal;
+  const hasActionable=(activity?.approvals||[]).some(a=>isActionableNativeApproval(a,now));
+  return isActive||hasActionable;
+ });
+ if(liveOrWaiting.length){
+  const ownedLive=liveOrWaiting.filter(({id})=>!String(id||'').startsWith('external-codex-'));
+  return ownedLive.length?ownedLive:liveOrWaiting;
+ }
+ const owned=ordered.filter(({id})=>!String(id||'').startsWith('external-codex-'));
+ return (owned.length?owned:ordered).slice(-1);
+});
+function isActionableNativeApproval(approval,now=Date.now()){
+ return Boolean(
+  approval?.actionable===true&&
+  approval?.status==='pending'&&
+  typeof approval?.permission_id==='string'&&
+  approval.permission_id.length>0&&
+  Number.isFinite(approval?.expires_at)&&
+  approval.expires_at>now
+ );
+}
+const pendingNativeApprovals=computed(()=>{
+ const now=Date.now();
+ const out=[];
+ for(const record of nativeActivities.value){
+  for(const approval of record.activity?.approvals||[]){
+   if(isActionableNativeApproval(approval,now)){
+    out.push({requestId:record.id,approval});
+   }
+  }
+ }
+ return out;
+});
+const approvalNotifyPermission=ref(
+ globalThis.__bobApprovalNotifications?.getApprovalNotificationState?.()?.permission||'unsupported'
+);
+async function enableApprovalAlerts(){
+ const helper=globalThis.__bobApprovalNotifications;
+ if(!helper?.enableApprovalNotifications)return;
+ const res=await helper.enableApprovalNotifications(kernelBridge);
+ approvalNotifyPermission.value=res?.state?.permission||approvalNotifyPermission.value;
+}
+function formatBarApprovalDetail(approval){
+ const raw=String(approval?.detail||'').trim();
+ if(!raw)return '';
+ try{
+  const parsed=JSON.parse(raw);
+  if(approval?.title==='AskUserQuestion'&&Array.isArray(parsed?.questions)&&parsed.questions.length>0){
+   return String(parsed.questions[0]?.question||parsed.questions[0]?.header||'').trim();
+  }
+  if(typeof parsed?.command==='string'&&parsed.command.trim())return parsed.command.trim();
+  if(typeof parsed?.file_path==='string'&&parsed.file_path.trim())return parsed.file_path.trim();
+  if(typeof parsed?.filePath==='string'&&parsed.filePath.trim())return parsed.filePath.trim();
+ }catch{}
+ return raw;
+}
+function remainingBarMinutes(approval){
+ const left=Number(approval?.expires_at||0)-Date.now();
+ return Math.max(1,Math.ceil(left/60000));
+}
+function barApprovalOptionLabel(option){
+ const label=String(option?.label||'').trim();
+ if(label&&label!=='allow_once'&&label!=='reject_once')return label;
+ return t('nativeApproveOnce');
+}
+function scrollToNativeApproval(permissionId){
+ try{
+  const el=reader.value?.querySelector?.(`[data-native-approval-id="${permissionId}"]`);
+  el?.scrollIntoView?.({behavior:'smooth',block:'center'});
+ }catch{}
+}
+const busyPermission=ref(''),pendingDecision=ref(null),approvalErrors=ref({});
+async function decidePermission(requestId,permissionId,optionId){
+ if(busyPermission.value||!selected.value)return;
+ const g=generation,address={connection:connection.value,session:selected.value.id};busyPermission.value=permissionId;
+ try{
+  const result=await kernelBridge.nativePermission(address.connection,address.session,requestId,permissionId,optionId);
+  if(result?.error)throw Error(String(result.error?.code||result.error));
+  if(result?.permission_id!==permissionId)throw Error('HARNESS_APPROVAL_UNCONFIRMED');
+  if(g===generation){delete approvalErrors.value[permissionId];pendingDecision.value={request:requestId,permission:permissionId};notice.value=t('nativeApprovalQueued');await refreshNativeEvents();}
+ }catch(e){if(g===generation)approvalErrors.value[permissionId]=String(e?.message||e).includes('HARNESS_TOOL_NOT_GRANTED')?'nativeApprovalRevoked':'nativeApprovalUnconfirmed';}
+ finally{busyPermission.value='';}
+}
+
+function stripHistoryPrefix(text){
+ const normalize=value=>String(value??'').replace(/\s+/g,' ').trim();
+ const parts=String(text??'').split(/\n\s*\n/);
+ const chunks=parts.map(p=>p.trim()).filter(Boolean);
+ if(!chunks.length)return '';
+ const msgs=history.value?.messages||[];
+ let lastUserIdx=-1;
+ for(let i=msgs.length-1;i>=0;i--){if(msgs[i]?.role==='user'){lastUserIdx=i;break;}}
+ const latestRun=msgs.slice(lastUserIdx+1).filter(m=>m?.role==='assistant').map(m=>normalize(m.text)).join(' ');
+ if(!latestRun)return String(text??'');
+ let drop=0,offset=0;
+ while(drop<chunks.length){
+  const norm=normalize(chunks[drop]);
+  const at=latestRun.indexOf(norm,offset);
+  if(at<0)break;
+  offset=at+norm.length;
+  drop++;
+ }
+ return chunks.slice(drop).join('\n\n');
+}
+const nativeMessages=computed(()=>{
+ const time=value=>typeof value==='number'?value:Date.parse(value)||0;
+ const latestUser=Math.max(0,...(history.value?.messages||[]).filter(m=>m.role==='user').map(m=>time(m.created_at||m.createdAt||m.timestamp)));
+ const hasOwnedActive=Object.entries(nativeDrafts.value).some(([id,v])=>!String(id||'').startsWith('external-codex-')&&(v?.active===true||!v?.terminal||id===awaitingReply.value));
+ // Historical checkpoints restore receipt state; they are not new replies to a later user turn.
+ return Object.entries(nativeDrafts.value)
+  .filter(([id,v])=>{
+   if(String(id||'').startsWith('external-codex-')&&hasOwnedActive)return false;
+   return v.text&&!v.unconfirmed&&!(v.terminal&&id!==awaitingReply.value&&time(v.timestamp)>0&&time(v.timestamp)<latestUser)&&!nativeTextInHistory(v.text);
+  })
+  .map(([id,v])=>({...v,id,text:stripHistoryPrefix(v.text)}))
+  .filter(v=>Boolean(v.text&&v.text.trim()))
+  .sort((a,b)=>time(a.timestamp)-time(b.timestamp));
+});
+const displayMessages=computed(()=>{
+ const raw=history.value?.messages||[];
+ if(!raw.length)return [];
+ const out=[];let run=[];
+ const flush=()=>{
+  if(!run.length)return;
+  if(run.length===1){out.push(run[0]);run=[];return;}
+  const chunks=[];let sbuf=[];
+  const flushSteps=()=>{if(sbuf.length){chunks.push('```thinking\n'+sbuf.map(s=>`- ${s}`).join('\n')+'\n```');sbuf=[];}};
+  for(const m of run){
+   const tx=String(m.text??'').trim();if(!tx)continue;
+   if(/^(?:[-*]\s+)?(?:`?\[(?:Tool|Thinking)(?::\s*[^\]]*)?\]`?)/i.test(tx)&&!tx.includes('\n\n'))sbuf.push(tx.replace(/^\s*[-*]\s+/,'').trim());
+   else{flushSteps();chunks.push(tx);}
+  }
+  flushSteps();
+  const anchor=run[run.length-1];
+  out.push({...anchor,text:chunks.join('\n\n')||anchor.text});run=[];
+ };
+ for(const m of raw){if(m.role==='user'){flush();out.push(m);}else run.push(m);}
+ flush();
+ return out;
+});
+const syncStatusLabel=computed(()=>stripDots(syncStatus.value==='checking'?t('dshSyncChecking'):syncStatus.value==='syncing'?t('dshSyncUpdating'):syncStatus.value==='synced'?t('dshSyncCompleted'):syncStatus.value==='offline_cached'?t('dshSyncOfflineCached'):''));
+async function refreshActivity(g,id){
+ const stop=dshStop.value;
+ if(Date.now()-activityChecked<(stop?.checking?1800:10000))return;
+ activityChecked=Date.now();
+ try{
+  const list=await kernelBridge.dshList(connection.value);if(g!==generation||disposed)return;
+  const row=list.find(s=>s.id===id);nodeActivity.value=typeof row?.running==='boolean'?{running:row.running,at:Date.now()}:null;
+  if(stop?.checking&&dshStop.value===stop&&row?.running===false)settleDshIdle();
+ }catch{if(g===generation)nodeActivity.value=null}
+}
+const activityLabel=computed(()=>stripDots(dshQuestionBlocking.value?t('dshQuestionWaiting'):sending.value?t('dshSendingWaitReceipt'):waitingNativeApproval(nativeDrafts.value)?t('nativeApprovalPending'):isExternalCodexWaitingApproval.value?t('codexExternalWaitingApproval'):isExternalCodexRunning.value&&!awaitingReply.value?t('codexExternalActiveBadge'):replying.value?t('dshReplying'):nodeActivity.value?.running===true?t('dshNodeProcessing'):awaitingReply.value?t('dshAwaitingReply'):''));
+const agentLabel=computed(()=>{const h=selected.value?.harness||history.value?.harness||'';const sid=String(selected.value?.id||'');if(h==='agy'||sid.startsWith('agy:'))return t('agyAgent');if(h==='copilot'||sid.startsWith('copilot:'))return 'Copilot';if(h==='kimi'||sid.startsWith('kimi:'))return 'Kimi Code';if(h==='qoder'||sid.startsWith('qoder:'))return 'Qoder';if(h==='zcode'||sid.startsWith('zcode:'))return 'ZCode';if(h==='workbuddy'||sid.startsWith('workbuddy:'))return 'WorkBuddy';if(h==='goose'||sid.startsWith('goose:'))return 'Goose';if(h==='claude'||selected.value?.toolLabel==='Claude')return t('claudeAgent');if(h==='pi'||selected.value?.toolLabel==='Pi')return 'Pi';if(h==='codex'||selected.value?.toolLabel==='Codex')return 'Codex';return t('dshAgent');});
+function formatMessageTime(ts){
+ if(ts===null||ts===undefined||ts===''||typeof ts==='boolean')return '';
+ const raw=typeof ts==='number'?ts:Number(ts);
+ if(Number.isFinite(raw)&&raw<=0)return '';
+ const ms=Number.isFinite(raw)?(raw<1e12&&raw>1e9?raw*1000:raw):Date.parse(String(ts));
+ if(!Number.isFinite(ms)||ms<946684800000)return '';
+ const d=new Date(ms),now=new Date(),p=n=>String(n).padStart(2,'0');
+ const hm=`${p(d.getHours())}:${p(d.getMinutes())}`;
+ if(d.getFullYear()===now.getFullYear()&&d.getMonth()===now.getMonth()&&d.getDate()===now.getDate())return hm;
+ if(d.getFullYear()===now.getFullYear())return `${p(d.getMonth()+1)}-${p(d.getDate())} ${hm}`;
+ return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${hm}`;
+}
+async function copyMessage(m){
+ const raw=String(m?.text??'');
+ if(!raw)return false;
+ try{
+  if(globalThis.navigator?.clipboard?.writeText){await globalThis.navigator.clipboard.writeText(raw);}
+  copiedSeq.value=m.sequence;
+  clearTimeout(copyTimer);
+  copyTimer=setTimeout(()=>{if(copiedSeq.value===m.sequence)copiedSeq.value=null;},1600);
+  return true;
+ }catch{return false;}
+}
+function scrollToBottom(){
+ chatScroll.bind(reader.value);chatScroll.bottom();
+ hasNewMessages.value=false;
+ if(reader.value){reader.value.scrollTop=reader.value.scrollHeight;lastTop=reader.value.scrollTop;}
+}
+const preview=ref(null);let previewScroll=0;
+const visualReelOpen = ref(false);
+function openAssetPreview(path,sequence) {
+  previewScroll = reader.value?.scrollTop || 0;
+  clearTimeout(timer);
+  preview.value = fileAddress(path,sequence);
+}
+const sessionVisualAssets = computed(() => {
+  if (!selected.value || !displayMessages.value?.length) return [];
+  const assetsMap = new Map();
+  const fileRegex = /(?:!?\[([^\]]*)\]\(([^)]+)\)|`([^`]+)`|([a-zA-Z0-9_\-./\\]+\.(?:png|jpe?g|webp|svg|html?))|(\/[^\s`"'<>]+\.(?:png|jpe?g|webp|svg|html?)))/gi;
+  for (const m of history.value?.messages || []) {
+    // Native hosts expose the same observed references used for file reads.
+    if (Array.isArray(m.file_references)) {
+      for (const path of m.file_references) {
+        const ext = path.match(/\.(png|jpe?g|webp|html)$/i)?.[1]?.toLowerCase();
+        if (!ext || assetsMap.has(path)) continue;
+        assetsMap.set(path, {path, messageSequence:m.sequence, name:path.split('/').pop(), ext, isHtml:ext==='html', role:m.role});
+      }
+      continue;
+    }
+    const text = m.text || '';
+    let match;
+    while ((match = fileRegex.exec(text)) !== null) {
+      const candidate = match[2] || match[3] || match[4] || match[5];
+      if (!candidate) continue;
+      const clean = candidate.trim().split('#')[0].split('?')[0];
+      const extMatch = clean.match(/\.(png|jpe?g|webp|svg|html?)$/i);
+      if (extMatch) {
+        const ext = extMatch[1].toLowerCase();
+        const isHtml = ext === 'html' || ext === 'htm';
+        const name = clean.split('/').pop().split('\\').pop();
+        if (!assetsMap.has(clean)) {
+          assetsMap.set(clean, {
+            path: clean,
+            messageSequence: m.sequence,
+            name: (match[1] && !match[1].startsWith('http')) ? match[1] : name,
+            ext,
+            isHtml,
+            role: m.role
+          });
+        }
+      }
+    }
+  }
+  return Array.from(assetsMap.values());
+});
+const fileCache=createPersistentPreviewCache((a,known)=>kernelBridge.dshPreview(a.connectionId,a.sessionId,a.path,known,a.messageSequence));
+const fileAddress=(path,messageSequence=null)=>({messageSequence,connectionId:connection.value,sessionId:selected.value.id,endpoint:nodes.value.find(n=>n.id===connection.value)?.baseUrl||nodes.value.find(n=>n.id===connection.value)?.url||'',path:artifactPath(path),cursor:history.value?.cursor});
+let artifactQueue=[],artifactTimer,artifactRunning=false,artifactCount=0;
+async function drainArtifacts(){if(artifactRunning||disposed)return;artifactQueue=artifactQueue.filter(x=>x.visible());artifactQueue.sort((a,b)=>b.element.getBoundingClientRect().top-a.element.getBoundingClientRect().top);const item=artifactQueue.shift();if(!item||artifactCount>=6)return;artifactCount++;artifactRunning=true;try{await item.run()}finally{artifactRunning=false;artifactTimer=setTimeout(drainArtifacts,150)}}
+provide('dshArtifacts',{peek:(path,seq)=>fileCache.peek(fileAddress(path,seq)),get:(path,seq)=>fileCache.get(fileAddress(path,seq)),enqueue:item=>{if(!artifactQueue.some(x=>x.element===item.element))artifactQueue.push(item);clearTimeout(artifactTimer);artifactTimer=setTimeout(drainArtifacts,250)}});
+provide('dshPreviewGet',async(a,onUpdate)=>{
+ const cached=await fileCache.peek(a);
+ if(!cached)return fileCache.get(a);
+ // Return the saved view immediately, then verify its complete resource version.
+ setTimeout(()=>fileCache.get(a,{force:true}).then(f=>onUpdate?.(f)).catch(()=>{}),0);
+ return {...cached,from_cache:true};
+});
+async function closePreview(){preview.value=null;await nextTick();if(reader.value){reader.value.scrollTop=previewScroll;lastTop=previewScroll;}clearTimeout(timer);timer=setTimeout(refresh,60000)}
+provide('dshOpenFile',(path,seq)=>{previewScroll=reader.value?.scrollTop||0;clearTimeout(timer);preview.value=fileAddress(path,seq)});
+let generation=0, disposed=false, restoring=false, timer;
+const nodes=computed(()=>props.nodes.filter(n=>n.enabled!==false));
+const historyKey=()=>readingKey(connection.value,'history',nodes.value.find(n=>n.id===connection.value)?.baseUrl||nodes.value.find(n=>n.id===connection.value)?.url||'',selected.value?.id);
+function saveHistory(){if(!history.value)return;const {pending_questions,question_source,...cacheable}=history.value;const messages=history.value.messages.slice(-10);const h={...cacheable,messages,before:messages[0]?.sequence??history.value.before,has_more:history.value.has_more||history.value.messages.length>10};void readingCache.put(historyKey(),h)}
+const key=()=>`bob-dsh:${connection.value}:${selected.value?.id || ''}`;
+function readState(){try{return JSON.parse(localStorage.getItem(key()) || '{}')}catch{return {}}}
+function persist(){if(restoring || !selected.value)return false;try{localStorage.setItem(key(),JSON.stringify({draft:draft.value,pending:pending.value}));return true}catch{error.value=t('dshStorageError');return false}}
+watch(draft,persist,{flush:'sync'});
+const isListening=ref(false);
+let speechRec=null;
+function toggleVoiceInput(){
+ if(isListening.value){stopVoiceInput();return;}
+ const SR=globalThis.SpeechRecognition||globalThis.webkitSpeechRecognition;
+ if(!SR){notice.value=t('voiceInputUnsupported');return;}
+ try{
+  const rec=new SR();
+  rec.continuous=false;
+  rec.interimResults=false;
+  rec.lang=globalThis.navigator?.language||'zh-CN';
+  rec.onstart=()=>{isListening.value=true;};
+  rec.onresult=e=>{
+   const text=Array.from(e.results).map(r=>r[0]?.transcript||'').join('');
+   if(text){draft.value=draft.value?`${draft.value} ${text}`:text;persist();}
+  };
+  rec.onerror=e=>{isListening.value=false;if(e.error!=='no-speech')notice.value=t('voiceInputError');};
+  rec.onend=()=>{isListening.value=false;speechRec=null;};
+  speechRec=rec;
+  rec.start();
+ }catch{isListening.value=false;notice.value=t('voiceInputUnsupported');}
+}
+function stopVoiceInput(){if(speechRec){try{speechRec.stop();}catch{}speechRec=null;}isListening.value=false;}
+
+const archivedSessionIds=ref(new Set());
+try{
+ const raw=localStorage?.getItem?.('bob-dsh-archived-sessions');
+ if(raw){const arr=JSON.parse(raw);if(Array.isArray(arr))archivedSessionIds.value=new Set(arr);}
+}catch{}
+function toggleArchiveSession(id,e){
+ e?.stopPropagation?.();
+ const next=new Set(archivedSessionIds.value);
+ if(next.has(id))next.delete(id);else next.add(id);
+ archivedSessionIds.value=next;
+ try{localStorage?.setItem?.('bob-dsh-archived-sessions',JSON.stringify([...next]));}catch{}
+}
+const searchMatches=ref(new Map());
+let searchTimer=null;
+watch([search,connection],async([q,conn])=>{
+ clearTimeout(searchTimer);
+ if(!q?.trim()||!conn){searchMatches.value=new Map();return;}
+ searchTimer=setTimeout(async()=>{
+  try{
+   const matches=await readingCache.findMatches(connectionPrefix(conn),q);
+   const map=new Map();
+   for(const m of matches){if(m.sessionId)map.set(m.sessionId,m.snippet);}
+   searchMatches.value=map;
+  }catch{}
+ },120);
+});
+
+const groups=computed(()=>{
+ const map=new Map();
+ for(const s of sessions.value){
+  if(archivedSessionIds.value.has(s.id))continue;
+  if(isTestOrScratchSession(s))continue;
+  const q=search.value.trim().toLocaleLowerCase();
+  const textMatch=!q || `${s.title} ${s.workspace || ''}`.toLocaleLowerCase().includes(q) || searchMatches.value.has(s.id);
+  if(!textMatch)continue;
+  const k=typeof s.workspace==='string' && s.workspace ? s.workspace : t('dshNoWorkspace');
+  if(!map.has(k))map.set(k,[]);map.get(k).push(s);
+ }
+ return [...map].map(([name,items])=>({name,items}));
+});
+const testList=computed(()=>{
+ const list=[];
+ for(const s of sessions.value){
+  if(archivedSessionIds.value.has(s.id))continue;
+  if(!isTestOrScratchSession(s))continue;
+  const q=search.value.trim().toLocaleLowerCase();
+  const textMatch=!q || `${s.title} ${s.workspace || ''}`.toLocaleLowerCase().includes(q) || searchMatches.value.has(s.id);
+  if(!textMatch)continue;
+  list.push(s);
+ }
+ return list;
+});
+const archivedList=computed(()=>{
+ const list=[];
+ for(const s of sessions.value){
+  if(!archivedSessionIds.value.has(s.id))continue;
+  const q=search.value.trim().toLocaleLowerCase();
+  const textMatch=!q || `${s.title} ${s.workspace || ''}`.toLocaleLowerCase().includes(q) || searchMatches.value.has(s.id);
+  if(!textMatch)continue;
+  list.push(s);
+ }
+ return list;
+});
+
+const inSessionSearchOpen=ref(false);
+const inSessionSearchQuery=ref('');
+function toggleInSessionSearch(){
+ inSessionSearchOpen.value=!inSessionSearchOpen.value;
+ if(!inSessionSearchOpen.value)inSessionSearchQuery.value='';
+}
+const filteredDisplayMessages=computed(()=>{
+ const q=inSessionSearchQuery.value.trim().toLocaleLowerCase();
+ if(!q)return displayMessages.value;
+ return displayMessages.value.filter(m=>String(m.text||'').toLocaleLowerCase().includes(q));
+});
+function fault(e){const code=String(e?.message || e);if(code.includes('TOOL_DISABLED'))return t('toolPolicyDisabled');if(code.includes('AGY_'))return t('agyHistoryPending');return `${t(code.includes('DSH_RECEIPT_UNKNOWN')?'dshUncertain':code.includes('DSH_HISTORY_TOO_LARGE')?'dshHistoryTooLarge':code.includes('DSH_HISTORY_TIMEOUT')?'dshHistoryTimeout':code.includes('DSH_HISTORY_UNAVAILABLE')?'dshHistoryUnavailable':'dshError')} · ${code.match(/DSH_[A-Z_]+/)?.[0] || 'DSH_UNAVAILABLE'}`}
+async function load(){resetDshStop();dshQuestionView.value=null;const g=++generation;clearTimeout(timer);busy.value=true;error.value='';selected.value=null;history.value=null;sessions.value=[];try{const items=await kernelBridge.dshList(connection.value);if(g===generation&&!disposed)sessions.value=items;}catch(e){if(g===generation)error.value=fault(e)}finally{if(g===generation)busy.value=false}}
+watch(connection,()=>{if(connection.value&&!props.target)load()});
+function validatePage(h,id){if(h.address.session_id!==id||h.address.connection_id!==connection.value||!Number.isSafeInteger(h.cursor)||!Number.isSafeInteger(h.before)||!Array.isArray(h.messages))throw Error('DSH_IDENTITY_MISMATCH')}
+function combine(old,h){if(h.history_snapshot)return h;const map=new Map((old?.messages||[]).map(m=>[m.sequence,m]));for(const m of h.messages)map.set(m.sequence,m);const replacements=[...(old?.replacements||[]),...(h.replacements||[])];for(const op of replacements)for(const seq of map.keys())if(seq>=op.startSeq&&seq<=op.endSeq)map.delete(seq);return {...h,messages:[...map.values()].sort((a,b)=>a.sequence-b.sequence),replacements,workspace:h.workspace||old?.workspace,terminal_holder:h.terminal_holder!==undefined?h.terminal_holder:old?.terminal_holder,bob_holder:h.bob_holder!==undefined?h.bob_holder:old?.bob_holder}}
+let olderRequested=false;
+async function refresh(){if(!canReadOrResume(selected.value)){error.value=t(selected.value?.historyReason==='AGY_HISTORY_NOT_LOCAL'?'agyHistoryNotLocal':'agyHistoryPending');return;}
+ if(!selected.value||busy.value||loadingOlder.value||preview.value)return;
+ clearTimeout(timer);const g=generation,id=selected.value.id;busy.value=true;
+ clearTimeout(syncTimer);syncStatus.value='checking';emitTopbarPhase('checking');
+ try{
+  const native=isNativeId(id);
+  const h=await kernelBridge.dshPage(connection.value,id,null,null,(native||checkedDshQuestions)?history.value?.cursor??null:null);validatePage(h,id);
+  if(g!==generation||disposed||preview.value)return;
+  if(!native){
+   observeDshQuestions(h);checkedDshQuestions=true;
+   const key=`${connection.value||''}:${id}`;
+   if(typeof h.approval_mode==='string'&&APPROVAL_MODES.includes(h.approval_mode)&&!sessionApprovalOverrides.value[key]){
+    if(h.approval_mode==='full_auto'||h.approval_mode==='read_only'||approvalMode.value!=='full_auto'){
+     sessionApprovalOverrides.value={...sessionApprovalOverrides.value,[key]:h.approval_mode};
+    }
+   }
+  }
+  await refreshActivity(g,id);if(g!==generation||disposed)return;
+  if(h.request_results?.some(r=>r.request_id===awaitingReply.value&&['completed','error','blocked','cancelled'].includes(r.status))){awaitingReply.value=null;replying.value=false;}
+  if(h.terminal_holder!==undefined){terminalHolderOverride.value=null;if(history.value)history.value={...history.value,terminal_holder:h.terminal_holder};}
+  if(h.bob_holder!==undefined){bobHolderOverride.value=null;if(history.value)history.value={...history.value,bob_holder:h.bob_holder};}
+  if(h.not_modified){
+   error.value='';
+   if(syncStatus.value==='checking'){syncStatus.value='synced';clearTimeout(syncTimer);syncTimer=setTimeout(()=>{if(syncStatus.value==='synced')syncStatus.value='';},1800);}
+   return;
+  }
+  const first=history.value===null,prevCursor=history.value?.cursor??-1;let additions=h;
+  if(!first&&(h.messages.length>0||h.cursor>prevCursor)){syncStatus.value='syncing';}
+  if(!first&&awaitingReply.value&&h.messages.some(m=>m.role==='assistant'&&m.sequence>prevCursor)){replying.value=true;}
+  if(!first&&notice.value===t('dshAccepted')&&h.messages.some(m=>m.role==='assistant'&&m.sequence>prevCursor))notice.value='';
+  // Catch up a burst without losing messages between the old cursor and latest page.
+  for(let n=0;!first&&additions.before>history.value.cursor+1&&additions.has_more;n++){
+   if(n>=32)throw Error('DSH_PAGE_CATCHUP_REQUIRED');
+   const older=await kernelBridge.dshPage(connection.value,id,additions.before,h.cursor);validatePage(older,id);
+   if(g!==generation||disposed||preview.value)return;
+   if(older.before>=additions.before)throw Error('DSH_PAGE_NO_PROGRESS');
+   additions={...combine(older,additions),before:older.before,has_more:older.has_more};
+  }
+  const el=reader.value,follow=first||(el&&el.scrollHeight-el.scrollTop-el.clientHeight<80);
+  const deltaAdded=!first&&(additions.history_snapshot?JSON.stringify(additions.messages)!==JSON.stringify(history.value.messages):additions.messages.some(m=>m.sequence>prevCursor));
+  history.value=first||additions.history_snapshot?additions:{...combine(history.value,additions),before:history.value.before,has_more:history.value.has_more};error.value='';
+  if(!first&&deltaAdded&&(replying.value||awaitingReply.value||nodeActivity.value?.running)){
+   const lastAsst=[...(history.value?.messages||[])].reverse().find(m=>m.role!=='user'&&m.sequence>prevCursor);
+   if(lastAsst)streamSeq.value=lastAsst.sequence;
+  }
+  if(!first){
+   if(!follow&&deltaAdded)hasNewMessages.value=true;
+   else if(follow)hasNewMessages.value=false;
+   syncStatus.value='synced';clearTimeout(syncTimer);syncTimer=setTimeout(()=>{if(syncStatus.value==='synced')syncStatus.value='';},1800);
+  }
+  if(first||deltaAdded){emitTopbarPhase('syncing');clearTimeout(syncPulseTimer);syncPulseTimer=setTimeout(()=>emitTopbarPhase(),700);}else{emitTopbarPhase();}
+  await nextTick();if(g===generation&&!disposed&&follow&&chatScroll.following&&reader.value)scrollToBottom();
+  lastTop=reader.value?.scrollTop||0;saveHistory();
+ }catch(e){if(g===generation){error.value=fault(e);nodeActivity.value=null;if(history.value!==null){clearTimeout(syncTimer);syncStatus.value='offline_cached';}}}finally{if(g===generation){busy.value=false;const pollMs=(dshStop.value||dshQuestionBlocking.value||awaitingReply.value||replying.value||nodeActivity.value?.running)?1800:/^(agy|claude-jsonl|codex|pi):/.test(id)?5000:60000;if(olderRequested&&reader.value?.scrollTop<=24){olderRequested=false;loadOlder()}else{olderRequested=false;timer=setTimeout(refresh,pollMs)}}}
+}
+async function loadOlder(){
+ if(!history.value?.has_more||loadingOlder.value||busy.value||preview.value)return;
+ chatScroll.hold();const g=generation,id=selected.value.id,before=history.value.before;loadingOlder.value=true;clearTimeout(timer);
+ try{
+  const pageKey=readingKey(connection.value,'page',nodes.value.find(n=>n.id===connection.value)?.baseUrl||nodes.value.find(n=>n.id===connection.value)?.url||'',id,before,history.value.cursor);
+  const cached=await readingCache.get(pageKey);if(g!==generation||disposed)return;
+  const h=cached||await kernelBridge.dshPage(connection.value,id,before,history.value.cursor);validatePage(h,id);
+  if(g!==generation||disposed||preview.value)return;
+  if(h.has_more&&h.before>=before)throw Error('DSH_PAGE_NO_PROGRESS');
+  void readingCache.put(pageKey,h);
+  const el=reader.value, height=el?.scrollHeight||0,top=el?.scrollTop||0;
+  history.value={...combine(h,history.value),before:h.before,has_more:h.has_more};error.value='';
+  await nextTick();if(g===generation&&reader.value){reader.value.scrollTop=top+reader.value.scrollHeight-height;lastTop=reader.value.scrollTop;chatScroll.measure();}
+ }catch(e){if(g===generation)error.value=fault(e)}finally{if(g===generation){loadingOlder.value=false;timer=setTimeout(refresh,60000)}}
+}
+function onScroll(){chatScroll.bind(reader.value);chatScroll.scroll();const el=reader.value,top=el?.scrollTop||0;const upwards=top<lastTop;lastTop=top;if(el&&el.scrollHeight-top-el.clientHeight<80)hasNewMessages.value=false;if(upwards&&top<=24){if(busy.value)olderRequested=true;else loadOlder()}else if(top>24)olderRequested=false}
+async function forceRefresh(){if(!selected.value){if(connection.value)return load();return;}clearTimeout(timer);activityChecked=0;error.value='';if(pending.value&&!sending.value)return checkReceipt();await refresh();}
+function onReaderTouchStart(e){if(!selected.value)return;const el=reader.value,atBottom=!el||(el.scrollHeight-el.scrollTop-el.clientHeight<=16);touchStartY=atBottom?(e?.touches?.[0]?.clientY??null):null;pullUpDistance.value=0;}
+function onReaderTouchMove(e){if(touchStartY===null||!selected.value)return;const y=e?.touches?.[0]?.clientY;if(typeof y!=='number')return;const delta=touchStartY-y,el=reader.value,atBottom=!el||(el.scrollHeight-el.scrollTop-el.clientHeight<=20);if(delta>8&&atBottom)pullUpDistance.value=Math.min(72,Math.round((delta-8)*0.75));else if(delta<=0)pullUpDistance.value=0;}
+function onReaderTouchEnd(){const dist=pullUpDistance.value;touchStartY=null;pullUpDistance.value=0;if(dist>=36)void forceRefresh();}
+function onReaderWheel(e){if(!selected.value||!(e?.deltaY>24))return;const el=reader.value,atBottom=!el||(el.scrollHeight-el.scrollTop-el.clientHeight<=8);if(!atBottom){wheelOverscroll=0;return;}wheelOverscroll+=e.deltaY;clearTimeout(wheelResetTimer);wheelResetTimer=setTimeout(()=>{wheelOverscroll=0;},450);if(wheelOverscroll>=140){wheelOverscroll=0;void forceRefresh();}}
+function openFilePicker(){fileInput.value?.click?.();}
+function isTextAttachment(f){const m=String(f?.type||'').toLowerCase(),n=String(f?.name||'').toLowerCase();if(m.startsWith('image/')||m.startsWith('audio/')||m.startsWith('video/')||m==='application/pdf'||m==='application/zip')return false;if(m.startsWith('text/')||m.includes('json')||m.includes('yaml')||m.includes('xml')||m.includes('javascript'))return true;return /\.(txt|md|json|ya?ml|csv|tsv|py|rs|js|mjs|cjs|ts|tsx|jsx|vue|html|css|scss|sh|bat|ps1|toml|ini|cfg|log|sql|gd|tscn)$/i.test(n);}
+function bytesToBase64(bytes){let bin='';const chunk=0x8000;for(let i=0;i<bytes.length;i+=chunk){bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+chunk));}return btoa(bin);}
+const CHUNK_UPLOAD_THRESHOLD = 256 * 1024;
+const CHUNK_UPLOAD_BYTES = 1024 * 1024;
+const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+
+function updateAttachmentItem(id, patch) {
+  attachments.value = attachments.value.map(a => (a.id === id ? { ...a, ...patch } : a));
+}
+
+async function uploadAttachmentToNode(attId, file, name, type) {
+  if (!file || !connection.value || !kernelBridge.attachmentUploadChunk || !kernelBridge.attachmentFinalize) return;
+  const totalSize = file.size || 0;
+  if (totalSize <= 0 || totalSize > MAX_ATTACHMENT_BYTES) {
+    updateAttachmentItem(attId, { status: 'error' });
+    return;
+  }
+  const uploadId = `up_${crypto.randomUUID().replace(/-/g, '')}`;
+  const totalChunks = Math.max(1, Math.ceil(totalSize / CHUNK_UPLOAD_BYTES));
+  updateAttachmentItem(attId, { status: 'uploading', progress: 0, uploadId: '' });
+  try {
+    const ab = await file.arrayBuffer();
+    const bytes = new Uint8Array(ab);
+    for (let idx = 0; idx < totalChunks; idx++) {
+      const start = idx * CHUNK_UPLOAD_BYTES;
+      const slice = bytes.subarray(start, Math.min(bytes.length, start + CHUNK_UPLOAD_BYTES));
+      await kernelBridge.attachmentUploadChunk({
+        connectionId: connection.value,
+        uploadId,
+        chunkIndex: idx,
+        totalChunks,
+        totalSize: bytes.length,
+        name,
+        type,
+        dataBase64: bytesToBase64(slice),
+      });
+      updateAttachmentItem(attId, { progress: Math.round(((idx + 1) / totalChunks) * 100) });
+    }
+    const fin = await kernelBridge.attachmentFinalize({
+      connectionId: connection.value,
+      uploadId,
+      totalChunks,
+      name,
+      type,
+    });
+    updateAttachmentItem(attId, {
+      status: 'staged',
+      progress: 100,
+      uploadId: fin?.upload_id || uploadId,
+      sha256: fin?.sha256 || '',
+      base64: '',
+    });
+  } catch {
+    updateAttachmentItem(attId, { status: 'error' });
+  }
+}
+
+function retryAttachmentUpload(att) {
+  if (att?.file) void uploadAttachmentToNode(att.id, att.file, att.name, att.type);
+}
+
+async function readAttachmentBase64(f){if(!f||(f.size||0)>8*1024*1024)return '';try{if(String(f.type||'').startsWith('image/')&&(f.size||0)>1024*1024&&typeof createImageBitmap==='function'&&typeof document!=='undefined'){const bmp=await createImageBitmap(f);const maxSide=Math.max(bmp.width||1,bmp.height||1);const scale=maxSide>1920?1920/maxSide:1;const w=Math.max(1,Math.round(bmp.width*scale)),h=Math.max(1,Math.round(bmp.height*scale));const c=document.createElement('canvas');c.width=w;c.height=h;const ctx2d=c.getContext('2d');if(ctx2d){ctx2d.drawImage(bmp,0,0,w,h);const outMime=f.type==='image/png'?'image/png':'image/jpeg';const dataUrl=c.toDataURL(outMime,0.86);const idx=dataUrl.indexOf(',');if(idx>0)return dataUrl.slice(idx+1);}}if(typeof f.arrayBuffer==='function'){const ab=await f.arrayBuffer();return bytesToBase64(new Uint8Array(ab));}}catch{}return '';}
+async function appendFilesToAttachments(fileList){
+  const files=Array.from(fileList||[]);
+  for(const f of files){
+    if((f.size||0)>MAX_ATTACHMENT_BYTES)continue;
+    let content='',base64='';
+    const name=f.name||`attachment_${Date.now()}`;
+    const type=f.type||'';
+    const useChunked=Boolean(connection.value && kernelBridge.attachmentUploadChunk && kernelBridge.attachmentFinalize && (f.size||0)>CHUNK_UPLOAD_THRESHOLD);
+    const thumbUrl=type.startsWith('image/')&&typeof URL!=='undefined'&&typeof URL.createObjectURL==='function'?URL.createObjectURL(f):'';
+    try{
+      if(isTextAttachment(f)&&typeof f.text==='function'&&(f.size||0)<=256*1024)content=await f.text();
+      if(!useChunked)base64=await readAttachmentBase64(f);
+    }catch{}
+    const id=crypto.randomUUID();
+    attachments.value.push({id,name,size:f.size||0,type,content,base64,thumbUrl,file:f,status:useChunked?'uploading':'ready',progress:useChunked?0:100,uploadId:'',sha256:''});
+    if(useChunked)void uploadAttachmentToNode(id,f,name,type);
+  }
+}
+async function onFilesSelected(e){await appendFilesToAttachments(e?.target?.files);if(e?.target)e.target.value='';}
+async function onComposerPaste(e){const items=Array.from(e?.clipboardData?.items||[]);const fileItems=items.filter(it=>it.kind==='file').map(it=>it.getAsFile()).filter(Boolean);if(fileItems.length>0){e.preventDefault();await appendFilesToAttachments(fileItems);}}
+async function onComposerDrop(e){const files=Array.from(e?.dataTransfer?.files||[]);if(files.length>0){e.preventDefault();await appendFilesToAttachments(files);}}
+function onQuoteToPrompt({path, name}){
+  preview.value=null;
+  const cleanName=name||path?.split('/')?.pop()||'image';
+  const quoteText=`请基于此图 [Attachment: ${cleanName} -> ${path}] 调整：`;
+  draft.value=draft.value?`${draft.value}\n\n${quoteText}`:quoteText;
+  nextTick(()=>{
+    if(typeof document!=='undefined'){
+      const el=document.querySelector('.dsh-compose-box textarea');
+      if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}
+    }
+  });
+}
+function removeAttachment(id){attachments.value=attachments.value.filter(a=>a.id!==id);}
+function formatAttachmentBlock(list){if(!list?.length)return '';return list.map(a=>a.content?`[Attachment: ${a.name}]\n\`\`\`\n${String(a.content).slice(0,16384)}\n\`\`\``:`[Attachment: ${a.name} (${a.size||0} bytes)]`).join('\n\n');}
+function onComposeKeydown(e){if(e?.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();void send();}}
+globalThis.__bobForceRefreshDsh=forceRefresh;
+async function open(s){resetDshStop();checkedDshQuestions=false;dshQuestionView.value=null;answeredDshCallIds.value={};dshQuestionDrafts.value={};dshQuestionBusy.value={};dshQuestionErrors.value={};inSessionSearchOpen.value=false;inSessionSearchQuery.value='';approvalErrors.value={};pendingDecision.value=null;pendingPermissionElevation.value=null;switchingPermissionMode.value=false;cancelRequest.value=null;cancelBusy.value=false;takeoverPrompt.value=null;terminalHolderOverride.value=null;bobHolderOverride.value=null;handoffCardOpen.value=false;releasingHolder.value=false;copiedCliCmd.value=false;chatScroll.reset();clearTimeout(dshLiveTimer);dshLiveState.value=null;dshReadCursor=-1;clearTimeout(nativeTimer);nativeCursor=0;nativeEpoch='';nativeDrafts.value={};nodeActivity.value=null;awaitingReply.value=null;replying.value=false;hasNewMessages.value=false;streamSeq.value=null;syncStatus.value='';pullUpDistance.value=0;attachments.value=[];clearTimeout(syncTimer);activityChecked=0;olderRequested=false;artifactQueue=[];artifactCount=0;persist();++generation;clearTimeout(timer);busy.value=false;loadingOlder.value=false;lastTop=0;selected.value=s;history.value=null;notice.value='';loadSessionModelPrefs();loadAckUnknownIds();const saved=readState();restoring=true;draft.value=saved.draft||'';pending.value=saved.pending||null;restoring=false;if(pending.value)notice.value=t('dshUncertain');const g=generation;const cached=await readingCache.get(historyKey());if(g!==generation||disposed)return;if(cached){try{validatePage(cached,s.id);history.value=cached;syncStatus.value='checking';await nextTick();if(reader.value)reader.value.scrollTop=reader.value.scrollHeight;lastTop=reader.value?.scrollTop||0;}catch{}}if(!canReadOrResume(s)){error.value=t(s.historyReason==='AGY_HISTORY_NOT_LOCAL'?'agyHistoryNotLocal':'agyHistoryPending');return;}await refresh();void refreshNativeEvents();void refreshDshLive()}
+function back(){resetDshStop();dshQuestionView.value=null;answeredDshCallIds.value={};dshQuestionDrafts.value={};dshQuestionBusy.value={};dshQuestionErrors.value={};inSessionSearchOpen.value=false;inSessionSearchQuery.value='';pendingPermissionElevation.value=null;switchingPermissionMode.value=false;takeoverPrompt.value=null;terminalHolderOverride.value=null;bobHolderOverride.value=null;handoffCardOpen.value=false;releasingHolder.value=false;copiedCliCmd.value=false;clearTimeout(dshLiveTimer);dshLiveState.value=null;clearTimeout(nativeTimer);persist();++generation;clearTimeout(timer);clearTimeout(syncTimer);busy.value=false;selected.value=null;history.value=null;syncStatus.value='';hasNewMessages.value=false;notice.value='';load()}
+async function checkReceipt(){
+ if(!pending.value || sending.value)return;
+ const g=generation,p= pending.value; sending.value=true;
+ try{const receipt=await kernelBridge.dshReceipt(connection.value,selected.value.id,p.text,p.id);
+ if(g!==generation||disposed)return;
+ if(isNotAcceptedReceipt(receipt,selected.value.id,p.id)){pending.value=null;persist();error.value='';notice.value=t('dshNotDispatched');}
+ else if(receipt.status==='accepted' && receipt.session_id===selected.value.id && receipt.request_id===p.id){
+ pending.value=null;if(draft.value.trim()===p.text)draft.value='';persist();error.value='';notice.value=t('dshAccepted');
+ }else{notice.value=t('dshReceiptStillUnknown');}
+ }catch(e){if(g===generation)error.value=fault(e)}finally{sending.value=false;if(g===generation&&!busy.value)refresh()}
+}
+function dismissPending(){if(!pending.value||sending.value)return;if(!draft.value.trim()&&pending.value.text)draft.value=pending.value.text;pending.value=null;notice.value='';error.value='';persist();void dismissNativeUnresolved();}
+function sendResumePrompt(){if(!draft.value.trim())draft.value=t('agyResumeDefaultPrompt');void send();}
+async function fillResumePrompt(){if(!draft.value.trim())draft.value=t('agyResumeDefaultPrompt');await nextTick();composerInput.value?.focus?.();}
+async function send(opts={}){
+  const takeover=opts?.takeover===true;
+  if(!canReadOrResume(selected.value)){error.value=t('agyHistoryPending');return;}
+  if(isRemoteProtected.value){notice.value=t(remoteProtectedTitleKey.value);return;}
+  const attBlock=formatAttachmentBlock(attachments.value);
+  const text=[draft.value.trim(),attBlock].filter(Boolean).join('\n\n');
+  if(sending.value||pending.value||nativeUnresolved.value||dshQuestionBlocking.value||dshStop.value||!text)return;
+  if(!takeover&&isExternalHolderBusy.value){
+    takeoverPrompt.value=activeTerminalHolder.value||{busy:true,remote_control:false,harness:holderHarness.value,mode:holderMode.value};
+    return;
+  }
+  const g=generation, address={connection:connection.value,session:selected.value.id};
+  const attPayload=attachments.value.filter(a=>a.uploadId||a.base64).map(a=>a.uploadId?{name:a.name,type:a.type,size:a.size,uploadId:a.uploadId,sha256:a.sha256}:{name:a.name,type:a.type,size:a.size,base64:a.base64});
+  pending.value={id:crypto.randomUUID(),text};
+  if(!persist()){pending.value=null;return;}
+  sending.value=true;error.value='';
+  try{
+    const requestId=pending.value.id;
+    const receipt=await kernelBridge.dshPrompt(address.connection,address.session,text,requestId,attPayload,{takeover,approvalMode:supportsApprovalMode.value?effectiveApprovalMode.value:null,workspace:selected.value?.workspace||history.value?.workspace||null,model:selectedModel.value||null,reasoningEffort:selectedEffort.value||null});
+    if(isNotAcceptedReceipt(receipt,address.session,requestId)){
+      if(g===generation){
+        pending.value=null;persist();
+        if(receipt?.reason==='HARNESS_CLAUDE_REMOTE_CONTROL'||receipt?.reason==='HARNESS_REMOTE_CONTROL'){
+          const holder=receipt.terminal_holder||{busy:true,remote_control:true,harness:holderHarness.value,mode:holderHarness.value==='agy'?'agy_ide':''};
+          terminalHolderOverride.value=holder;takeoverPrompt.value=null;
+          notice.value=t((holder.harness||holderHarness.value)==='agy'?'agyIdeProtectedTitle':'claudeRemoteControlTitle');
+        }else if(receipt?.reason==='HARNESS_SESSION_BUSY'&&/^(claude-jsonl|codex|agy):/.test(String(address.session||''))){
+          const holder=receipt.terminal_holder||{busy:true,remote_control:false,harness:holderHarness.value,mode:holderMode.value};
+          terminalHolderOverride.value=holder;takeoverPrompt.value=holder;notice.value='';
+        }else{
+          notice.value=t('dshNotDispatched');
+        }
+      }
+      return;
+    }
+    if(receipt?.status!=='accepted'||receipt.session_id!==address.session||receipt.request_id!==requestId)throw Error('DSH_RECEIPT_UNKNOWN');
+    if(g===generation){
+      takeoverPrompt.value=null;terminalHolderOverride.value={busy:false,remote_control:false,harness:holderHarness.value,mode:''};
+      bobHolderOverride.value=null;awaitingReply.value=requestId;replying.value=false;activityChecked=0;pending.value=null;attachments.value=[];
+      if(draft.value.trim()===text||attBlock)draft.value='';persist();notice.value=t('dshAccepted');
+    }
+  }catch(e){
+    if(g===generation){error.value=fault(e);notice.value=t('dshUncertain');}
+  }finally{
+    sending.value=false;if(g===generation&&!busy.value)refresh();
+  }
+}
+watch(()=>props.target, async target=>{if(!target)return;connection.value=target.node.id;await open(target.session)},{immediate:true});
+onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeout(dshLiveTimer);clearTimeout(nativeTimer);if(globalThis.__bobForceRefreshDsh===forceRefresh)globalThis.__bobForceRefreshDsh=null;clearTimeout(syncPulseTimer);if(typeof globalThis.__bobSetRemoteSyncPhase==='function')globalThis.__bobSetRemoteSyncPhase('');if(rodTimer&&typeof clearInterval==='function')clearInterval(rodTimer);clearTimeout(wheelResetTimer);clearTimeout(artifactTimer);clearTimeout(syncTimer);clearTimeout(copyTimer);artifactQueue=[];fileCache.clear();persist();disposed=true;++generation;clearTimeout(timer)});
+</script>
+<template>
+ <DshFilePreview v-if="preview" :address="preview" @close="closePreview" @quote="onQuoteToPrompt" />
+ <section class="dsh-sessions" :class="{embedded:!!target}" :aria-label="t('dshTitle')">
+  <div ref="reader" class="dsh-reader" tabindex="0" @scroll.passive="onScroll" @touchstart.passive="onReaderTouchStart" @touchmove.passive="onReaderTouchMove" @touchend.passive="onReaderTouchEnd" @touchcancel.passive="onReaderTouchEnd" @wheel.passive="onReaderWheel">
+  <div ref="chatContent" data-chat-content>
+  <header v-if="!target"><h3>{{ t('dshTitle') }}</h3><select v-model="connection" :disabled="sending" :aria-label="t('dshChooseNode')"><option value="">{{ t('dshChooseNode') }}</option><option v-for="n in nodes" :key="n.id" :value="n.id">{{ n.label || n.name || n.baseUrl || n.url }}</option></select></header>
+  <p v-if="!target" class="dsh-note">{{ t('dshSource') }}</p>
+  <p v-if="(error || nativeFailureText) && syncStatus!=='offline_cached'" role="alert">{{ error || nativeFailureText }}</p><p v-if="nativeUnresolved" role="status">{{ t('nativeExecutionUnconfirmed') }} <button type="button" @click="dismissNativeUnresolved">{{ t('dshUnlockEdit') }}</button></p><p v-else-if="notice" role="status">{{ notice }}</p>
+  <template v-if="connection && !selected">
+   <div class="dsh-tools"><input v-model="search" type="search" :placeholder="t('dshSearch')" :aria-label="t('dshSearch')"><button :disabled="busy" @click="load">{{ t('dshRefresh') }}</button></div>
+   <p v-if="busy" class="terminal-status-line" role="status"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ stripDots(t('dshLoading')) }}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
+   <details v-for="group in groups" :key="group.name" :open="!!search"><summary>{{ group.name }} · {{ group.items.length }}</summary><div v-for="s in group.items" :key="s.id" class="dsh-session-item"><button class="dsh-session" @click="open(s)"><strong><HarnessIcon :session="s" class="session-card-icon" />{{ s.title }}</strong><small>{{ s.updated_at ? new Date(s.updated_at).toLocaleString() : t('sidebarTimeUnknown') }} · {{ t(s.running?'dshRunning':'dshIdle') }}</small><small v-if="searchMatches.has(s.id)" class="dsh-search-snippet">“{{ searchMatches.get(s.id) }}”</small></button><button type="button" class="dsh-session-archive-btn" :title="t('dshArchiveSession')" :aria-label="t('dshArchiveSession')" @click.stop="toggleArchiveSession(s.id, $event)"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg></button></div></details>
+   <p v-if="!busy && !groups.length && !archivedList.length && !testList.length">{{ t('dshEmpty') }}</p>
+   <details v-if="testList.length" class="dsh-test-group" :open="!!search"><summary><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2v7.24a4 4 0 0 0 1.25 2.9l5.5 5.5a2.83 2.83 0 0 1-4 4H7"/><path d="M14 2v4"/><path d="M8.5 2h7"/></svg> {{ t('testAndScratchSessions') }} · {{ testList.length }}</summary><div v-for="s in testList" :key="s.id" class="dsh-session-item test-item"><button class="dsh-session" @click="open(s)"><strong><HarnessIcon :session="s" class="session-card-icon" />{{ s.title }}</strong><small>{{ s.updated_at ? new Date(s.updated_at).toLocaleString() : t('sidebarTimeUnknown') }} · {{ t(s.running?'dshRunning':'dshIdle') }}</small><small v-if="searchMatches.has(s.id)" class="dsh-search-snippet">“{{ searchMatches.get(s.id) }}”</small></button><button type="button" class="dsh-session-archive-btn" :title="t('dshArchiveSession')" :aria-label="t('dshArchiveSession')" @click.stop="toggleArchiveSession(s.id, $event)"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg></button></div></details>
+   <details v-if="archivedList.length" class="dsh-archived-group" :open="!!search"><summary>{{ t('dshArchivedSessions') }} · {{ archivedList.length }}</summary><div v-for="s in archivedList" :key="s.id" class="dsh-session-item archived"><button class="dsh-session" @click="open(s)"><strong><HarnessIcon :session="s" class="session-card-icon" />{{ s.title }}</strong><small>{{ s.updated_at ? new Date(s.updated_at).toLocaleString() : t('sidebarTimeUnknown') }} · {{ t(s.running?'dshRunning':'dshIdle') }}</small><small v-if="searchMatches.has(s.id)" class="dsh-search-snippet">“{{ searchMatches.get(s.id) }}”</small></button><button type="button" class="dsh-session-unarchive-btn" :title="t('dshUnarchiveSession')" :aria-label="t('dshUnarchiveSession')" @click.stop="toggleArchiveSession(s.id, $event)">{{ t('dshUnarchiveSession') }}</button></div></details>
+  </template>
+  <template v-if="selected">
+   <div v-if="sessionConfigOpen" class="dsh-session-config-backdrop" @click.self="sessionConfigOpen = false">
+    <div class="dsh-session-config-popover" role="dialog" :aria-label="t('sessionConfigTitle')" @keydown.esc="sessionConfigOpen = false">
+     <div class="dsh-session-config-head">
+      <strong>{{ t('sessionConfigTitle') }}</strong>
+      <button type="button" class="dsh-session-config-done" @click="sessionConfigOpen = false">{{ t('sessionConfigDone') }}</button>
+     </div>
+     <div class="dsh-session-config-row">
+      <label class="dsh-session-config-label">{{ t('sessionRenameLabel') }}</label>
+      <input
+        v-model="customSessionTitle"
+        type="text"
+        class="dsh-session-config-input"
+        :placeholder="selected.title || t('sessionRenamePlaceholder')"
+        @change="saveCustomSessionTitle"
+        @blur="saveCustomSessionTitle"
+        @keydown.enter.prevent="saveCustomSessionTitle(); sessionConfigOpen = false"
+      />
+     </div>
+     <div v-if="supportsApprovalMode" class="dsh-session-config-row">
+      <label class="dsh-session-config-label">{{ t('permissionModeLabel') }}</label>
+      <CustomSelect
+        :model-value="effectiveApprovalMode"
+        class="dsh-permission-mode-select dsh-config-select"
+        :options="permissionModeOptions"
+        :disabled="sending || switchingPermissionMode || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl"
+        :aria-label="t('permissionModeLabel')"
+        @update:model-value="onSelectApprovalMode"
+      />
+     </div>
+     <div v-if="supportsModelOverride" class="dsh-session-config-row">
+      <label class="dsh-session-config-label">{{ t('sessionModelLabel') }}</label>
+      <CustomSelect
+        :model-value="selectedModel"
+        class="dsh-permission-mode-select dsh-config-select"
+        :options="modelOptions"
+        :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl"
+        :aria-label="t('sessionModelLabel')"
+        @update:model-value="onSelectSessionModel"
+      />
+     </div>
+     <div v-if="supportsEffortOverride" class="dsh-session-config-row">
+      <label class="dsh-session-config-label">{{ t('sessionEffortLabel') }}</label>
+      <CustomSelect
+        :model-value="selectedEffort"
+        class="dsh-permission-mode-select dsh-config-select"
+        :options="effortOptions"
+        :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl"
+        :aria-label="t('sessionEffortLabel')"
+        @update:model-value="onSelectSessionEffort"
+      />
+     </div>
+    </div>
+   </div>
+   <div class="dsh-tools"><button v-if="!target" :disabled="sending" @click="back">{{ t('dshBack') }}</button><h4 v-if="!target"><HarnessIcon :session="selected" class="topbar-harness-icon" />{{ selected.title }}</h4><small v-else><HarnessIcon :session="selected" class="topbar-harness-icon" />{{ target.node.label || target.node.name }} · {{ agentLabel }}</small><span v-if="isExternalHolderBusy" class="dsh-holder-pill" role="status"><span>{{ t(holderBusyBadgeKey, {pid: activeTerminalHolder?.pid || '?'}) }}</span><button type="button" class="dsh-holder-takeover-btn" @click="takeoverPrompt = activeTerminalHolder">{{ t('claudeTakeoverBtn') }}</button></span><span v-if="isBobBackgroundIdleHeld" class="dsh-bob-holder-pill" role="status"><span>{{ t('bobHolderActiveBadge') }}</span><button type="button" class="dsh-bob-release-btn" :disabled="releasingHolder" @click="handoffToTerminal">{{ t('bobHolderReleaseBtn') }}</button></span><button v-if="supportsTerminalHandoff" type="button" class="dsh-terminal-cmd-btn" :class="{active: handoffCardOpen}" @click="handoffCardOpen = !handoffCardOpen">{{ t('terminalHandoffBtn') }}</button><button type="button" class="dsh-search-toggle-btn" :class="{active:inSessionSearchOpen}" :title="t('dshSearchInSession')" :aria-label="t('dshSearchInSession')" @click="toggleInSessionSearch"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></button><button v-if="sessionVisualAssets.length" type="button" class="dsh-visual-reel-toggle-btn" :class="{active: visualReelOpen}" :title="t('visualAssetsCount', {count: sessionVisualAssets.length})" :aria-label="t('visualAssets')" @click="visualReelOpen = !visualReelOpen"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg><span>{{ sessionVisualAssets.length }}</span></button>
+    <span v-if="syncStatus==='offline_cached' && syncStatusLabel" class="dsh-sync-pill" :class="{active:syncStatus==='checking'||syncStatus==='syncing'}" role="status" aria-live="polite"><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ syncStatusLabel }}</span><span v-if="syncStatus==='checking'||syncStatus==='syncing'" class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span></div>
+   <div v-if="visualReelOpen && sessionVisualAssets.length" class="dsh-visual-reel-strip" role="region" :aria-label="t('visualAssets')">
+     <div class="visual-reel-header">
+       <span class="visual-reel-title"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>{{ t('visualAssetsCount', {count: sessionVisualAssets.length}) }}</span>
+       <button type="button" class="visual-reel-close" :aria-label="t('filePreviewClose')" @click="visualReelOpen = false">✕</button>
+     </div>
+     <div class="visual-reel-scroll">
+       <div
+         v-for="asset in sessionVisualAssets"
+         :key="asset.path"
+         class="visual-reel-card-wrap"
+       >
+         <button
+           type="button"
+           class="visual-reel-card"
+           :title="asset.path"
+           @click="openAssetPreview(asset.path,asset.messageSequence)"
+         >
+           <div class="visual-reel-thumb-box">
+             <span v-if="asset.isHtml" class="reel-type-badge html-badge">HTML</span>
+             <span v-else class="reel-type-badge img-badge">{{ asset.ext.toUpperCase() }}</span>
+             <svg v-if="asset.isHtml" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="reel-icon" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+             <svg v-else viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="reel-icon" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+           </div>
+           <span class="visual-reel-name">{{ asset.name }}</span>
+         </button>
+         <button
+           type="button"
+           class="reel-card-quote-btn"
+           :title="t('quoteFeedbackBtn')"
+           :aria-label="t('quoteFeedbackBtn')"
+           @click.stop="onQuoteToPrompt({path: asset.path, name: asset.name})"
+         >
+           <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+         </button>
+       </div>
+     </div>
+   </div>
+   <div v-if="inSessionSearchOpen" class="dsh-session-search-bar"><input v-model="inSessionSearchQuery" type="search" :placeholder="t('dshSearchMessagesPlaceholder')" :aria-label="t('dshSearchMessagesPlaceholder')"><span v-if="inSessionSearchQuery.trim()" class="dsh-search-count">{{ t('dshSearchMatchCount', {count: filteredDisplayMessages.length}) }}</span><button v-if="inSessionSearchQuery" type="button" class="dsh-search-clear" :aria-label="t('dshSearchClear')" @click="inSessionSearchQuery=''">✕</button></div>
+    <div v-if="isRemoteProtected" class="dsh-remote-control-banner" role="status"><strong>{{ t(remoteProtectedTitleKey) }}</strong><p>{{ t(remoteProtectedDescKey, {pid: activeTerminalHolder?.pid || '?'}) }}</p></div>
+    <div v-if="handoffCardOpen && cliResumeCommand" class="dsh-handoff-card" role="region" :aria-label="t('terminalHandoffCardTitle')">
+     <div class="dsh-handoff-head"><strong>{{ t('terminalHandoffCardTitle') }}</strong><button type="button" class="dsh-handoff-close" :aria-label="t('dshSearchClear')" @click="handoffCardOpen = false"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button></div>
+     <p>{{ t('terminalHandoffCardDesc') }}</p>
+     <div class="dsh-handoff-cmd-row"><code>{{ cliResumeCommand }}</code><button type="button" class="dsh-takeover-primary" @click="copyCliResumeCommand"><svg v-if="copiedCliCmd" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg><span>{{ t('copyTerminalCmdBtn') }}</span></button></div>
+    </div>
+    <div v-if="isInterruptedCliSession" class="dsh-interrupted-banner" role="status">
+      <div class="dsh-interrupted-text">
+        <strong>{{ t(selected?.cliInterrupted || history?.cli_interrupted ? 'agyCliInterruptedTitle' : 'agyCliCodecResumeTitle') }}</strong>
+        <p>{{ t(selected?.cliInterrupted || history?.cli_interrupted ? 'agyCliInterruptedDesc' : 'agyCliCodecResumeDesc') }}</p>
+      </div>
+      <div class="dsh-interrupted-actions">
+        <button type="button" class="dsh-takeover-primary" :disabled="sending || !!pending || (!history && !selected?.resumable)" @click="sendResumePrompt">{{ t('agyResumeNowBtn') }}</button>
+        <button type="button" class="dsh-takeover-secondary" :disabled="sending || !!pending" @click="fillResumePrompt">{{ t('agyFillComposerBtn') }}</button>
+      </div>
+    </div>
+   <p class="dsh-note">{{ history?.workspace || t('dshNoWorkspace') }}</p>
+   <p v-if="history?.partial || history?.omitted" class="dsh-note">{{ t('dshPartial') }}</p>
+   <p v-if="busy && !history" class="terminal-status-line" role="status"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ stripDots(t('dshLoading')) }}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
+   <button v-if="history?.has_more" class="dsh-older" :disabled="loadingOlder || busy" @click="loadOlder"><span v-if="loadingOlder" class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span> {{ t(loadingOlder ? 'dshLoading' : 'dshLoadOlder') }}</button>
+   <article v-for="(m, idx) in filteredDisplayMessages" :key="m.sequence" :data-sequence="m.sequence" :data-chat-anchor="String(m.sequence)" class="dsh-message" :class="{user:m.role==='user'}"><div class="dsh-message-meta"><small class="dsh-role"><HarnessIcon v-if="m.role!=='user'" :session="selected" class="role-harness-icon" />{{ m.role==='user'?t('dshYou'):agentLabel }}</small><time v-if="formatMessageTime(m.created_at || m.createdAt || m.timestamp)" class="dsh-time">{{ formatMessageTime(m.created_at || m.createdAt || m.timestamp) }}</time><button type="button" class="dsh-copy-btn" @click="copyMessage(m)">{{ t(copiedSeq===m.sequence?'copied':'copyMessage') }}</button></div><MessageContent :message-sequence="m.sequence" :content="m.text" :thinking-steps="m.thinkingSteps || []" :plain="m.role==='user'" :stream="m.role!=='user' && idx===displayMessages.length-1 && m.sequence===streamSeq" /></article>
+   <p v-if="dshLiveState && dshLiveState.status!=='live'" class="dsh-notice" role="status">{{ t(dshLiveState.status==='connecting'?'dshLiveConnecting':'dshLiveReconnecting') }}</p>
+   <article v-for="m in dshLiveMessages" :key="'dsh-live-'+m.id" :data-chat-anchor="'live-'+m.id" class="dsh-message"><small><HarnessIcon :session="selected" class="role-harness-icon" />{{ agentLabel }}</small><MessageContent :message-sequence="m.sequence" :content="m.text" :stream="m.active" /></article>
+   <article v-for="m in nativeMessages" :key="m.id" :data-chat-anchor="m.id" class="dsh-message"><small><HarnessIcon :session="selected" class="role-harness-icon" />{{ agentLabel }}</small><MessageContent :message-sequence="m.sequence" :content="m.text" :stream="m.active" /></article>
+   <p v-if="inSessionSearchQuery.trim() && !filteredDisplayMessages.length" class="dsh-empty-search" role="status">{{ t('dshSearchNoMatches') }}</p>
+    <NativeActivity v-for="record in nativeActivities" :key="'activity-'+record.id" :activity="record.activity" :busy-permission="busyPermission" :approval-errors="approvalErrors" @decide="(permission,option)=>decidePermission(record.id,permission,option)"/>
+   <div v-if="pullUpDistance > 10" class="pull-up-refresh-hint" :class="{ready: pullUpDistance >= 36}" role="status" aria-live="polite"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span><span>{{ t(pullUpDistance >= 36 ? 'releaseToRefresh' : 'pullUpToRefresh') }}</span></div>
+  </template>
+  </div>
+  </div>
+  <div v-if="selected && (awayFromLatest || hasNewMessages)" class="dsh-new-msg-bar"><button type="button" class="dsh-new-msg-btn" @click="scrollToBottom" :aria-label="t('chatJumpLatest')" :title="t('chatJumpLatest')"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 4v16m-6-6 6 6 6-6"/></svg></button></div>
+  <form v-if="selected" class="dsh-compose" @submit.prevent="send()">
+   <div v-if="takeoverPrompt && !isRemoteProtected" class="dsh-takeover-card" @keydown.esc.stop.prevent="cancelTakeover" role="alertdialog" :aria-label="t(activeTakeoverKeys.title)">
+    <div class="dsh-takeover-body">
+     <strong>{{ t(activeTakeoverKeys.title) }}</strong>
+     <p>{{ t(activeTakeoverKeys.desc, {pid: takeoverPrompt?.pid || '?'}) }}</p>
+    </div>
+    <div class="dsh-takeover-actions">
+     <button type="button" class="dsh-takeover-primary" :disabled="sending" @click="confirmTakeoverSend">{{ t('claudeTakeoverSendBtn') }}</button>
+     <button type="button" class="dsh-takeover-secondary" :disabled="sending" @click="takeoverPrompt = null">{{ t('claudeKeepBoardBtn') }}</button>
+     <button type="button" class="dsh-takeover-secondary" :disabled="sending" @click="cancelTakeover">{{ t('claudeCancelTakeoverBtn') }}</button>
+    </div>
+   </div>
+   <div v-if="pendingPermissionElevation && pendingPermissionElevation.sessionId === selected?.id" class="dsh-takeover-card" @keydown.esc.stop.prevent="cancelPermissionElevation" role="alertdialog" :aria-label="t('permissionElevateConfirmTitle')">
+    <div class="dsh-takeover-body">
+     <strong>{{ t('permissionElevateConfirmTitle') }}</strong>
+     <p>{{ t('permissionElevateConfirmDesc') }}</p>
+    </div>
+    <div class="dsh-takeover-actions">
+     <button type="button" class="dsh-takeover-primary" :disabled="switchingPermissionMode" @click="confirmPermissionElevation">{{ t('permissionElevateConfirmBtn') }}</button>
+     <button type="button" class="dsh-takeover-secondary" :disabled="switchingPermissionMode" @click="cancelPermissionElevation">{{ t('permissionElevateCancelBtn') }}</button>
+    </div>
+   </div>
+   <section v-if="pendingNativeApprovals.length" class="dsh-pending-approval-bar" role="region" aria-live="polite">
+    <div class="dsh-pending-approval-head">
+     <span class="dsh-pending-approval-title-group">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      <strong>{{ t('nativeApprovalBannerTitle', { count: pendingNativeApprovals.length }) }}</strong>
+     </span>
+     <span class="dsh-pending-approval-meta">
+      <small class="dsh-pending-ttl">{{ t('nativeApprovalRemainingMin', { minutes: remainingBarMinutes(pendingNativeApprovals[0].approval) }) }}</small>
+      <button v-if="approvalNotifyPermission === 'default'" type="button" class="dsh-pending-link-btn" @click="enableApprovalAlerts">{{ t('approvalNotifyEnableShort') }}</button>
+      <button type="button" class="dsh-pending-link-btn" @click="scrollToNativeApproval(pendingNativeApprovals[0].approval.permission_id)">{{ t('nativeApprovalJumpCard') }}</button>
+     </span>
+    </div>
+    <p class="dsh-pending-approval-detail">{{ pendingNativeApprovals[0].approval.title === 'AskUserQuestion' ? t('nativeQuestionTitle') : (pendingNativeApprovals[0].approval.title || t('nativeApprovalLocal')) }}<span v-if="formatBarApprovalDetail(pendingNativeApprovals[0].approval)"> · {{ formatBarApprovalDetail(pendingNativeApprovals[0].approval) }}</span></p>
+    <p v-if="approvalErrors[pendingNativeApprovals[0].approval.permission_id]" class="dsh-pending-approval-err" role="alert">{{ t(approvalErrors[pendingNativeApprovals[0].approval.permission_id]) }}</p>
+    <div class="dsh-pending-approval-actions">
+     <template v-if="(pendingNativeApprovals[0].approval.options || []).filter(o => o.kind === 'allow_once').length <= 2">
+      <button
+       v-for="option in (pendingNativeApprovals[0].approval.options || []).filter(o => o.kind === 'allow_once')"
+       :key="'bar-opt-' + option.id"
+       type="button"
+       class="dsh-takeover-primary"
+       :disabled="!!busyPermission || approvalErrors[pendingNativeApprovals[0].approval.permission_id] === 'nativeApprovalRevoked'"
+       @click="decidePermission(pendingNativeApprovals[0].requestId, pendingNativeApprovals[0].approval.permission_id, option.id)"
+      >{{ barApprovalOptionLabel(option) }}</button>
+     </template>
+     <button
+      v-else
+      type="button"
+      class="dsh-takeover-primary"
+      @click="scrollToNativeApproval(pendingNativeApprovals[0].approval.permission_id)"
+     >{{ t('nativeApprovalViewChoices') }}</button>
+     <button
+      type="button"
+      class="dsh-takeover-secondary"
+      :disabled="!!busyPermission"
+      @click="decidePermission(pendingNativeApprovals[0].requestId, pendingNativeApprovals[0].approval.permission_id, null)"
+     >{{ t('nativeRejectOnce') }}</button>
+    </div>
+   </section>
+   <section v-if="dshQuestions.length" class="dsh-question-notice" aria-live="polite">
+    <div class="dsh-question-top">
+     <strong>{{ t(dshQuestionBlocking ? 'dshQuestionWaiting' : 'dshQuestionOpen') }}</strong>
+     <a v-if="dshQuestionSource" :href="dshQuestionSource" target="_blank" rel="noopener noreferrer">{{ t('dshQuestionOpenSource') }}</a>
+    </div>
+    <p>{{ dshQuestions.every(canAnswerDshRequest) ? t('dshQuestionReplyInlineHint') : t('dshQuestionReplyInSource') }}</p>
+    <div v-for="request in dshQuestions" :key="request.call_id" class="dsh-question-card">
+     <template v-if="canAnswerDshRequest(request)">
+      <div v-for="(item,qIdx) in request.questions" :key="item.id || qIdx" class="dsh-question-item">
+       <div class="dsh-question-item-head">
+        <span v-if="item.header" class="dsh-question-header">{{ item.header }}</span>
+        <span v-if="item.multi_select" class="dsh-question-badge">{{ t('dshQuestionMultiSelect') }}</span>
+       </div>
+       <p class="dsh-question-prompt">{{ item.question }}</p>
+       <details v-if="item.detail" class="dsh-question-detail">
+        <summary>{{ t('dshQuestionDetailToggle') }}</summary>
+        <pre class="dsh-question-detail-body">{{ item.detail }}</pre>
+       </details>
+       <div v-if="item.options?.length" class="dsh-question-options">
+        <button v-for="(option,optIdx) in item.options" :key="optIdx" type="button" class="dsh-question-option" :class="{ selected: isDshOptionSelected(request.call_id, item.id, option.label) }" :aria-pressed="isDshOptionSelected(request.call_id, item.id, option.label)" :disabled="!!dshQuestionBusy[request.call_id]" @click="toggleDshOption(request, item, option.label)">
+         <span class="dsh-question-option-label">{{ option.label }}</span>
+         <small v-if="option.description" class="dsh-question-option-desc">{{ option.description }}</small>
+        </button>
+       </div>
+       <textarea rows="2" class="dsh-question-custom" :value="getDshAnswerDraft(request.call_id, item.id).custom" :placeholder="item.options?.length ? t('dshQuestionCustomOptional') : t('dshQuestionCustomRequired')" :disabled="!!dshQuestionBusy[request.call_id]" @input="setDshCustomAnswer(request, item, $event.target.value)" @keydown.ctrl.enter.prevent="submitDshQuestion(request)" @keydown.meta.enter.prevent="submitDshQuestion(request)" />
+      </div>
+      <p v-if="dshQuestionErrors[request.call_id]" class="dsh-question-error" role="alert">{{ dshQuestionErrors[request.call_id] }}</p>
+      <div class="dsh-question-actions">
+       <button type="button" class="dsh-question-submit" :disabled="!canSubmitDshQuestion(request)" @click="submitDshQuestion(request)">{{ t(dshQuestionBusy[request.call_id] ? 'dshQuestionSubmitting' : 'dshQuestionSubmit') }}</button>
+      </div>
+     </template>
+     <details v-else open>
+      <summary>{{ t('dshQuestionDetails') }}</summary>
+      <div v-for="(item,index) in request.questions" :key="index">
+       <p>{{ item.question }}</p>
+       <ul v-if="item.options?.length"><li v-for="(option,optIndex) in item.options" :key="optIndex">{{ option.label }} <small v-if="option.description">{{ option.description }}</small></li></ul>
+      </div>
+     </details>
+    </div>
+   </section>
+   <p v-if="activityLabel && !dshQuestionBlocking && !dshStop" class="dsh-activity" role="status" aria-live="polite"><span class="terminal-rod" aria-hidden="true">[{{ rodFrame }}]</span> <span>{{activityLabel}}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></p>
+   <div v-if="syncStatus==='offline_cached' && syncStatusLabel" class="dsh-offline-strip" role="status" aria-live="polite">
+    <span>{{ syncStatusLabel }}</span>
+   </div>
+   <div class="dsh-compose-box">
+    <p v-if="history?.execution_enabled===false || selected?.execution_enabled===false" role="status">{{t('toolPolicyDisabled')}}</p>
+    <textarea ref="composerInput" v-model="draft" :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl" :placeholder="t(isClaudeRemoteControl ? 'claudeRemoteControlTitle' : 'dshPrompt')" :aria-label="t('dshPrompt')" rows="2" @keydown="onComposeKeydown" @paste="onComposerPaste" @dragover.prevent @drop.prevent="onComposerDrop"></textarea>
+    <div v-if="attachments.length" class="composer-attachments"><span v-for="att in attachments" :key="att.id" class="composer-attachment-chip"><img v-if="(att.thumbUrl || att.base64) && att.type?.startsWith('image/')" :src="att.thumbUrl || ('data:' + att.type + ';base64,' + att.base64)" alt="" class="chip-thumb" /><span class="chip-file-name">{{ att.name }}</span><span v-if="att.status==='uploading'" class="chip-upload-status">{{ t('attachmentUploading', { pct: att.progress || 0 }) }}</span><span v-else-if="att.status==='staged'" class="chip-upload-status staged">{{ t('attachmentStaged') }}</span><template v-else-if="att.status==='error'"><span class="chip-upload-status error">{{ t('attachmentUploadFailed') }}</span><button type="button" class="chip-retry-btn" @click="retryAttachmentUpload(att)">{{ t('attachmentRetry') }}</button></template><button type="button" class="chip-remove-btn" :aria-label="t('removeAttachment')" @click="removeAttachment(att.id)">×</button></span></div>
+    <div class="dsh-compose-toolbar">
+     <div class="dsh-compose-left-tools">
+      <input ref="fileInput" type="file" multiple class="visually-hidden" @change="onFilesSelected" />
+      <button type="button" class="composer-tool-btn" :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl" :title="t('attachFileBtn')" :aria-label="t('attachFileBtn')" @click="openFilePicker"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+      <button type="button" class="composer-tool-btn voice-btn" :class="{recording:isListening}" :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl" :title="t(isListening ? 'voiceInputListening' : 'voiceInputBtn')" :aria-label="t(isListening ? 'voiceInputListening' : 'voiceInputBtn')" @click="toggleVoiceInput"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg></button>
+     </div>
+     <button v-if="canStopDsh" type="button" class="composer-submit-btn" :disabled="!!dshStop || sending" @click="stopDsh">{{ t(dshStop ? 'dshStopChecking' : 'dshStop') }}</button>
+     <button v-else-if="cancellableRequest" type="button" class="composer-submit-btn" :disabled="cancelBusy || cancelRequest===cancellableRequest" @click="cancelNative">{{ t(cancelRequest===cancellableRequest?'nativeCancelPending':'nativeCancel') }}</button>
+      <button v-else type="submit" class="composer-submit-btn" :title="sendDisabledReason || t('send')" :disabled="sending || attachments.some(a=>a.status==='uploading') || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl || !!pending || nativeUnresolved || dshQuestionBlocking || (!draft.trim() && !attachments.length) || !isSessionResumable">{{ t(sending?'dshSending':'send') }}</button>
+    </div>
+   </div>
+   <p v-if="sendDisabledReason && !pending && (draft.trim() || attachments.length) && !sending" class="dsh-send-blocked-hint" role="status">{{ sendDisabledReason }} <button v-if="nativeUnresolved" type="button" @click="dismissNativeUnresolved">{{ t('dshUnlockEdit') }}</button></p>
+   <p v-if="pending && !sending" role="status">{{ t('dshUncertain') }} <button type="button" @click="checkReceipt">{{ t('dshCheckReceipt') }}</button> <button type="button" @click="dismissPending">{{ t('dshUnlockEdit') }}</button></p>
+  </form>
+ </section>
+</template>
+<style scoped>
+.dsh-question-notice{max-height:46vh;overflow:auto;padding:12px 14px;border:1px solid var(--accent-primary);border-radius:var(--radius-card);background:var(--bg-secondary);overflow-wrap:anywhere;display:flex;flex-direction:column;gap:8px}
+.dsh-sessions.embedded .dsh-question-notice{width:min(100%, 46rem);margin:0 auto;box-sizing:border-box}
+.dsh-question-notice p{margin:0;color:var(--text-secondary);font-size:.82rem}.dsh-question-notice details{margin-top:0}.dsh-question-notice ul{margin:4px 0;padding-inline-start:1.5rem}
+.dsh-question-top{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.dsh-question-top strong{font-size:.9rem;color:var(--text-primary)}
+.dsh-question-card{padding-top:8px;border-top:1px solid var(--border-color);display:flex;flex-direction:column;gap:8px}
+.dsh-question-item{display:flex;flex-direction:column;gap:6px}
+.dsh-question-item-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.dsh-question-header,.dsh-question-badge{font-size:.72rem;padding:1px 7px;border-radius:999px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-secondary)}
+.dsh-question-badge{border-color:var(--accent-primary);color:var(--accent-primary)}
+.dsh-question-notice .dsh-question-prompt{color:var(--text-primary);font-size:.88rem;font-weight:500;line-height:1.45}
+.dsh-question-detail{margin-top:2px;font-size:.8rem}
+.dsh-question-detail summary{padding:2px 0;color:var(--text-secondary)}
+.dsh-question-detail-body{margin:4px 0 0;padding:8px 10px;border-radius:var(--radius-btn);border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);white-space:pre-wrap;font-size:.78rem}
+.dsh-question-options{display:flex;flex-direction:column;gap:6px}
+.dsh-question-option{display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:2px;width:100%;padding:8px 10px;border-radius:var(--radius-btn);border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);cursor:pointer;transition:border-color .15s ease,background-color .15s ease}
+.dsh-question-option:hover:not(:disabled){border-color:var(--accent-primary)}
+.dsh-question-option.selected{border-color:var(--accent-primary);background:color-mix(in srgb, var(--accent-primary) 12%, var(--bg-primary))}
+.dsh-question-option-label{font-size:.85rem;font-weight:600;color:var(--text-primary)}
+.dsh-question-option-desc{font-size:.76rem;color:var(--text-secondary)}
+.dsh-question-custom{width:100%;box-sizing:border-box;min-height:2.4rem;resize:vertical;padding:6px 10px;font-size:.84rem;border:1px solid var(--border-color);border-radius:var(--radius-btn);background:var(--bg-primary);color:var(--text-primary)}
+.dsh-question-custom:focus{outline:none;border-color:var(--accent-primary)}
+.dsh-question-notice .dsh-question-error{color:var(--color-error);font-size:.8rem}
+.dsh-question-actions{display:flex;justify-content:flex-end;gap:8px}
+.dsh-question-submit{padding:6px 14px;border-radius:var(--radius-btn);border:1px solid var(--accent-primary);background:var(--accent-primary);color:var(--bg-primary);font-size:.82rem;font-weight:600;cursor:pointer}
+.dsh-question-submit:disabled{opacity:.45;cursor:not-allowed}
+
+.dsh-sessions{min-width:0;max-width:100%;padding:16px;border:1px solid var(--border-color);border-radius:var(--radius-modal);background:var(--bg-primary)}
+.dsh-sessions.embedded{border:0;border-radius:0;padding:0;flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;width:100%}
+.dsh-sessions.embedded .dsh-reader{min-height:0;flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;overflow-anchor:none;padding:12px 8px;overscroll-behavior:contain}
+.dsh-sessions.embedded .dsh-reader [data-chat-content]{width:min(100%, 46rem);margin:0 auto;padding:0 8px;box-sizing:border-box}
+.dsh-sessions.embedded .dsh-compose{width:100%;align-items:center;background:var(--bg-primary);border-top:1px solid var(--border-color)}
+.dsh-sessions.embedded .dsh-compose-box{width:min(100%, 46rem);margin:0 auto;box-sizing:border-box}
+.dsh-sessions.embedded .dsh-new-msg-bar{max-width:46rem;margin:0 auto}.dsh-reader{min-height:0;flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;overflow-anchor:none;padding:12px;overscroll-behavior:contain}.dsh-compose{flex-shrink:0;padding:8px 12px 10px;background:var(--bg-primary);border-top:1px solid var(--border-color);display:flex;flex-direction:column;gap:6px}.dsh-compose-box{border:1px solid var(--border-color);border-radius:var(--radius-card);padding:7px 10px;background:var(--bg-secondary);display:flex;flex-direction:column;gap:6px;transition:border-color .15s ease}.dsh-compose-box:focus-within{border-color:var(--accent-primary)}.dsh-compose-box textarea{width:100%;border:0;outline:none;background:transparent;padding:2px;resize:vertical;min-height:2.6rem;max-height:7.5rem}.dsh-compose-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px}.dsh-compose-left-tools{display:flex;align-items:center;gap:6px;min-width:0;flex:1;flex-wrap:wrap}.dsh-older{display:block;margin:8px auto;background:transparent;border:0;color:var(--text-secondary)}header,.dsh-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}h3,h4{margin:0;overflow-wrap:anywhere}select,input,textarea{min-width:0;max-width:100%;color:var(--text-primary);background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:8px}select,input{flex:1}button{max-width:100%;white-space:normal}details{margin-top:10px}summary{overflow-wrap:anywhere;cursor:pointer;padding:8px 0}.dsh-note,small{color:var(--text-secondary);overflow-wrap:anywhere}.dsh-sync-pill{display:inline-flex;align-items:center;gap:5px;font-size:.75rem;padding:2px 8px;border-radius:999px;background:var(--bg-primary);color:var(--text-secondary);border:1px solid var(--border-color)}.dsh-tools .dsh-sync-pill{margin-left:auto}.dsh-sync-pill.active{color:var(--accent-primary);border-color:var(--accent-primary)}.dsh-session{display:flex;flex-direction:column;text-align:left;width:100%;gap:5px;margin-top:5px;padding:10px}.dsh-session strong{overflow-wrap:anywhere}.dsh-message{min-width:0;margin-top:20px;overflow-wrap:anywhere}.dsh-message-meta{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap}.dsh-message.user{background:var(--bg-secondary);border-radius:var(--radius-card);padding:14px 16px;width:fit-content;max-width:88%;margin-left:auto}.dsh-message.user .dsh-message-meta{justify-content:flex-end}.dsh-message:not(.user){padding:4px 2px}.dsh-time{font-size:.75rem;color:var(--text-secondary)}.dsh-copy-btn{padding:2px 8px;font-size:.75rem;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-secondary);cursor:pointer}@media(hover:hover) and (pointer:fine){.dsh-copy-btn{opacity:0;transition:opacity .15s ease}.dsh-message:hover .dsh-copy-btn,.dsh-copy-btn:focus-visible{opacity:1}}.dsh-new-msg-bar{height:0;position:relative;z-index:2;display:flex;justify-content:flex-end;padding:0 20px;background:transparent;transform:translateY(-46px)}.dsh-new-msg-btn{display:grid;place-items:center;width:36px;height:36px;padding:6px;border-radius:999px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--accent-primary);font-size:.82rem;cursor:pointer}.dsh-activity{margin:0;display:flex;align-items:center;gap:6px;color:var(--text-secondary);font-size:.82rem}.dsh-compose p{width:100%;margin:0}
+.dsh-holder-pill{display:inline-flex;align-items:center;gap:6px;font-size:.75rem;padding:2px 8px;border-radius:999px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--accent-primary)}
+.dsh-holder-takeover-btn{padding:1px 7px;border-radius:999px;border:0;background:var(--accent-primary);color:var(--bg-primary);font-size:.72rem;font-weight:600;cursor:pointer}
+.dsh-remote-control-banner{margin:8px 0;padding:10px 12px;border-radius:var(--radius-card);border:1px solid var(--accent-primary);background:var(--bg-secondary);display:flex;flex-direction:column;gap:4px}
+.dsh-remote-control-banner strong{font-size:.84rem;color:var(--accent-primary)}.dsh-remote-control-banner p{margin:0;font-size:.8rem;color:var(--text-secondary)}
+.dsh-bob-holder-pill{display:inline-flex;align-items:center;gap:6px;font-size:.75rem;padding:2px 8px;border-radius:999px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border-color)}
+.dsh-bob-release-btn,.dsh-terminal-cmd-btn{padding:1px 7px;border-radius:999px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);font-size:.72rem;font-weight:600;cursor:pointer}
+.dsh-terminal-cmd-btn.active{border-color:var(--accent-primary);color:var(--accent-primary)}
+.dsh-handoff-card{margin:8px 0;padding:10px 12px;border-radius:var(--radius-card);border:1px solid var(--border-color);background:var(--bg-secondary);display:flex;flex-direction:column;gap:6px}
+.dsh-handoff-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.dsh-handoff-head strong{font-size:.84rem;color:var(--text-primary)}
+.dsh-handoff-card p{margin:0;font-size:.78rem;color:var(--text-secondary)}
+.dsh-handoff-close{border:0;background:transparent;color:var(--text-secondary);cursor:pointer;display:inline-flex;align-items:center;padding:2px}
+.dsh-handoff-cmd-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dsh-handoff-cmd-row code{flex:1;min-width:180px;padding:6px 8px;border-radius:var(--radius-btn);background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-color);font-size:.76rem;overflow-x:auto;white-space:nowrap}
+.dsh-handoff-cmd-row button{display:inline-flex;align-items:center;gap:4px}
+.dsh-interrupted-banner{margin:8px 0;padding:10px 12px;border-radius:var(--radius-card);border:1px solid var(--color-warning);background:color-mix(in srgb, var(--color-warning) 10%, var(--bg-secondary));display:flex;flex-direction:column;gap:8px}
+.dsh-interrupted-text strong{display:block;font-size:.84rem;color:var(--text-primary);margin-bottom:2px}
+.dsh-interrupted-text p{margin:0;font-size:.8rem;color:var(--text-secondary);line-height:1.4}
+.dsh-interrupted-actions{display:flex;gap:8px;flex-wrap:wrap}
+.dsh-takeover-card{padding:10px 12px;border-radius:var(--radius-card);border:1px solid var(--accent-primary);background:var(--bg-secondary);display:flex;flex-direction:column;gap:8px}
+.dsh-takeover-body strong{display:block;font-size:.85rem;color:var(--text-primary);margin-bottom:2px}.dsh-takeover-body p{margin:0;font-size:.8rem;color:var(--text-secondary)}
+.dsh-takeover-actions{display:flex;gap:8px;flex-wrap:wrap}
+.dsh-takeover-primary,.dsh-takeover-secondary{padding:5px 12px;border-radius:var(--radius-btn);font-size:.78rem;font-weight:600;cursor:pointer;border:1px solid var(--border-color)}
+.dsh-takeover-primary{background:var(--accent-primary);color:var(--bg-primary);border-color:var(--accent-primary)}
+.dsh-takeover-secondary{background:var(--bg-primary);color:var(--text-secondary)}
+.dsh-permission-mode-select.custom-select-wrapper{flex:0 0 auto;width:auto;min-width:0}
+.dsh-permission-mode-select :deep(.custom-select-trigger){min-height:1.8rem;height:1.8rem;padding:0 8px;font-size:.76rem;border-radius:var(--radius-btn);background:var(--bg-primary);color:var(--text-secondary);border:1px solid var(--border-color);gap:4px}
+.dsh-permission-mode-select :deep(.custom-select-trigger:hover:not(.disabled)){color:var(--text-primary);border-color:var(--accent-primary)}
+.dsh-permission-mode-select :deep(.custom-select-chevron){width:.75rem;height:.75rem}
+.dsh-session-item{display:flex;align-items:center;gap:6px;width:100%;margin-top:5px;position:relative}.dsh-session-item .dsh-session{flex:1;min-width:0;margin-top:0}.dsh-session-archive-btn{flex-shrink:0;padding:6px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-secondary);cursor:pointer;opacity:0.6;transition:opacity .15s ease}.dsh-session-item:hover .dsh-session-archive-btn,.dsh-session-archive-btn:focus-visible{opacity:1}.dsh-session-unarchive-btn{flex-shrink:0;padding:4px 8px;font-size:.75rem;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-secondary);cursor:pointer}.dsh-test-group{margin-top:14px;border-top:1px dashed var(--border-color);padding-top:8px}.dsh-test-group summary{color:var(--text-secondary);cursor:pointer;display:inline-flex;align-items:center;gap:6px}.dsh-test-group summary svg{color:var(--accent-primary)}.dsh-archived-group{margin-top:16px;border-top:1px dashed var(--border-color);padding-top:8px}.dsh-archived-group summary{color:var(--text-secondary)}.composer-tool-btn.voice-btn.recording{color:var(--color-error);animation:pulse-mic 1.2s infinite ease-in-out}@keyframes pulse-mic{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.5;transform:scale(1.15)}}.dsh-search-snippet{display:block;margin-top:2px;font-style:italic;color:var(--accent-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dsh-search-toggle-btn{padding:4px 8px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-secondary);cursor:pointer;display:inline-flex;align-items:center}.dsh-search-toggle-btn.active{color:var(--accent-primary);border-color:var(--accent-primary)}.dsh-session-search-bar{display:flex;align-items:center;gap:8px;padding:6px 0;width:100%}.dsh-session-search-bar input{flex:1;padding:6px 10px;font-size:.85rem}.dsh-search-count{font-size:.78rem;color:var(--accent-primary);white-space:nowrap}.dsh-search-clear{background:transparent;border:0;color:var(--text-secondary);cursor:pointer;padding:4px 8px;font-size:1rem}.dsh-empty-search{padding:16px;text-align:center;color:var(--text-secondary);font-size:.85rem}.composer-attachment-chip .chip-thumb{width:22px;height:22px;object-fit:cover;border-radius:4px;flex-shrink:0}
+.dsh-pending-approval-bar{width:100%;box-sizing:border-box;padding:10px 12px;border-radius:var(--radius-card);border:1px solid var(--accent-primary);background:var(--bg-secondary);display:flex;flex-direction:column;gap:6px}
+.dsh-sessions.embedded .dsh-pending-approval-bar{width:min(100%, 46rem);margin:0 auto}
+.dsh-pending-approval-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.dsh-pending-approval-title-group{display:inline-flex;align-items:center;gap:6px;color:var(--text-primary);font-size:.86rem}
+.dsh-pending-approval-title-group svg{color:var(--accent-primary);flex-shrink:0}
+.dsh-pending-approval-meta{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+.dsh-pending-ttl{padding:1px 7px;border-radius:999px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-secondary);font-size:.72rem}
+.dsh-pending-link-btn{padding:1px 8px;border-radius:999px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--accent-primary);font-size:.72rem;font-weight:600;cursor:pointer}
+.dsh-pending-approval-detail{margin:0;font-size:.8rem;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsh-pending-approval-err{margin:0;font-size:.78rem;color:var(--color-error)}
+.dsh-pending-approval-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dsh-pending-approval-actions .dsh-takeover-primary:disabled,.dsh-pending-approval-actions .dsh-takeover-secondary:disabled{opacity:.48;cursor:not-allowed}
+
+.dsh-sessions.embedded{position:relative}
+.dsh-session-config-backdrop{position:absolute;inset:0;z-index:20;background:color-mix(in srgb, var(--bg-root) 45%, transparent);display:flex;align-items:flex-start;justify-content:center;padding:8px 12px}
+.dsh-session-config-popover{width:min(100%, 26rem);background:var(--bg-primary);border:1px solid var(--border-color);border-radius:var(--radius-modal);padding:12px 14px;box-shadow:var(--shadow-lg);display:flex;flex-direction:column;gap:10px}
+.dsh-session-config-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-bottom:6px;border-bottom:1px solid var(--border-color)}
+.dsh-session-config-head strong{font-size:var(--text-sm);color:var(--text-primary)}
+.dsh-session-config-done{border:0;background:transparent;color:var(--accent-primary);font-size:var(--text-xs);font-weight:600;cursor:pointer;padding:2px 6px;min-height:0}
+.dsh-session-config-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.dsh-session-config-label{font-size:var(--text-xs);color:var(--text-secondary);white-space:nowrap;flex-shrink:0}
+.dsh-session-config-input{flex:1;min-width:0;padding:5px 8px;font-size:var(--text-xs);border-radius:var(--radius-btn);border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-primary)}
+.dsh-session-config-input:focus{outline:none;border-color:var(--accent-primary)}
+.dsh-config-select.custom-select-wrapper{flex:1;min-width:0;max-width:16rem}
+.dsh-config-select :deep(.custom-select-trigger){width:100%;justify-content:space-between;min-height:1.95rem;height:1.95rem;padding:0 9px;font-size:var(--text-xs)}
+
+.dsh-offline-strip{width:min(100%, 46rem);margin:0 auto;padding:4px 10px;border-radius:var(--radius-sm);background:var(--bg-secondary);border:1px solid var(--border-color);color:var(--warning-text);font-size:var(--text-2xs);display:flex;align-items:center;justify-content:space-between;box-sizing:border-box}
+
+.composer-attachments{display:flex;flex-wrap:wrap;gap:6px}
+.composer-attachment-chip{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:4px 8px;border-radius:999px;border:1px solid var(--border-color);background:var(--bg-primary);font-size:var(--text-xs);color:var(--text-primary)}
+.chip-file-name{max-width:9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip-upload-status{white-space:nowrap;flex-shrink:0;font-size:var(--text-2xs);color:var(--text-secondary)}
+.chip-upload-status.staged{color:var(--success-text)}
+.chip-upload-status.error{color:var(--error-text)}
+.chip-retry-btn{white-space:nowrap;flex-shrink:0;padding:2px 8px;min-height:0;border-radius:999px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--accent-primary);font-size:var(--text-2xs);font-weight:600;cursor:pointer}
+.chip-remove-btn{white-space:nowrap;flex-shrink:0;border:0;background:transparent;color:var(--text-secondary);cursor:pointer;padding:0 4px;min-height:0;font-size:var(--text-sm);line-height:1}
+
+@media (max-width: 768px){
+ .dsh-sessions.embedded .dsh-reader{scrollbar-gutter:auto;scrollbar-width:none;padding:10px 10px}
+ .dsh-sessions.embedded .dsh-reader::-webkit-scrollbar{width:0;height:0}
+ .dsh-sessions.embedded .dsh-reader [data-chat-content]{width:100%;padding:0}
+ .dsh-sessions.embedded .dsh-compose{padding:0;gap:0;background:var(--bg-primary)}
+ .dsh-sessions.embedded .dsh-compose-box{width:100%;margin:0;border:0;border-radius:0;padding:8px 12px;background:var(--bg-primary)}
+ .dsh-offline-strip{width:100%;border-radius:0;border-left:0;border-right:0;border-top:0;padding:4px 12px}
+ .dsh-session-config-backdrop{padding:6px 8px}
+ .dsh-session-config-popover{width:100%}
+}
+</style>

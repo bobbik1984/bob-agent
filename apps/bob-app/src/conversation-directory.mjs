@@ -1,0 +1,725 @@
+import { deviceKey } from './device-paths.mjs';
+export const nodeLabel = node => node.label || node.name || node.baseUrl || node.id;
+export function workspaceName(path) {
+  const parts = String(path || '').split(/[\\/]+/).filter(Boolean);
+  return parts.at(-1) || path;
+}
+
+export const REMOTE_NODE_PREFIX = 'node:';
+export const TEST_ARCHIVE_PROJECT_ID = '__bob_test_archive__';
+
+/** Build a distinct UI selection key for remote/paired nodes so id="local" never collides with built-in local chat. */
+export function nodeCreationKey(node) {
+  const id = typeof node === 'string' ? node : node?.id;
+  if (!id) return '';
+  const text = String(id);
+  return text.startsWith(REMOTE_NODE_PREFIX) ? text : `${REMOTE_NODE_PREFIX}${text}`;
+}
+
+/** Extract the underlying node connection ID from a creation device selection key. */
+export function parseNodeConnectionId(deviceId) {
+  const text = String(deviceId || '');
+  if (!text || text === 'none' || text === 'local') return '';
+  return text.startsWith(REMOTE_NODE_PREFIX) ? text.slice(REMOTE_NODE_PREFIX.length) : text;
+}
+
+const GENERIC_WORKSPACES = new Set([
+  'dsh_projects',
+  'bob-projects',
+  'projects',
+  'workspace',
+  'workspaces',
+  'work',
+  'code',
+  'repos',
+  'default',
+  'home',
+  'bobbik',
+  'ubuntu',
+  'root',
+  'tmp',
+  'opt',
+  'srv',
+  'var',
+  'src',
+  'app',
+  'apps',
+]);
+
+const STOP_TOKENS = new Set([
+  '项目',
+  '方案',
+  '报告',
+  '优化',
+  '效果',
+  '寻找',
+  '记录',
+  '检查',
+  '测试',
+  '问题',
+  '分析',
+  '设计',
+  '实现',
+  '功能',
+  'the',
+  'and',
+  'for',
+  'with',
+  'from',
+  'check',
+  'test',
+]);
+
+export function inferSmartTopic(row) {
+  const title = String(row.title || '').trim();
+  const ws = workspaceName(row.workspace || '');
+  const wsLower = String(ws || '').toLocaleLowerCase();
+  const normWs = String(row.workspace || '').replace(/\\/g, '/').toLocaleLowerCase();
+  if (/^session-[0-9a-f-]{8,}/i.test(title)) {
+    return { key: 'smart:unnamed-uuid', name: '未命名节点会话 (UUID)' };
+  }
+  if (
+    /(bob[\s_-]*agent|bob[\s_-]*online)/i.test(title) ||
+    /(bob[\s_-]*agent|bob[\s_-]*online)/i.test(wsLower) ||
+    /(^|\/)(bob[\s_-]*agent|bob[\s_-]*online)(\/|$)/i.test(normWs)
+  ) {
+    return { key: 'smart:topic:bob-agent', name: 'bob-agent' };
+  }
+  if (
+    /(bob[\s_-]*bot|bobbot)/i.test(title) ||
+    /(bob[\s_-]*bot|bobbot)/i.test(wsLower) ||
+    /(^|\/)(bob[\s_-]*bot|bobbot)(\/|$)/i.test(normWs)
+  ) {
+    return { key: 'smart:topic:bob-bot', name: 'Bob-bot 助手' };
+  }
+  if (/(sea2|海路纪元|地球渲染|海洋|航海)/i.test(title)) {
+    return { key: 'smart:topic:sea2-hailu', name: '海路纪元 · Sea2 地球渲染' };
+  }
+  if (/(winter[\s_-]*shelter)/i.test(title) || /(winter[\s_-]*shelter)/i.test(wsLower)) {
+    return { key: 'smart:topic:winter-shelter', name: 'winter-shelter' };
+  }
+  if (/(庭院|花园守线|garden)/i.test(title) || /(garden)/i.test(wsLower)) {
+    return { key: 'smart:topic:courtyard-garden', name: '庭院布局与塔防网页' };
+  }
+  if (
+    /(空间站|月表|molence|gpcr|blender|render|渲染|建模|3d|sketchup|model[\s_-]*builder|平面模型)/i.test(title) ||
+    /(sketchup|model[\s_-]*builder|blender|3d)/i.test(wsLower)
+  ) {
+    return { key: 'smart:topic:3d-render', name: '3D 渲染与美术管线' };
+  }
+  if (/(dos|exe|逆向|还原源代码|反编译)/i.test(title)) {
+    return { key: 'smart:topic:reverse-eng', name: '逆向工程与源码还原' };
+  }
+  if (/(four-harness|four_harness)/i.test(title) || /(four_harness)/i.test(wsLower)) {
+    return { key: 'smart:topic:four-harness', name: '多工具联合验收 (Four-Harness)' };
+  }
+  if (ws && !GENERIC_WORKSPACES.has(wsLower) && !/^proj_[0-9a-f]{12,}/i.test(wsLower) && !/^exec_[a-z0-9_]+$/i.test(wsLower)) {
+    const normalized = wsLower.replace(/[_-]+/g, ' ').trim();
+    return { key: `smart:ws:${normalized}`, name: ws };
+  }
+  const tokens =
+    title
+      .match(/[A-Za-z0-9_]{3,}|[\u4e00-\u9fa5]{2,4}/g)
+      ?.map(t => t.toLocaleLowerCase())
+      .filter(t => !STOP_TOKENS.has(t)) || [];
+  if (tokens.length > 0) {
+    return { key: `smart:kw:${tokens[0]}`, name: `专题 · ${tokens[0]}` };
+  }
+  return { key: 'smart:misc', name: '其他独立会话' };
+}
+
+export function rowNodeKey(row) {
+  return row.remote ? `remote:${deviceKey(row.node || {}) || ''}` : `local:${row.device || 'local'}`;
+}
+
+export function rowNodeLabel(row) {
+  return row.remote ? nodeLabel(row.node) : String(row.device || 'Local');
+}
+
+export function rowHarnessKey(row) {
+  if (!row.remote) return 'local';
+  const raw = row.harness || (row.source_kind === 'claude_native' ? 'claude' : 'dsh');
+  return String(raw).toLocaleLowerCase();
+}
+
+export function rowHarnessLabel(row) {
+  if (!row.remote) return 'Bob';
+  if (row.toolLabel || row.tool_label) return String(row.toolLabel || row.tool_label);
+  const h = rowHarnessKey(row);
+  if (h === 'claude') return 'Claude';
+  if (h === 'agy') return 'AGY';
+  if (h === 'copilot') return 'Copilot';
+  if (h === 'kimi') return 'Kimi Code';
+  if (h === 'qoder') return 'Qoder';
+  if (h === 'zcode') return 'ZCode';
+  if (h === 'workbuddy') return 'WorkBuddy';
+  if (h === 'goose') return 'Goose';
+  if (h === 'doubao') return 'Doubao CLI';
+  if (h === 'pi') return 'Pi';
+  if (h === 'codex') return 'Codex';
+  return 'DSH';
+}
+
+export function rowTopicInfo(row) {
+  if (row.project_owner && row.project_id) {
+    return {
+      key: `project:${row.project_id}`,
+      name: row.project || row.project_id,
+      kind: 'project',
+    };
+  }
+  const smart = inferSmartTopic(row);
+  return {
+    key: smart.key,
+    name: smart.name,
+    kind: 'smart',
+  };
+}
+
+export function extractFilterOptions(rows, options = null) {
+  const nonLegacy = attachInferredProjects(
+    (rows || []).filter(r => !r.legacy && !isRuntimeDaemonSession(r)),
+    options?.projects,
+    options?.ownerInstance
+  );
+  const nodeMap = new Map();
+  const harnessMap = new Map();
+  const topicMap = new Map();
+
+  for (const row of nonLegacy) {
+    const nKey = rowNodeKey(row);
+    const nLabel = rowNodeLabel(row);
+    if (!nodeMap.has(nKey)) nodeMap.set(nKey, { key: nKey, label: nLabel, count: 0 });
+    nodeMap.get(nKey).count += 1;
+
+    const hKey = rowHarnessKey(row);
+    const hLabel = rowHarnessLabel(row);
+    if (!harnessMap.has(hKey)) harnessMap.set(hKey, { key: hKey, label: hLabel, count: 0 });
+    harnessMap.get(hKey).count += 1;
+
+    const tInfo = rowTopicInfo(row);
+    if (!topicMap.has(tInfo.key)) {
+      topicMap.set(tInfo.key, {
+        key: tInfo.key,
+        label: tInfo.name,
+        kind: tInfo.kind,
+        count: 0,
+      });
+    }
+    topicMap.get(tInfo.key).count += 1;
+  }
+
+  return {
+    nodes: [...nodeMap.values()],
+    harnesses: [...harnessMap.values()],
+    topics: [...topicMap.values()].sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === 'project' ? -1 : 1;
+      return b.count - a.count || a.label.localeCompare(b.label);
+    }),
+  };
+}
+
+const rowStamp = s => {
+  const raw = s.updated_at;
+  const n = Number(raw);
+  return Number.isFinite(n) ? (n < 1e12 ? n * 1000 : n) : Date.parse(raw) || 0;
+};
+
+export function filterAndSortRows(rows, pinnedSet = null, options = null) {
+  const secondIsOptions =
+    pinnedSet &&
+    !(pinnedSet instanceof Set) &&
+    !Array.isArray(pinnedSet) &&
+    typeof pinnedSet === 'object' &&
+    options === null;
+  const pins = secondIsOptions
+    ? new Set()
+    : pinnedSet instanceof Set
+      ? pinnedSet
+      : Array.isArray(pinnedSet)
+        ? new Set(pinnedSet)
+        : new Set();
+  const opts = (secondIsOptions ? pinnedSet : options) || {};
+  const nodeSet =
+    opts.selectedNodes instanceof Set
+      ? opts.selectedNodes
+      : Array.isArray(opts.selectedNodes) && opts.selectedNodes.length > 0
+        ? new Set(opts.selectedNodes)
+        : null;
+  const harnessSet =
+    opts.selectedHarnesses instanceof Set
+      ? opts.selectedHarnesses
+      : Array.isArray(opts.selectedHarnesses) && opts.selectedHarnesses.length > 0
+        ? new Set(opts.selectedHarnesses)
+        : null;
+  const topicFilter = String(opts.selectedTopic || 'all');
+  const sortBy = String(opts.sortBy || 'time_desc');
+  const enriched = attachInferredProjects(rows, opts.projects, opts.ownerInstance);
+
+  const filtered = (enriched || []).filter(row => {
+    if (row.legacy) return false;
+    if (!pins.has(row.uid || row.id) && isRuntimeDaemonSession(row)) return false;
+    if (nodeSet && !nodeSet.has(rowNodeKey(row)) && !nodeSet.has(rowNodeLabel(row))) {
+      return false;
+    }
+    if (harnessSet && !harnessSet.has(rowHarnessKey(row)) && !harnessSet.has(rowHarnessLabel(row))) {
+      return false;
+    }
+    if (topicFilter === 'pinned') {
+      return pins.has(row.uid || row.id);
+    }
+    if (topicFilter === 'unlinked') {
+      return !(row.project_owner && row.project_id);
+    }
+    if (topicFilter && topicFilter !== 'all') {
+      return rowTopicInfo(row).key === topicFilter;
+    }
+    return true;
+  });
+
+  return [...filtered].sort((a, b) => {
+    const aPin = pins.has(a.uid || a.id) ? 1 : 0;
+    const bPin = pins.has(b.uid || b.id) ? 1 : 0;
+    if (aPin !== bPin) return bPin - aPin;
+
+    if (sortBy === 'time_asc') {
+      return rowStamp(a) - rowStamp(b) || String(a.uid || a.id).localeCompare(String(b.uid || b.id));
+    }
+    if (sortBy === 'title_asc') {
+      return (
+        String(a.title || '').localeCompare(String(b.title || '')) ||
+        rowStamp(b) - rowStamp(a)
+      );
+    }
+    if (sortBy === 'node_asc') {
+      return (
+        rowNodeLabel(a).localeCompare(rowNodeLabel(b)) ||
+        rowHarnessLabel(a).localeCompare(rowHarnessLabel(b)) ||
+        rowStamp(b) - rowStamp(a)
+      );
+    }
+    if (sortBy === 'topic_asc') {
+      return (
+        rowTopicInfo(a).name.localeCompare(rowTopicInfo(b).name) ||
+        rowStamp(b) - rowStamp(a)
+      );
+    }
+    return rowStamp(b) - rowStamp(a) || String(a.uid || a.id).localeCompare(String(b.uid || b.id));
+  });
+}
+
+
+export const CANONICAL_PROJECTS = [
+  { id: 'bob_agent', name: 'bob-agent', pattern: /(bob[\s_-]*agent|bob[\s_-]*online)/i },
+  { id: 'bob-bot', name: 'Bob-bot 助手', pattern: /(bob[\s_-]*bot|bobbot)/i },
+  { id: 'sea2', name: '海路纪元 · Sea2', pattern: /(sea2|海路纪元|海路|地球渲染|航海)/i },
+  { id: 'quant_lab', name: 'Quant Lab', pattern: /(quant_lab|quant|量化)/i },
+  { id: 'wild', name: 'Winter Shelter', pattern: /(winter[\s_-]*shelter|winter|雪洞)/i },
+  { id: 'history_map', name: '时空华夏', pattern: /(history_map|history-map|历史地图|时空华夏)/i },
+  { id: 'village', name: 'Village Dashboard', pattern: /(village|cluster-os|集控|运维控制台)/i },
+  { id: 'bedtime_story', name: 'Bedtime Story', pattern: /(bedtime_story|睡前故事|绘本)/i },
+  { id: 'code_runner', name: 'CodeRunner', pattern: /(code_runner|coderunner)/i },
+  { id: 'iknow', name: 'I Know', pattern: /(iknow|i[\s_-]*know|生态图谱|知识图谱)/i },
+  { id: 'brick_compiler', name: 'Brick Compiler', pattern: /(brick[\s_-]*compiler)/i },
+  { id: 'indoormap', name: 'IndoorMap', pattern: /(indoormap|indoor|mallos|室内地图)/i },
+  { id: 'mall_coordination', name: 'Mall_coordination', pattern: /(mall_coordination|mall[\s_-]*coord|招商协同)/i },
+  { id: 'timeline', name: 'Timeline', pattern: /(timeline|甘特图)/i },
+];
+
+export function isRuntimeDaemonSession(row) {
+  if (!row || !row.remote || row.pinned || row.bobInitiated === true) return false;
+  const normWs = normWorkspacePath(row.workspace || '');
+  if (normWs === '/opt' || normWs.startsWith('/opt/')) return true;
+  const title = String(row.title || '');
+  if (title.includes('硅基先知') && title.includes('赛马竞技场')) return true;
+  return false;
+}
+
+function normWorkspacePath(path) {
+  return String(path || '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '')
+    .toLocaleLowerCase();
+}
+
+function slugifyMatchText(text) {
+  return String(text || '')
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '');
+}
+
+function isMeaningfulWorkspace(path) {
+  const norm = normWorkspacePath(path);
+  if (!norm || norm === '/' || /^[a-z]:$/.test(norm)) return false;
+  const leaf = workspaceName(norm).toLocaleLowerCase();
+  if (!leaf || leaf.startsWith('.') || GENERIC_WORKSPACES.has(leaf)) return false;
+  if (/^proj_[0-9a-f]{12,}$/i.test(leaf) || /^exec_[a-z0-9_]+$/i.test(leaf)) return false;
+  if (/(^|\/)(tmp|temp|verification-workspaces|bob-agy-candidates|bob-native-setup)(\/|$)/i.test(norm)) {
+    return false;
+  }
+  return true;
+}
+
+export function resolveCanonicalProject(row) {
+  if (!row) return null;
+  if (row.project_owner && row.project_id) {
+    return {
+      id: row.project_id,
+      name: row.project || row.project_id,
+      isExplicit: !row.project_inferred,
+    };
+  }
+  const title = String(row.title || '').trim();
+  const ws = workspaceName(row.workspace || '');
+  const wsLower = String(ws || '').toLocaleLowerCase();
+  const normWs = normWorkspacePath(row.workspace || '');
+
+  for (const def of CANONICAL_PROJECTS) {
+    if (def.pattern.test(title) || def.pattern.test(wsLower) || (normWs && def.pattern.test(normWs))) {
+      return { id: def.id, name: def.name, isCanonical: true };
+    }
+  }
+  return null;
+}
+
+export function isTestOrScratchSession(row) {
+  if (!row) return false;
+  if (row.pinned) return false;
+  if (row.project_id === TEST_ARCHIVE_PROJECT_ID) {
+    return true;
+  }
+  if (row.project_owner && row.project_id && !row.project_inferred) {
+    const pName = String(row.project || row.project_id || '');
+    return /(test|tmp|scratch|probe|测试|探针|临时|实验|冒烟|验收)/i.test(pName);
+  }
+  const title = String(row.title || '').trim().toLocaleLowerCase();
+  const ws = workspaceName(row.workspace || '').toLocaleLowerCase();
+  const normWs = normWorkspacePath(row.workspace || '');
+
+  if (/(^|[\s_/-])(test|eval|probe|tmp|temp|scratch|benchmark|fixture|mock|smoke|check|verification|verify)([\s_/-]|$)/i.test(title)) {
+    return true;
+  }
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(title)) {
+    return true;
+  }
+  if (/^user\s*\[message\s+[0-9a-f-]+\]:/i.test(title)) {
+    return true;
+  }
+  if (/^(are you online\??|r u online\??|hello\??|hi\??|ping\??|blank message( sent)?|blank conversation( start)?|checking system availability status|synced conversation)$/i.test(title)) {
+    return true;
+  }
+  if (/(bob_inventory_ok|bob connection (check|verification)|bob inventory verification|disposable restart validation)/i.test(title)) {
+    return true;
+  }
+  if (/(测试|探针|临时|冒烟|评测|验证|连通检查)/.test(title)) {
+    return true;
+  }
+
+  if (/(^|[\s_/-])(test|tmp|temp|scratch)([\s_/-]|$)/i.test(ws)) {
+    return true;
+  }
+  if (/(^|\/)(tmp|temp|verification-workspaces|bob-agy-candidates|bob-codex-candidates|bob-native-setup)(\/|$)/i.test(normWs)) {
+    return true;
+  }
+  if (/(\/|^)(disposable[_-]|bob-cf08-|four[_-]harness|mobile-loop-live|daily-assistant-basic)/i.test(normWs)) {
+    return true;
+  }
+  return false;
+}
+
+/** Infer catalog project associations for unlinked rows using sibling workspace affinity, canonical patterns, and project titles. */
+export function attachInferredProjects(rows, catalogProjects = [], defaultOwner = 'local') {
+  const input = Array.isArray(rows) ? rows : [];
+  if (input.length === 0) return input;
+
+  const projectOwnerById = new Map();
+  for (const row of input) {
+    if (row?.project_owner && row?.project_id && !row.project_inferred) {
+      if (!projectOwnerById.has(row.project_id)) {
+        projectOwnerById.set(row.project_id, row.project_owner);
+      }
+    }
+  }
+
+  const validProjects = [];
+  for (const p of Array.isArray(catalogProjects) ? catalogProjects : []) {
+    if (!p?.id) continue;
+    const title = String(p.title || p.name || p.id).trim();
+    const owner = projectOwnerById.get(p.id) || p.owner_instance || p.owner || defaultOwner || 'local';
+    validProjects.push({
+      id: String(p.id),
+      title,
+      owner: String(owner),
+      slug: slugifyMatchText(title),
+    });
+  }
+
+  const exactWsMap = new Map();
+  const slugWsMap = new Map();
+  for (const row of input) {
+    if (!row?.project_owner || !row?.project_id || row.project_inferred) continue;
+    if (!isMeaningfulWorkspace(row.workspace)) continue;
+    const meta = {
+      id: row.project_id,
+      title: row.project || row.project_id,
+      owner: row.project_owner,
+    };
+    const nKey = rowNodeKey(row);
+    const normWs = normWorkspacePath(row.workspace);
+    const exactKey = `${nKey}::${normWs}`;
+    if (!exactWsMap.has(exactKey)) exactWsMap.set(exactKey, meta);
+    const leafSlug = slugifyMatchText(workspaceName(normWs));
+    if (leafSlug && leafSlug.length >= 4 && !slugWsMap.has(leafSlug)) {
+      slugWsMap.set(leafSlug, meta);
+    }
+  }
+
+  if (validProjects.length === 0 && exactWsMap.size === 0 && slugWsMap.size === 0) {
+    return input;
+  }
+
+  const canonicalToProject = new Map();
+  for (const def of CANONICAL_PROJECTS) {
+    const matched = validProjects.find(p => def.pattern.test(p.title) || def.pattern.test(p.id));
+    if (matched) {
+      canonicalToProject.set(def.id, matched);
+    }
+  }
+
+  return input.map(row => {
+    if (!row || (row.project_owner && row.project_id)) return row;
+    if (row.legacy || isTestOrScratchSession(row)) return row;
+
+    let match = null;
+    if (isMeaningfulWorkspace(row.workspace)) {
+      const nKey = rowNodeKey(row);
+      const normWs = normWorkspacePath(row.workspace);
+      match = exactWsMap.get(`${nKey}::${normWs}`) || null;
+      if (!match) {
+        const leafSlug = slugifyMatchText(workspaceName(normWs));
+        if (leafSlug && leafSlug.length >= 4) {
+          match = slugWsMap.get(leafSlug) || null;
+        }
+      }
+    }
+
+    if (!match && canonicalToProject.size > 0) {
+      const canonical = resolveCanonicalProject(row);
+      if (canonical?.id && canonicalToProject.has(canonical.id)) {
+        match = canonicalToProject.get(canonical.id);
+      }
+    }
+
+    if (!match && validProjects.length > 0) {
+      const leafSlug = isMeaningfulWorkspace(row.workspace)
+        ? slugifyMatchText(workspaceName(row.workspace))
+        : '';
+      const titleSlug = slugifyMatchText(row.title);
+      match =
+        validProjects.find(p => {
+          if (!p.slug || p.slug.length < 4) return false;
+          if (leafSlug && (leafSlug === p.slug || leafSlug.includes(p.slug) || p.slug.includes(leafSlug))) {
+            return true;
+          }
+          if (titleSlug && p.slug.length >= 5 && titleSlug.includes(p.slug)) {
+            return true;
+          }
+          return false;
+        }) || null;
+    }
+
+    if (!match) return row;
+    return {
+      ...row,
+      project_id: match.id,
+      project: match.title,
+      project_owner: match.owner,
+      project_inferred: true,
+    };
+  });
+}
+
+// Display names never become identity keys: equal basenames can belong to different nodes/paths.
+export function directoryGroups(rows, mode, pinnedSet = null, options = null) {
+  const ordered = filterAndSortRows(rows, pinnedSet, options);
+
+  const pins =
+    pinnedSet instanceof Set
+      ? pinnedSet
+      : Array.isArray(pinnedSet)
+        ? new Set(pinnedSet)
+        : new Set();
+
+  const activeRows = [];
+  const testRows = [];
+
+  for (const row of ordered) {
+    const isPin = pins.has(row.uid || row.id);
+    if (!isPin && isTestOrScratchSession(row)) {
+      testRows.push(row);
+    } else {
+      activeRows.push(row);
+    }
+  }
+
+  if (mode === 'smart') {
+    const groups = new Map();
+    for (const row of activeRows) {
+      const linked = row.project_owner && row.project_id;
+      if (linked) {
+        const key = JSON.stringify(['project', row.project_owner, row.project_id]);
+        if (!groups.has(key)) {
+          groups.set(key, {
+            key,
+            name: row.project,
+            fullName: row.project,
+            items: [],
+          });
+        }
+        groups.get(key).items.push(row);
+        continue;
+      }
+      const topic = inferSmartTopic(row);
+      if (!groups.has(topic.key)) {
+        groups.set(topic.key, {
+          key: topic.key,
+          name: topic.name,
+          fullName: topic.name,
+          items: [],
+        });
+      }
+      groups.get(topic.key).items.push(row);
+    }
+    const res = [...groups.values()];
+    if (testRows.length > 0) {
+      res.push({
+        key: 'group:test-scratch',
+        name: '实验与临时测试',
+        fullName: '实验与临时测试',
+        isTestGroup: true,
+        items: testRows,
+      });
+    }
+    return res;
+  }
+
+  if (mode === 'device') {
+    const groups = new Map();
+    for (const row of activeRows) {
+      const device = row.remote ? nodeLabel(row.node) : row.device;
+      const owner = row.remote ? ['remote', deviceKey(row.node)] : ['local', row.device];
+      const key = JSON.stringify(owner);
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          name: device,
+          fullName: device,
+          items: [],
+        });
+      }
+      groups.get(key).items.push(row);
+    }
+    const res = [...groups.values()];
+    if (testRows.length > 0) {
+      res.push({
+        key: 'group:test-scratch',
+        name: '实验与临时测试',
+        fullName: '实验与临时测试',
+        isTestGroup: true,
+        items: testRows,
+      });
+    }
+    return res;
+  }
+
+  // mode === 'project' (default)
+  const groups = new Map();
+  const unassignedRemoteRows = [];
+  for (const row of activeRows) {
+    const device = row.remote ? nodeLabel(row.node) : row.device;
+    const owner = row.remote ? ['remote', deviceKey(row.node)] : ['local', row.device];
+    const canonical = resolveCanonicalProject(row);
+    const linked = row.project_owner && row.project_id;
+
+    let key;
+    let name;
+    let fullName;
+
+    if (linked) {
+      key = JSON.stringify(['project', row.project_owner, row.project_id]);
+      name = row.project;
+      fullName = row.project;
+    } else if (canonical) {
+      key = JSON.stringify(['canonical_project', canonical.id]);
+      name = canonical.name;
+      fullName = canonical.name;
+    } else if (row.remote && !isMeaningfulWorkspace(row.workspace)) {
+      unassignedRemoteRows.push(row);
+      continue;
+    } else {
+      const project = row.project || row.workspace || '';
+      key = JSON.stringify([...owner, row.project_id || row.workspace || '']);
+      name = project ? `${device} / ${row.project || workspaceName(row.workspace)}` : '';
+      fullName = project ? `${device} / ${project}` : '';
+    }
+
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        name,
+        fullName,
+        items: [],
+      });
+    }
+    groups.get(key).items.push(row);
+  }
+
+  const res = [...groups.values()];
+  if (unassignedRemoteRows.length > 0) {
+    res.push({
+      key: 'group:unassigned-remote',
+      name: '未归属探索会话',
+      fullName: '未归属探索会话',
+      isUnassignedGroup: true,
+      items: unassignedRemoteRows,
+    });
+  }
+  if (testRows.length > 0) {
+    res.push({
+      key: 'group:test-scratch',
+      name: '实验与临时测试',
+      fullName: '实验与临时测试',
+      isTestGroup: true,
+      items: testRows,
+    });
+  }
+  return res;
+}
+
+export function groupIconKind(group, mode = 'project') {
+  if (group?.isTestGroup || group?.isUnassignedGroup) return 'archive';
+  if (mode !== 'device') return 'project';
+  const sample = group?.items?.[0];
+  const node = sample?.node || {};
+  const text = [
+    group?.name,
+    group?.fullName,
+    group?.key,
+    node.label,
+    node.name,
+    node.remark,
+    node.baseUrl,
+    node.url,
+    sample?.device,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  if (/(phone|mobile|pixel|android|iphone|ios|ipad|手机|移动|平板)/i.test(text)) {
+    return 'phone';
+  }
+  if (/(vps|cloud|server|hostinger|racknerd|volc|aliyun|aws|gcp|azure|云|服务器)/i.test(text)) {
+    return 'cloud';
+  }
+  return 'computer';
+}

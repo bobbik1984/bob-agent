@@ -1,0 +1,13 @@
+{
+  "nativeSessions": 16,
+  "sameSessionId": "session-dab36d32-af81-4daf-96e1-2e6692cfaaac",
+  "userMarkerCount": 1,
+  "repliesAfterMarker": 1,
+  "userSequence": 9453,
+  "replySequence": 9458,
+  "partialHistory": true,
+  "sortedByActivity": true,
+  "newSessionCreated": false,
+  "filesModifiedByVerifier": false,
+  "scope": "one read-only progress prompt through local browser -> candidate bob-node -> native DSH"
+}

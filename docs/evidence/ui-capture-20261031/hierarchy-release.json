@@ -1,0 +1,23 @@
+{
+  "commit": "7d8a06e92d50acb5eb882f2e5e856511a35dcdfa",
+  "release": "conversation-hierarchy-20261031",
+  "dshNativeTransport": "verified-web",
+  "deployed": true,
+  "backup": "/opt/bob-online/backups/conversation-hierarchy-1793441124",
+  "frontendOnly": true,
+  "databaseChanged": false,
+  "serviceRestarted": false,
+  "localHttpReadback": "passed",
+  "indexSha256": "72a4c97d871880011f2ef65e3c35aba8a6cd72669ba354368e01d2223ae2533f",
+  "verification": {
+    "unitTests": "3/3 passed",
+    "frontendBuild": "passed",
+    "browser": "local and public real X1T directory",
+    "viewport": 390,
+    "directoryClientWidth": 302,
+    "directoryScrollWidth": 302,
+    "childIndentPx": 18,
+    "modelRequestsSent": 0,
+    "phoneApk": "not built or tested"
+  }
+}

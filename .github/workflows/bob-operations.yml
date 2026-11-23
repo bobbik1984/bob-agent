@@ -1,0 +1,48 @@
+name: Bob independent operations
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Operation on the configured Bob server
+        type: choice
+        options: [inspect, deploy]
+        default: inspect
+        required: true
+      source_sha:
+        description: Full tested source commit (required only for deploy)
+        type: string
+        required: false
+permissions:
+  contents: read
+concurrency:
+  group: bob-production-operations
+  cancel-in-progress: false
+jobs:
+  operate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Run configured operation over authenticated SSH
+        env:
+          BOB_DEPLOY_SSH_CONFIG: ${{ secrets.BOB_DEPLOY_SSH_CONFIG }}
+          BOB_OPERATION: ${{ inputs.operation }}
+          BOB_SOURCE_SHA: ${{ inputs.source_sha }}
+          BOB_SOURCE_REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 scripts/run-remote-bob-operation.py \
+            --operation "$BOB_OPERATION" \
+            --source-sha "$BOB_SOURCE_SHA" \
+            --repository "$BOB_SOURCE_REPOSITORY" \
+            --scripts scripts \
+            --result-file "$RUNNER_TEMP/bob-operation-result.txt"
+      - name: Retain redacted operation result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bob-operation-result-${{ github.run_id }}
+          path: ${{ runner.temp }}/bob-operation-result.txt
+          if-no-files-found: ignore
+          retention-days: 7

@@ -1,0 +1,315 @@
+# Bob — Decisions
+
+> 命名空间 `BOB-D-###`。引用前身项目决策写作 `APP-D-…`（旧 App）/ `ONL-D-…`（旧 Online）。
+> 状态取值：`proposed`（待用户裁决）、`accepted`（用户已确认）、`superseded`、`rejected`。已接受的决策不改写，变更通过新决策取代。
+
+---
+
+## BOB-D-001 — 统一项目在新目录重新组织，前身项目归档为 `legacy/v0.9`，新主线从 `1.0.1` 起步
+
+- 日期：2026-10-28　状态：**accepted**（用户确认）
+- **决定**：
+  1. 统一后的 `bob-agent` 在独立的新开发目录（本仓库，位于工作区规定的本地高速区）中建设。
+  2. 前身 `bob-agent`（旧单机 App，v0.9.30，提交 `a4ff5fd`）的完整 Git 历史拉入本仓库并归档至 **`legacy/v0.9` 分支**推送到 GitHub；前身原目录与 `cloud-agent`（旧 Online）保留原位作为只读参考和资产来源。
+  3. 统一后的新一代 `bob-agent` 版本号从 **`1.0.1`** 起步推进开发（建立 **`1.0.1` 分支**与快进演进的 `main` 分支）。
+- **理由**：避免在正有大量未提交改动的旧仓库里做结构手术；新目录不在 OneDrive 同步范围内，可以规避同步风暴；通过将旧历史归入 `legacy/v0.9` 分支并在其上快进开启 `1.0.1`，实现 GitHub 同名仓库 `bobbik1984/bob-agent` 的零冲突、不断代演进。
+- **约束**：从旧仓库迁入代码、数据或文档必须走获批的工作包。旧产品（App 0.9.30、Hostinger 上的 Online）在新内核对应能力通过验收前继续服务。
+
+## BOB-D-002 — 目标用户：白领与普通开发者，单用户多设备
+
+- 日期：2026-10-28　状态：**accepted**
+- **决定**：主要服务白领与普通开发者；不做公司级重型协同、多租户或团队权限。
+- **影响**：数据模型以“一个用户、几台设备”为前提；默认路径不能要求用户拥有服务器；开发者向的能力（Harness、代码审阅）是能力层，不是首屏门槛。
+
+## BOB-D-003 — 手机形态为 Tauri Android，iOS 后期再评估
+
+- 日期：2026-10-28　状态：**accepted**
+- **决定**：手机端沿用 Tauri（与桌面共享 Rust 内核和 Vue UI），先做 Android。iOS 在 BP7 再评估。旧 Online 的 Web/PWA 不再作为主要手机入口（取代 ONL Vision §8 的“PWA 默认”表述，仅对本项目有效）。
+- **影响**：内核必须能嵌入 Android（体积、依赖受控）；后台运行、推送与唤醒受 Android 限制，需要单独设计。
+
+## BOB-D-004 — 当前优先级：先完成作者本人完整的个人工作环境（主库在 X1C）
+
+> 当前适用性：全产品必须依赖X1C主库的解释已由BOB-D-012取代。历史部署可继续存在，但只约束明确共享对象；各实例可独立运行。
+
+
+- 日期：2026-10-28　状态：**accepted**
+- **决定**：近期交付目标是作者本人的设备与服务（**X1C 作为个人环境的 Home 主权威**，手机作为 Replica，常开节点与 Harness 主机按需接入）组成的可用环境。新项目位于本地高速区，**不依靠 OneDrive 或 Syncthing 同步，代码与文档通过 GitHub 同步**。开源通用化在 BP6 进行，但从第一天起不在代码中硬编码个人基础设施，避免日后返工。
+- **影响**：X1C 睡眠或关机时，手机端涉及 Home 修改的操作进入排队，并诚实提示状态；需要 7×24 可达时再评估常开节点与 X1C 的主权威切换。新项目必须在 GitHub 建立远端，未推送的改动没有跨盘备份。
+
+---
+
+## BOB-D-005 — 内核拓扑：一个内核，多种部署形态
+
+- 日期：2026-10-28　状态：**accepted**（用户确认统一内核）
+
+### 问题
+
+前身项目各有一个“工作内核”：旧 App 的 Persistent Work Core（Rust 加 SQLite，Project、Goal、Task、Decision、Artifact、Evidence 等，APP-D-008 / APP-D-018），旧 Online 的 Bob Core（TS 加 SQLite，Project、Task、Execution、Artifact、Verification、Review，ONL-D-001）。两者实体**同名不同义**。统一后应该是一个内核，还是保持两个各管一块？
+
+### 对比（以 BOB-D-002 的用户定位为前提）
+
+| 维度 | 统一（一个内核） | 分开（App 内核加 Online 内核） |
+|---|---|---|
+| 用户心智 | 一个 Bob、一个事项列表 | 用户要理解“本地事项”和“在线事项”以及两者之间的晋升 |
+| 无服务器起步 | 内核嵌入 App 即可完整运行 | App 内核可以，但 Work/Harness 能力必须依赖服务器 |
+| 跨设备一致 | 同一套语义：一个主权威（home）加多个副本 | 两套语义、一层映射、一套晋升和交接协议 |
+| 单人维护成本 | 一套 schema、迁移、测试 | 两套实体、两套迁移，映射层永久存在 |
+| 迁移代价 | **高**：Online 的治理语义（Task/Execution/成果版本/Review）要在新内核重新实现 | **低**：基本维持现状 |
+| 长期风险 | 一次性重写风险，可以用渐进替换缓解 | 双重权威漂移（同名实体已经出现） |
+| 常驻执行 | 同一内核以无界面形态跑在常开设备上 | Online 服务器承担 |
+
+### 推荐
+
+**统一的优势更大。** 你的用户是单人多设备、不能假设有服务器；分开方案最大的好处（迁移便宜）只是一次性的，而它的代价（两套语义加映射层）会伴随整个产品生命周期。推荐形态：
+
+1. **一个内核（`bob-kernel`，Rust）**：领域模型、状态机、存储、事件日志、权限与契约只实现一次。选 Rust 的理由：旧 App 已经是 Rust；能嵌入 Android；能编译成单一二进制，白领安装门槛低；常开节点也能跑同一个二进制。
+2. **多种部署形态**：嵌入 Tauri 桌面和 Android App；无界面的 `bob-node` 跑在常开设备或 VPS 上。三者是同一份代码。
+3. **执行适配走进程边界**：Harness runner（DSH、AGY、Codex、Generic API）通过版本化契约与内核通信，可以用任何语言实现。过渡期可以直接复用旧 Online 的 TS 适配器作为 runner，不必先重写。
+4. **数据：一个主权威加多个副本，不做多主合并**。每个用户指定一个 home 内核作为主权威（作者的个人环境可以是常开节点；普通白领默认是自己的 PC）。其他设备保存只读缓存和带 `expected_version` 的意图队列（outbox）。追加型对象（捕获、消息）可以在任意一端创建后汇入 home；修改已有对象必须由 home 接受，版本过期就拒绝并解释原因。
+5. **渐进替换**：旧 Online 继续在 Hostinger 服务，新内核先实现契约和领域语义；某项能力在新内核验收通过后，再迁移数据、退役旧路径。旧 Online 的约 6 万行 TS 中，直接复用的主要是设计、不变量和测试场景，而不是代码本身。
+
+### 需要验证（WP-02）
+
+- 旧 App 的 PC↔Android 同步引擎是什么模型（多主还是主从、冲突怎么处理），能否改造成“home 加副本”；
+- 两边同名实体的语义对齐表（Task、Decision、Artifact、Evidence、Goal 对 Execution）；
+- 把 Online 的治理语义移植到 Rust 的工作量估算；如果代价明显失控，退回“分开加契约优先”的方案，作为本决策的回退条件。
+
+### 被比较的其他选项
+
+- 单内核 TS，App 内嵌 sidecar：违背轻量交付，Android 基本不可行，**不推荐**。
+- 保持双内核，只做契约对齐：迁移最便宜，作为 BOB-D-005 的**回退方案**。
+
+## BOB-D-006 — 跨设备连接：分层连接，开源默认不依赖任何人的服务器
+
+- 日期：2026-10-28　状态：**accepted（设计）**；用户本轮明确同意 connectivity 与 threat-model 两份文档。现场安全与跨网验收未运行。
+- **决定**：连接抽象为 Connection Provider，按顺序尝试：局域网直连 → P2P 打洞直连 → E2EE 中继（可替换：社区中继、项目中继或自建）→ 借用用户自己的云盘做异步信箱。常开节点是可选增强。分析与依据见 [wiki/connectivity.md](wiki/connectivity.md)。
+- **个人环境（BOB-D-004）**：可以先用作者已有的自建中继和 Headscale，但必须作为可替换的 Provider 配置接入，不写死在代码里。
+- **待验证**：在作者的真实网络（家庭 Wi-Fi、4G/5G、办公网）上实测 P2P 直连成功率；评估云盘信箱的延迟和可靠性；威胁模型设计已获批，仍需按其中门槛验证实现。
+
+## BOB-D-007 — 文档权威位置与命名空间
+
+- 日期：2026-10-28　状态：**proposed**
+- **决定（草案）**：统一项目的权威文档在本仓库 `docs/`。Drive `bob-online/docs` 和旧 App `docs/` 继续作为前身项目的权威和历史，不再承接统一项目的新结论。ID 加命名空间前缀（见 [wiki/glossary.md](wiki/glossary.md)）。
+- **待定**：是否需要在 Drive 放一份只读镜像，方便手机端 Bot 和云端 Agent 读取。
+
+---
+
+## BOB-D-008 — 懒式响应（Lazy Response）与非即时模式下“发送必不失败”铁律
+
+- 日期：2026-10-28　状态：**accepted**（用户确认）
+- **背景与审计证据**：见 [evidence/2026-10-28-lazy-send-audit.md](evidence/2026-10-28-lazy-send-audit.md)。`legacy/v0.9`（提交 `a4ff5fd`）虽在 Work 面板引入了 `linkDormant` 懒式休眠同步，但仍存在 4 条会导致非即时模式下发送失败的漏洞（底层 Socket 刚断未进休眠时发送未出网即被误标为 `REMOTE_OUTCOME_UNKNOWN`、`connecting` 竞态跳过唤醒、唤醒重连后旧 `watchId` 触发 `REMOTE_STALE`、以及 Chat `@pc` 模式离线弹窗拒发）。
+- **决定**：`1.0.1` 统一内核全面采用**懒式响应（Lazy Dormant Connection）+ 本地持久化发件箱（Local-First Durable Outbox）**架构，并强制执行以下四条不变式：
+  1. **本地落盘即发送成功（Local-First Durable Outbox Acceptance）**：无论当前链路处于懒式休眠（`linkDormant`）、唤醒重连中（`connecting`）、L4 云盘信箱模式，还是 X1C Home 睡眠/暂不可达，用户点击“发送”时，只要消息写入本机 SQLite `intent_outbox`（带全局唯一 `request_id` 与幂等键，初始状态 `local_saved` → `queued_for_wakeup`）成功，UI 必须立即接纳消息上屏并清空输入框，**绝对禁止因为非即时连接状态而让发送动作失败或阻塞用户**。
+  2. **输入框聚焦/打字静默预热（Speculative Pre-Warm on Focus/Typing）+ 单飞唤醒复用（Single-Flight Wakeup Await）**：
+     - **打字即预热**：当用户点击输入框（`@focus`）或开始输入第一个字符（`@input`，带 15 秒节流冷却）时，若当前处于 `linkDormant`、连接未就绪或距上次心跳超过阈值，后台**静默启动预热探针与重连（Pre-Warm）**（`preserveView: true`，不置 `busy`、不闪报错条、不打断打字）。利用用户打字的 3～15 秒时间差提前完成隧道建连与 `session/watch` 握手，实现“打完字点发送即刻秒发”的无感体验。
+     - **单飞 Promise 共享**：预热与发送共用同一个 `inFlightWakeupPromise`。若用户打字极快、点发送时预热握手尚未结束，`send()` 直接 `await` 该在途 Promise 并在拿到新 `watchId` 后立即投递，既不重复建连，也不会因 `connecting == true` 跳过唤醒或误用旧 `watchId` 触发 `REMOTE_STALE`。
+     - **未发自动回眠**：若用户仅聚焦输入框但最终未发送消息，预热连接在空闲超时后自动回落至 `linkDormant` 休眠态。
+  3. **严格区分 `not_dispatched`（未出网）与 `unknown_send`（已出网未确认）**：
+     - 凡是在本地连接状态检查（`!alive`）、唤醒重连或 HTTP/QUIC 建连阶段失败（请求字节尚未写入网络流），一律归类为 **`not_dispatched`**，保留在 `intent_outbox` 中等待通道就绪后自动重发，**严禁打入 `REMOTE_OUTCOME_UNKNOWN` 锁死会话**。
+     - 仅当请求字节已写入传输层、在等待 ACK 期间连接中断时，才标为 **`unknown_send`**；重连后由内核先携带同一 `request_id` 自动向对端查询幂等回执对账，未执行则自动补发，已执行则直接绑定结果流。
+  4. **空会话一致休眠**：无论会话是否已有历史消息（含 `messages.length === 0` 的新建会话），只要处于静止阶段且无待确认交互，空闲断连一律平滑进入 `linkDormant` 懒式休眠。
+
+## BOB-D-009 — 扫码即设备确认，首连不追加多步设置
+
+- 日期：2026-10-29　状态：**accepted**（用户明确要求“扫码就默认是完全确认了，现在先打通”）。
+- 对默认QR路径，短时邀请的首个有效私钥持有证明自动完成设备授权、保存和可用只读回复启用；不要求再选角色、粘贴JSON、核对指纹或再点启用。
+- 延续已批准的365天设备消息访问、Home可撤销以及最长1小时的有界只读执行；不据此开放真实项目写入、生产发布或无期限执行。相机权限仍遵循Android系统要求。
+- 此条取代connectivity旧QR流程中的扫码后Home人工确认与首次单独启用步骤；高级手工诊断路径保留原有显式动作。以后新增确认/密码须基于明确风险另作产品决定，不默认堆叠首连步骤。
+- 协议仍核验证书、PoP、有效期、单次消费、精确设备/会话和持久化；保存失败不得授予权限。扫码不代表网络必然可达，异地公网通道仍是现有BP3未完验收项。
+
+
+---
+
+## BOB-D-010 — 多节点统和工作模式：快慢双轨调度、异构能力互借、原生子代理与项目画像胶囊
+
+> 当前适用性：认知主账本以BOB-D-012的对象归属为边界，不表示全产品只有一个强制中心；快慢轨及能力借用设计不变。
+
+
+> 实施边界已由 BOB-D-011 部分修订。以下保留决策历史；当前模型选择、许可表述、胶囊预算与执行顺序以 D-011 为准。
+
+- 日期：2026-10-31　状态：**accepted**（用户确认设计边界，实施归入 BP4/F5/F6）
+- **背景**：
+  1. 作者个人工作环境包含随身手机（Android）、移动开发本（`X1C`）、常驻云端节点（`VPS2` / `bob-online`）以及带独显与实体显示器的桌面主机（`bobbik-pc`，角色定义见 cluster-ops `node_inventory.md`）。
+  2. 长周期软件工程任务的胜负取决于模型之外的 Harness（上下文治理、可组合执行轨道、运行时动态验证与子代理协同）；一年前的 `code_runner` 静态重型 DAG 代码已不适配当代模型的原生规划能力，应予退役。
+  3. 跨设备调度官方 CLI（如 `agy`、`codex`、`dsh`）需明确区分“合理的单用户低频任务卡/持久会话自动化”与“违规逆向 Token 或将个人订阅包装为高频第三方聊天接口”。
+- **决定**：
+  1. **三层解耦的统和拓扑（任意端操作 + 单一认知账本 + 节点能力全网互借）**：
+     - **任意设备皆为操作端（Operator Surface）**：手机、浏览器、任意电脑（`X1C` 或 `bobbik-pc`）均可作为操作入口发起对话、审阅成果与派发任务。
+     - **项目按需驻留或经 Git 显式交接**：遵循 `Project ≠ Workspace ≠ Host`，80% 专项工程可单机驻留于最匹配的节点（如 3D/渲染项目驻留 `bobbik-pc`，24h 服务驻留 `VPS2`），操作端隔空下发指令并收回成果快照，无需全网克隆所有仓库；多机接力开发的核心工程通过 `workspace_handoff` 基于精确 Git commit 与检查点显式交接写入权。
+     - **节点专长能力互借（Federated Node Capabilities）**：各节点通过 `RuntimeCapabilityManifest` 声明可被授权节点借用的能力（均由配置驱动，源码零硬编码）：
+       - **海外模型出口代理（`overseas_model_egress`）**：如海外 `VPS2` 节点代国内设备发起合法商业 API（BYOK）请求，API Key 留在节点本地 Vault；
+       - **独显与实体显示器渲染验证（`gpu_display_render`）**：如 `bobbik-pc` 节点提供 GPU 算力、Godot / Blender / 高分屏浏览器实机渲染与截图回传，供无头 `VPS2` 或轻薄本借用；
+       - **全天候常驻执行沙箱（`always_on_harness`）**：由常开节点承接合盖/离线期间的长周期后台任务。
+  2. **快慢双轨制与原生子代理（Subagent）分工（合规边界）**：
+     - **快轨（日常高频对话 / 灵感整理 / 任务卡规划 / 轻量并发 Subagent）**：100% 走 `bob-runtime` 内置的正规商业 API（BYOK，`ModelHubRuntime`）。“分配任务给子代理（`invoke_subagent`）”作为 Harness 能力在 `bob-runtime` 内生实现：主控会话调用旗舰模型 API，当触发子任务拆分时由 Rust 内核并发调用轻量模型 API（如 Flash 系列）并在独立上下文中收敛结果，毫秒级响应且完全符合商业 API 条款。
+     - **慢轨（正式工程实施 / 深度算法攻坚 / 持续沙盒会话）**：采用 **“低频结构化《任务卡（Task Card）》委派 + 持久会话（ACP `session/prompt`、`--resume` 或单次完整任务进程）”** 调用目标工作区节点的官方原版 CLI（`agy`、`codex`、`dsh`）。
+     - **合规红线**：严禁提取/逆向官方 CLI 的个人订阅 OAuth Token 伪装 API，严禁将个人订阅包装为多租户公共服务，严禁在用户每发一句话时高频冷启动一次 CLI 进程充当聊天接口。桌面端 Antigravity 与 Bob 采取正向协同（人在电脑前用 Antigravity 读写本地项目/待办，出门后用 Bob 继续），互不反向套壳。
+     - **退役旧 `code_runner` 代码**：不再复用旧 `code_runner` 的 Python 静态 DAG 源码，仅保留其“人类专注目标输入与 V1/V2 阶段成果审阅”的产品逻辑，在 `bob-kernel` + `bob-runtime` 中以薄轨道（Thin Rails：Context / Session / Verify / Delegate）原生实现。
+  3. **防跑偏机制：项目画像胶囊（Project Context Capsule）与两段式任务卡**：
+     - 为防止操作端快轨模型在无完整源码时写出脱离实际的任务卡，代码驻留节点在绑定工作区、Git 提交或执行完成时，自动提取并向主账本同步一份轻量（3～8KB）的 **项目画像胶囊（`ProjectContextCapsule`）**，包含：① 项目 `AGENTS.md` 宪章与测试命令摘要；② 仓库关键目录树与核心导出符号签名；③ 该项目已生效的 `Decisions` 与 `Memories`；④ 当前 `todo.md` 与最近一次 `Artifact`（V1/V2）审阅结论。
+     - **两段式防偏分工**：第一段（快轨规划）自动挂载该项目画像胶囊，生成的《任务卡》负责锁定**业务目标、真实模块路径范围、架构红线（引用 Decision）及验证钩子（如派发 `bobbik-pc` 渲染截图）**，不盲猜具体代码行号；第二段（慢轨执行）在驻留节点打开真实文件定位行号、完成修改与验证，并在结束时自动刷新项目画像胶囊与成果快照。
+
+## BOB-D-011 — 连续开发优先与BOB-D-010实施边界修订
+
+> 当前适用性：认知主账本以BOB-D-012的对象归属为边界，不表示全产品只有一个强制中心；快慢轨及能力借用设计不变。
+
+
+- 日期：2026-10-31；状态：**accepted（设计）**。来源：用户采纳本轮文档/代码审查并要求写入连续执行指引；不表示已实现或获准生产迁移。
+- 保留D-010三层解耦、能力互借、上下文索引及两段式委派方向；本条取代其“100%合规/毫秒级响应”、固定模型等级、强制每次快轨前置和固定胶囊体积的实施解释。D-010原文保留为历史决策依据，现行细则以本条和kernel-schema §10为准。
+- 已绑定Harness的原会话可以直接继续，不强制BYOK规划、不因消息短就换轨。用户仍使用一个连续对话；轨道是内部策略。
+- 商业API与官方CLI各按提供方条款和实测能力接入；禁止窃取/逆向订阅凭据及未授权转售。进程冷启动频率是效率策略，不是通用违规判据；供应商核查逐项留日期/来源/认证范围，不作百分之百合规保证。
+- 胶囊是有来源、可失效的project+workspace索引，不能代替原文、权限或现场核查。3～8KB仅为预算目标，不承诺字节到token固定比例。
+- 保持kernel拥有领域状态与授权，runtime负责外部调用/调度；子代理复用同一Task/Execution体系。单执行者成果闭环先于并发池。
+- D-004的X1C Home未被本次取代：已有授权在途任务与新治理写入分开。常开Home迁移需另行批准并证明单写者、恢复与撤销。
+- 不复用旧code_runner实现不授权退役其他项目。实施顺序唯一见CURRENT_STAGE §3；节点权限、真实模型/渲染和发布继续遵守具体操作门槛。
+
+## BOB-D-012 — 独立实例与对象级权威
+
+- 日期：2026-10-31；状态：**accepted（用户明确确认）**。来源：用户澄清手机、PC、Linux/VPS均可独立配置模型并工作，要求归并并实施默认助理闭环。
+- 最小产品是一个独立实例，持有自己的内核、持久对话、个人资料与凭据；不要求先配对PC或部署VPS。手机+PC是常见组合，个人工作集群是扩展形态。
+- 浏览器是其所连接实例的操作界面，不因打开一个标签页就产生另一个权威节点。VPS可以运行独立实例并提供随时访问的网页；常开不自动赋予全局主控权。
+- 每个共享对象只有一个明确的owner instance及版本；对象引用携带来源命名空间与原ID。各实例拥有自己的对象，不使用一个全局Home限制全部本地操作。现有Home/Replica协议只解释为已建立共享关系的授权和接纳机制。
+- 原生DSH会话归原DSH服务；Bob保存关联、派发回执和有来源的结果，不复制成另一个权威会话。工作区文件归驻留节点；同名目录、相同GitHub URL或设备配对均不自动合并所有权。
+- 共享对象的owner离线时，相关写入等待或明确失败；本实例普通对话和捕获继续。所有权迁移仍需显式交接、版本核对及单写者保护，不自动抢占未知执行。
+- 默认助理是本实例持久Conversation；当前选定模型可提出关联建议，目录身份与既有授权由内核/宿主核对。直接进入原会话仍固定目标。派发和结果引用沿既有Outbox、Execution及回执，不另造任务生命周期。
+- **替代范围**：替代D-004、D-005、D-010、D-011中“每用户必须以X1C或某台Home为全部对象的唯一主库”的解释；保留单一Rust实现、每对象单写者、凭据隔离、幂等和人工审阅要求。旧记录为历史，不授权迁移现有数据或凭据。
+- 本条是已确认设计，完整对象联邦与自动迁移尚未实现；实施事实只看CURRENT_STAGE。
+
+
+### BOB-D-011/012 实施澄清（2026-11-01）
+
+沿既有决策推进，不新增决策编号：同构指统一任务、回执、取消与成果契约，不要求所有平台同一进程管理器。tmux限实际支持节点；原生恢复不保证完整上下文或缓存命中。会话失效时先核对原执行及授权，再决定有界上下文新执行；对象Owner与工作区写入权显式交接。具体实施约束归kernel-schema §10.5，进度只看CURRENT_STAGE。
+
+### BOB-D-010 / BOB-D-011 / BOB-D-012 补充解释：设备入口与项目组织
+
+2026-11-02用户确认，状态accepted（设计接受，不代表实现完成）。沿用三项决策，不替换独立实例、原生会话和对象Owner边界。
+
+选择“一次添加设备，按能力选择Harness；按项目跨设备组织会话”。拒绝把每个工具端口变成一个用户必须重复配置的设备，也拒绝以相同目录名推定项目身份。理由是用户工作的连续性由项目表达，工具和设备只描述执行位置与方式。域名是入口而非身份；tmux是执行层而非连接层。SSH作为兼容通道保留，最终执行监管落在工作区节点。明确关联和保留原生会话避免误合并历史；该选择不意味着代码自动同步或共享对象可多端同时写入。完整边界见ARCHITECTURE“设备统一入口与跨设备项目组织”，实施沿BP4-01/02/06/07。
+
+### BOB-D-010 / BOB-D-011 补充解释：受控主路由、执行防退化护栏与 CLI 反套壳合规边界（2026-11-02）
+
+状态：accepted（架构与施工约束归并，不代表代码已全部验收）。
+
+1. **吸收 `dsh-superagent-prototype` 的 Router-Worker / Observe 思想**：置顶主 Agent 扮演轻量常驻路由器（Resident Router），通过 Observe/Ticket 草案卡缓冲跨设备派发，将过程噪音隔离在 Worker 会话内，仅回流终态成果与待决问题，保护用户注意力。
+2. **吸收三项智能体可靠性研究作为内核/Runner 客观锚点**：针对大模型内生决策边界脆弱问题，以回执前置冻结 `ExecutionAssertion`（防盲目质疑导致 54.7% 错误反转）、任务卡减法原则+全绿锁写（防 226:1 加法重构膨胀与暗中改写）、以及 `ProjectContextCapsule` + `WarmRestartState`（跳过前 20k Token 盲探并避免冷重启丢失探索资产）作为标准治理机制。
+3. **厘清 `tmux` 保活与反套壳（Anti-Wrapping）合规边界**：`tmux` 仅用于解决 Linux/macOS 下 SSH/PuTTY 关闭引发的 `SIGHUP` 进程挂断问题，**不能消除或规避厂商的反套壳条款**。因此对官方支持非交互式 CLI 与会话恢复的工具（`DSH`、`Claude Code -p --resume`、`Codex exec resume`）采用目标端宿主守护 + `tmux` 保活 + 原生 `session_id` 续接；对 `AGY` 等交互式 IDE 工具严禁通过凭据提取或 `tmux` 刮屏做后台套壳，仅通过工作区规范文档与 `ProjectContextCapsule` 实现合规协同。
+
+研究整合补充说明（2026-11-02）：研究数字是来源主张，缺原论文及实验条件时不作Bob效果承诺；自评置信度不替代验证，用户反馈不因测试通过而失效。“全绿锁写”按执行终止、证据持久化和候选冻结解释，不能提前释放未知执行租约。现行实现边界见ARCHITECTURE“自治护栏的证据与反馈边界”；各工具许可须按官方来源另行核查，不作100%合规/不封号保证。
+
+## BOB-D-013 — 原生持久接口优先与标准 Harness 适配组件
+
+- 日期：2026-11-04；状态：accepted（用户确认的设计，未宣称运行接线完成）。
+- 采用官方持久服务/子进程协议优先、tmux 兼容保活的策略；统一的是认证、会话、事件、回执与成果契约，不是进程启动形式。
+- 替代 D-010/011 后续解释中“所有 CLI 均需 tmux”及“AGY 仅能通过文件协同”的实施限制；保持 D-012 独立实例、对象 Owner、原生会话身份及权限不扩张。
+- 理由：官方程序接口保留流式事件、审批与会话身份，减少终端包装脆弱性；官方远控 UI 不自动等于第三方控制 API。仅提供官方远控的工具可保留外部打开入口。
+- 能力以官方文档、节点版本实测、Bob 链路验收三层区分；配置表不能替代探测。供应商认证用途须另核查，特别不将 app-server 本地认证直接用于商业/托管服务。
+- 当前架构见 ARCHITECTURE；适配器及流式契约唯一见 wiki/harness-auth §6；施工沿 BP4-06 / F2/F5，无新增总计划。
+
+
+## BOB-D-014 — 单一收集箱与每日幕僚长分拣（One Inbox, Sorted Once a Day）及五栏导航职责收敛
+
+- 日期：2026-11-08；状态：**accepted（设计立项，尚未施工）**。来源：用户引入并确认“One inbox, sorted once a day”概念设计，要求写入项目开发文档作为后续推进指南。
+- **背景**：
+  1. 原有灵感入口分散在三处（Dashboard `#inbox`、Bob「闪念摘录」、以及「日程 → 待办事项」下的收件箱），且写入时需选择项目或类型，违背“2 秒随手记”的认知规律。
+  2. 「日程」、「收集箱」与「知识」边界模糊，未整理的碎片与已沉淀的笔记/决定混杂。
+- **决定**：
+  1. **捕获与分拣彻底解耦（Capture Now, Sort Once a Day）**：
+     - **捕获层（Zero-Decision Capture）**：全平台（手机、Web、桌面悬浮按钮及外部 Share/API）统一写入唯一的云端同步 **收集箱（Inbox）**。支持纯文本、照片、语音；写入时**不强制**要求项目、标签或日期，支持离线先存本地、联网自动同步。
+     - **状态与溯源（Never Deleted, Linked to Destination）**：每条 Spark 仅有两个核心状态：`unsorted`（未分拣）与 `sorted`（已分拣）。已分拣的 Spark 永不静默删除，而是持久保留指向其最终去向（目标项目 `todo.md`、日程事件或知识笔记）的可点击溯源链接（Destination Chip）。
+  2. **Bob Core 幕僚长每日批处理分拣（Daily Sort & Review Card）**：
+     - 每天固定时间（可配置，如 21:00）或用户手动触发时，由自包含的 `Bob Core`（复用当前选定的主对话模型，不依赖宿主预装外部 CLI）批量读取 `unsorted` Sparks 并结合 `project_registry.yaml` 生成一张聚合的 **每日分拣确认卡（Daily Review Card）**，提供五类去向建议：
+       - `→ Project todo`：匹配项目并准备写入对应项目的 `todo.md`；
+       - `→ Calendar`：含时间语义的事项转为日程/提醒；
+       - `→ Note / Knowledge`：沉淀为结构化笔记，后续支持一键在对话中“展开这个想法（Develop this idea）”；
+       - `→ Merge`：将多条同主题碎片合并为一项；
+       - `→ Keep for later`：暂不处理，继续留在收集箱。
+     - **人类确认门禁（Human Confirmation Gate）**：未经用户在 Review Card 上点击「确认 / 全部确认」，不产生任何跨模块写入副作用。
+     - **跨端 `todo.md` 写入策略**：对已通过 Syncthing 同步至常驻节点的工作区或全局 `todo.md` 直接落盘；仅存在于离线 PC 本地独有路径的项目 `todo.md` 诚实标记为 `Waiting for PC`（进入持久化 Outbox 队列），待 PC 节点重连后由 PC 端完成写入并回填状态。
+  3. **五栏导航职责重划（Time vs. Spark vs. Knowledge）**：
+     - **对话（Chat）**：与 Bob 主助理对话及各项目工程会话；
+     - **今天（Today，原“日程”）**：只关注时间与当下行动（今日议程、待办事项、定时任务）；
+     - **收集箱（Inbox）**：未分拣的原始火花（带轻量角标计数）+ 每日分拣确认卡；统一替代旧 Dashboard `#inbox`、闪念摘录与日程收件箱；
+     - **知识（Knowledge）**：仅存放**已分拣沉淀**的材料（笔记、决定记录、长期记忆）；
+     - **我的（Avatar / Profile）**：设置、设备连接、模型配置与**票夹**（收拢至单一入口，不再多处重复）。
+- **实施路由**：视觉与交互约束归并入 `docs/DESIGN_PRINCIPLES.md`，能力验收归并入 `docs/FEATURES.md §F3`，分阶段施工步骤维护于 `docs/CURRENT_STAGE.md §3.10`。
+
+
+## BOB-D-015 — 单一主干吸收 `bob-bot`、Jarvis 彩色球与桌面小组件主界面、无 Node 纯 Rust 自扩展及渐进式三层产品结构
+
+- 日期：2026-11-11；状态：**accepted（2026-11-12 状态更新：`WP-J1`～`WP-J6` 全栈源码、359 项 Rust 单测、207 项前端单测及常驻节点部署已完成，见 [WP-J1～WP-J6 验证回执](evidence/2026-11-11-wp-j1-j6-jarvis-convergence-verification.md) 与 `CURRENT_STAGE.md`；剩余宿主机真实浏览器实连、真机终端验收及后续系统性进化转入 `BOB-D-016`）**。来源：用户对历代 Bob 项目（旧版 `bob-agent`、`bob-bot`、`code_runner`、`cloud-agent`、当前 `bob-agent-next`）产品层级、主界面形态与统一开发路线的最终裁决。
+- **背景**：
+  1. 评价标准从“新版是否逐项覆盖旧版全部功能”转向“每一层用户能否用适合自己的复杂度把事情顺畅做完”。
+  2. `bob-bot` 原型已验证了极简单一对话入口、彩色球（Orb）状态表达、云浏览器手机虚拟窗口接管、Routine 示教与待批草稿、四档主动关心及 3 分钟试用沙箱功能包的体验优势；其 `Node.js + DSH` 只是临时推理脚手架，并非核心。
+  3. 当前 `bob-agent-next` 已具备跨平台 Rust 内核与多节点底座，但置顶主助理（`crates/bob-runtime/src/assistant.rs`）仍是单轮 JSON 意图分类器，缺乏多步自主执行与自扩展能力，且首屏默认暴露了面向专业集群（L3）的节点、Harness 与额度概念。
+- **决定**：
+  1. **单一生产主干与原型实验室分工**：
+     - **`bob-agent-next` 为唯一正式开发主干**（Rust 单一内核 + Linux `bob-node` 常驻网页/PWA + Tauri 桌面端 + Tauri Android 客户端），取消在 `bob-bot` 仓库另建独立 `bobbot-server` Rust 分叉的计划。
+     - **`bob-bot`（`prototype/`）长期保留为轻量交互与能力研究原型实验室**，其已跑通的能力与 61+ 项端到端/浏览器/UI 验收用例逐包迁入 `bob-agent-next`。
+  2. **Jarvis 主助理合一（彩色球 + 桌面小组件 + 单一交流主窗口）**：
+     - `bob-bot` 的单一交流主界面与 `bob-agent-next` 置顶的主 Agent 合一为同一个角色：**直白、自主的 Jarvis 个人助理**，直接面对用户完成回复、多步执行或跨设备任务派发。
+     - 默认主界面始终保持克制：以类似 Siri 唤醒态的**流体彩色能量球（Jarvis Orb）**表达空闲、思考、工具执行、播报与等待人工确认/接管状态，并在主屏承载**类似手机桌面的可按需增删小组件网格（Widget Grid）**（含系统内建组件与用户通过对话让 Bob 现场生成的自定义小组件）。`今天 / 收集箱 / 知识 / 我的` 与会话目录作为次级视图或抽屉保留，不把重型运维面板强加于首屏。
+  3. **纯 Rust 自主主脑与零 Node 依赖自扩展**：
+     - 以纯 Rust 内置 **`BobNativeHarness`**（多服务商逐字流式 ReAct 循环 + 工具调用循环熔断器 + 默认 `$10` 月度花费上限）配合统一**工具与门禁总线（Bob Tool Bus + Action Gates）**替换 `assistant.rs` 单轮 JSON 分类器；同时保留标准 `AgentHarness` / 本地 MCP 窄接口，允许按需由外部 Harness（DSH、Claude Code、Codex、AGY）支撑任务执行。
+     - **严禁在正式版引入 Node.js 运行时依赖**：功能包（Feature Packages）前端小组件与设置面板运行于无凭据沙箱 `<iframe sandbox>` + `@scope` CSS；功能包服务端微型工具与路由运行于 `bob-runtime` 内嵌的轻量 **`QuickJS`（`rquickjs`）能力沙箱**（仅暴露经公网地址守卫过滤的网络请求、限额键值存储与工具/路由注册），完整保留 **3 分钟试用（保留 / 撤销 + 5 版本自动回退）** 治理机制。
+  4. **产品能力分三层，与设备数量和部署形态解耦**：
+     - **L1 个人助理**：随手捕获、待办日程提醒、Routine、云浏览器手机接管、成长回路（遥测→夜间做梦→每日晨报/四档主动关心→知识检索）与小组件自改造；默认隐藏节点、端口、Harness 与订阅额度名词。
+     - **L2 工作助理**：连接“我的电脑”（运行同一 Rust 内核与 `BobNativeHarness`），支持授权目录文件处理、本机浏览器/脚本审批，以及跨文稿/设计图/网页的 **V1→V2 成果批注与对照续改**。
+     - **L3 专业工作台**：按需展开多节点目录、多外部 Harness 原生会话续聊、项目画像胶囊、GPU/海外出口借用与订阅额度小组件；置顶 Jarvis 兼任跨节点幕僚长。
+- **实施路由**：愿景分层归并入 `docs/PROJECT_VISION.md`，系统结构归并入 `docs/ARCHITECTURE.md`，视觉与小组件交互归并入 `docs/DESIGN_PRINCIPLES.md`，分层能力验收归并入 `docs/FEATURES.md`，里程碑与 6 个可独立交付工作包（`WP-J1`～`WP-J6`）归并入 `docs/DEVELOPMENT_ROUTE.md` 与 `docs/CURRENT_STAGE.md`。
+
+
+## BOB-D-016 — 后 `WP-J6` 系统性进化：白领生产力对齐、三路径零门槛安装与 MCP/Plugin/Skill 三层扩展边界
+
+- 日期：2026-11-14；状态：**accepted（架构与长期路线立项，待按 `WP-E1`～`WP-E4` 递进施工）**。来源：基于已落地的 `WP-J1`～`WP-J6` 底座，对标全托管云端竞品（如 Grok Bot 等）的白领办公体验差距，并系统确立多平台傻瓜安装体系与后期扩展架构。
+- **背景**：
+  1. `WP-J1`～`WP-J6` 已打通纯 Rust `BobNativeHarness`、Jarvis 水滴主屏、手机桌面小组件、无凭据沙箱 3 分钟试用、`bob-browser` CDP 手机虚拟接管、`V1→V2` 批注审阅与单 VPS 模板；
+  2. 但面向非技术白领日常办公时，对比全托管云端竞品仍存在 4 项短板：**办公 SaaS OAuth/MCP 一键直连缺失**（`McpStore` 尚未实现真实远程握手）、**PDF/Excel/Word 原生读写生成工具缺失**、**常用 IM 随手交代与推送门槛较高**、**首次自托管部署仍需手工运维**；
+  3. 同时 Bob 拥有 4 项明确反超竞品的差异化护城河：**本机住宅 IP 浏览器与授权文件夹协同（L1→L2 无缝接力）**、**`V1→V2` 成果圈选批注对照定稿**、**一句话自生长且 3 分钟试用自动回退的小组件机制**、**BYOK 可预期低花费（默认 `$10`/月硬上限）+ 密码零入模 + 无人值守强制转待批草稿**。
+- **决定**：
+  1. **快慢双模分流与白领生产力补齐**：
+     - 置顶 Jarvis 主脑明确拆分为 **`Resident Clerk`（快模型秒回与记忆检索）+ `Async ReAct Worker`（后台多步工具执行与进度推送）**，消除复杂任务阻塞对话输入手感；
+     - 在 `BobNativeHarness` 内置纯 Rust 办公文档读写原语（解析 PDF / `.xlsx` / `.docx` / CSV 并产出可下载报告，直连 `ArtifactRevisionReview` 完成 `V1→V2` 批注定稿）及统一 `ChannelAdapter`（飞书 / Telegram / 官方微信桥）。
+  2. **三路径零门槛安装体系（与 L1/L2/L3 产品界面解耦）**：
+     - **路径 A（零服务器·电脑直装版，推荐 80% 新用户首日使用）**：Windows/macOS 桌面安装包托盘常驻 + 首次启动 **3 步图形向导**（选预设服务商贴 1 个 Key 自动绑定快慢双模 → 勾选 1 个授权工作文件夹 → 弹出配对二维码供手机扫码双向 TLS/通道直连），零 VPS/域名/配置文件门槛；
+     - **路径 B（7×24 云端常驻·90 秒预编译引导安装）**：通过 CI 发布内置 `bob-node` + Headless Chromium + `fonts-noto-cjk` 中文字体的多架构预编译镜像与静态二进制，彻底避免 2C/4G 机器现场编译 Rust OOM；配合单行交互式引导器（仅询问域名或隧道，输出 6 位首次配对码），浏览器直接进入同一 3 步图形开箱向导，并同步提供 1Panel / CasaOS / NAS 标准应用模板；
+     - **路径 C（云 + PC + 手机混合完全体）**：云端用户随时扫码将办公室/家用电脑挂载为受控执行节点，保持 L1/L2 简洁体验不退化为运维台。
+  3. **零 Node.js 必经依赖的三层正交扩展架构**：
+     - **MCP 连接层（双向）**：`bob-runtime` 实现纯 Rust **MCP Streamable HTTP 客户端 + OAuth 2.1 令牌保险箱**（桌面端按需支持本地 `stdio` MCP）；外部工具注入 `BobToolBus` 时，除显式验证只读外默认标为 `SideEffect`（交互弹审批卡，无人值守 Routine 强制存为 `SavedActionDraft` 防提示词注入）；`bob-node` 继续作为受控 MCP Server 对外提供细粒度授权接口；
+     - **Feature Plugin 层（`.bobpkg` 可视化小组件与微应用）**：前端无凭据 `<FeatureWidgetFrame />` + 后端将声明式路由升级为内嵌纯 Rust **`rquickjs`（`QuickJS`）隔离沙箱**（16MB 内存上限、500ms 单次执行超时、无文件系统/子进程/内网套接字权限，仅开放经 `net_guard` 过滤的 HTTP 请求与 8KB 键值存储），严格继承 **3 分钟试用 + 5 版本自动回退**；
+     - **Skill / Routine 模板与渠道适配层**：声明式 Markdown/YAML 技能库（受 `SYSTEM_PROMPT_SKILLS_BUDGET_CHARS` 预算约束）与标准化 `RoutinePlaybook` / `ChannelAdapter`。
+- **实施路由**：安全与隔离边界入 `docs/ARCHITECTURE.md`，长期阶段与 Exit Gate 入 `docs/DEVELOPMENT_ROUTE.md`，模块落点索引入 `docs/COMPONENT_MAP.md` 与 `docs/LLM_WIKI.md`，具体施工任务卡唯一维护于 `docs/CURRENT_STAGE.md §5`。
+
+---
+
+## BOB-D-017 — 去开发本机（X1C）单点依赖与无状态多参谋长（Chief of Staff）可插拔总线契约
+
+- 日期：2026-11-15（落地登记：2026-11-16）；状态：**accepted（已确立为远程优先与多参谋长平权协作架构标准，按 `WP-C1` 落地核心闭环）**。来源：用户要求后续工作可在非 `X1C` 设备（手机、`X1T`、`VPS`、外部对话入口）独立闭环，并支持 `bob-online` 主对话、`grok_bot`、`meta_muse` 平权下达指令与回收成果，且日后停订外部服务时可零损耗移除。
+- **背景**：
+  1. 过去部分工作流（Codex 本地库、Google Drive 同步任务等）隐含依赖 `X1C` 开机中转；离开电脑后跨端推演与派单体验受限。
+  2. 随着 `VPS2` 常驻 `bob-online` 与 `X1T`/`VPS3` 各节点就位，统一将全集群收敛到 `~/work` 标准结构与 Syncthing `~/work/common/`；与此同时，外部助理（`grok_bot`、`meta_muse`）目前仅接通项目关联与待办读写（`/api/bot/v1/mcp`），尚缺统一的标准派单与回执检索协议。
+- **决定**：
+  1. **去 `X1C` 单点依赖（Peer-Terminal Model）**：`X1C` 定位为对等可选终端；各常驻节点（`VPS2` / `VPS3` / `X1T`）持有独立的 `~/work/code/*` Git 克隆与边缘凭据（不跨节点复制个人凭据），通过 `~/work/common/chief_briefing.py` 7×24 本地聚合脱敏项目战报至 `~/work/common/interchange/chief_briefing.{yaml,json,md}`。
+  2. **无状态多参谋长可插拔总线（Pluggable Chief-of-Staff Bus）**：
+     - `bob-online` 主对话、`grok_bot`、`meta_muse` 作为**无状态轮值参谋长（Planner / Chief Seats）**平权接入同一契约：`bob_briefing`（读取获准项目态势、开源待办、跨席位最近指令与回执）→ `bob_order_submit`（提交带幂等 `request_id` 与目标约束的标准指令单）→ **`bob-online` 唯一主权账本与手机审批门禁（`pending_approval` → `ApprovalRequest`）** → 执行完成后写入 `ChiefOrderReceipt` → 任一参谋长通过 `bob_orders` 回收成果。
+  3. **零锁定退订保证（Zero-Lock-In Unsubscribe）**：外部参谋长不持有项目记忆库或节点执行权，所有状态、决策与回执均沉淀在 `bob-online`（`chief_orders.json` / `kernel.sqlite`）与 Git 仓库 `docs/`。在 `bot-grants.json` 将某一席位标记为 `revoked: true` 即刻吊销其访问并下线，保留该席位历史订单与成果记录供其余席位无缝接力，对主系统零损耗。
+- **实施路由**：安全与权限边界入 `docs/ARCHITECTURE.md`，`WP-C1` 交付回执入 `docs/CURRENT_STAGE.md` 与 `progress.yaml`。
+
+---
+
+## BOB-D-018 — 单一主 Agent 对话窗统筹调度架构：确定性建项、真实跨节点派发、L1 自动审阅与 L2 进度熔断闭环
+
+- 日期：2026-11-20；状态：**accepted（已合入主干并完成后端/前端核心闭环实现）**。来源：用户确立最终产品形态——网页端与手机端统一以 `bob-online` 主 Agent 为唯一日常工作入口，底层多节点项目会话退居可下钻执行层，避免手动进入单一项目会话反复编写指令，同时杜绝多 Agent 自主调度失控烧光订阅额度。
+- **背景**：
+  1. **新建项目目录时序悖论**：在父目录启动 Coding CLI（Codex / AGY / Claude）再由模型新建子目录，会导致 `cwd` 沙箱放大、无法加载子目录 `AGENTS.md`/`.git`、会话归档错位与长对话路径漂移。
+  2. **跨节点派发与回调断链**：`BobToolBus` 原 `dispatch_to_node_session` 为占位实现，且子节点完成后无法自动唤醒主 Agent 评审并向手机推送下一步建议。
+  3. **纯预算百分比上限的局限**：固定消耗百分比会导致小任务过度空转、大任务中途腰斩，必须以**阶段门（Stage Gates）+ 完成定义（DoD）+ 跨轮无进展熔断**作为停止控制条件。
+- **决定**：
+  1. **确定性建项原语（`node_bootstrap_workspace` / `app_node_bootstrap_workspace`）**：
+     - 建目录 / `git clone` → 最小骨架初始化 → 写入节点 `WorkspaceGrantStore` 授权，全部由确定性 Rust 原语执行（严格校验 `slug` 与 `git_url`，禁止路径逃逸与系统目录写入，受 `SideEffect` 审批门禁保护）；完成后再以精确 `workspace` 作为 `cwd` 启动节点 Coding 会话。
+  2. **真实跨节点派发与持久化调度账本（`bob-runtime::orchestrator` + `bob-node::orchestration`）**：
+     - 将 `dispatch_to_node_session` 接入 `route_paired_node_rpc`，支持续聊已有会话或自动调用远端 `app_native_setup` / `app_dsh_create` 新建会话，并在 `orchestration_runs.json` 持久化 `stage`（`plan / execute / verify / release`）、`dod`、`autonomy_mode`（`L1 / L2 / L3`）、`max_auto_rounds`（L2 默认 3、硬上限 6）与每轮 `failure_signature`。
+     - 向 Clerk 与 Worker 同步暴露只读 `orchestration_status` 与调度协议契约。
+  3. **后台完成监听、L1 自动审阅卡片与 L2 有界进度熔断（Progress-Gated Autonomy）**：
+     - `spawn_orchestration_watcher` 轻量追踪在途远端回执（空闲零开销）；远端 turn 结束后自动拉取摘要并提取归一化错误签名 `extract_failure_signature`，执行受月度预算约束的低成本只读主 Agent 评审（支持离线确定性回退）。
+     - **停止控制律（`evaluate_round_outcome`）**：取消即停；DoD 满足即硬停（禁止无意义主观润色）；`plan`/`release` 阶段门与主观决策强制停下交给人；`L1` 默认每轮产出 `orchestration_review` 卡片（`[验收结案]` / `[按建议追派一轮]` / `[查看底层会话]`）并触发 Web Push；`L2` 在客观失败、错误签名变化且未超轮次上限时自动纠错，连续 2 轮相同错误签名触发 `HaltedNoProgress` 熔断、达上限触发 `HaltedMaxRounds` 交回人工审批。
+- **实施路由**：核心状态机与建项原语在 `crates/bob-runtime/src/orchestrator.rs`，跨节点执行/监听/RPC 在 `crates/bob-node/src/orchestration.rs`，前端单一窗口审阅卡与在途条在 `ActionCard.vue` / `PrimaryChatPane.vue` / `useJarvisHome.mjs` / `kernel-bridge.mjs`。

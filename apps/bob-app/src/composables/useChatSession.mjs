@@ -1,0 +1,1737 @@
+import {markRecentProject} from '../recent-projects.mjs';
+import { computed, nextTick, ref, watch } from 'vue';
+import { isBobNodeRuntime } from '../http-bridge.mjs';
+import { loadClientState, saveClientState, chooseStartupConversation } from '../client-view-state.mjs';
+import { createLayoutState } from '../layout-mode.mjs';
+import { kernelBridge } from '../native-bridge.mjs';
+import { createSendController } from '../send-controller.mjs';
+import {
+  createExecutionController,
+  canCancelExecution,
+  executionStatusKey,
+  singleFlight,
+  blocksNewExecution,
+} from '../execution-controller.mjs';
+
+export function useChatSession(ctx) {
+  const { t, locale } = ctx;
+
+const sessionId = ref(null);
+const assistantConversationId = ref(null);
+const assistantLinks = ref([]);
+const assistantPollFailed = ref(false);
+let assistantPolling = false;
+let assistantNextPoll = 0;
+async function refreshAssistantResults() {
+  if (!browserClient || assistantPolling || sessionId.value !== assistantConversationId.value || Date.now() < assistantNextPoll) return;
+  const current = sessionId.value;
+  assistantPolling = true;
+  try {
+    const result = await kernelBridge.assistantPoll(current);
+    if (current === sessionId.value) {
+      assistantLinks.value = result.links || [];
+      assistantPollFailed.value = Boolean(result.errors?.length);
+    }
+  } catch { if (current === sessionId.value) assistantPollFailed.value = true; }
+  finally { assistantPolling = false; assistantNextPoll = Date.now() + (assistantPollFailed.value ? 30000 : 8000); }
+}
+function assistantLink(message) { return assistantLinks.value.find(link => link.request_id === message.request_id); }
+function openAssistantTarget(link) {
+  const node = (ctx.modelHub.value.state.remote_nodes || []).find(n => n.id === link.connection_id);
+  if (node) void selectRemoteConversation({node,session:{id:link.native_session_id,title:link.target_title}});
+}
+const browserClient = isBobNodeRuntime();
+const newConversationPending = ref(false);
+const clientState = loadClientState();
+const messages = ref([]);
+const readiness = ref(null);
+const executions = ref([]);
+const executionFault = ref(null);
+const homeFault = ref(false);
+const cancelPending = ref(new Set());
+const dispatchPending = ref(false);
+const catalog = ref(null);
+const directorySyncRevision = ref(0);
+const sidebarGroupMode = ref('project');
+const sidebarSearch = ref('');
+const remoteConversation = ref(null);
+async function selectRemoteConversation(target) {
+  restoreRemoteSelection.value = false;
+  remoteConversation.value = target;
+  try {
+    localStorage.setItem(
+      'bob-active-remote',
+      JSON.stringify({ nodeId: target.node.id, session: { id: target.session.id, title: target.session.title } }),
+    );
+  } catch {}
+  activeDrawer.value = 'chat';
+  settingsOpen.value = false;
+  navigationOpen.value = false;
+  void flushCurrentViewState();
+}
+
+const restoreRemoteSelection = ref(true);
+const expandedProjects = ref({});
+const showLegacy = ref(false);
+const matchesSidebar = item => !sidebarSearch.value.trim() || String(item.title || '').toLocaleLowerCase().includes(sidebarSearch.value.trim().toLocaleLowerCase());
+const recentFirst = items => [...items].sort((a,b) => (Number(b.updated_at)||0)-(Number(a.updated_at)||0) || String(a.id).localeCompare(String(b.id)));
+const isLegacyProject = item => item.source_kind === 'legacy_import' || (catalog.value?.imported_project_ids || []).includes(item.id);
+const projectExpanded = id => expandedProjects.value[id] ?? (Boolean(sidebarSearch.value.trim()) || activeConversationItem.value?.project_id === id);
+function toggleProject(id) { expandedProjects.value[id] = !projectExpanded(id); }
+function activityText(item) { return Number(item.updated_at) > 0 ? new Date(Number(item.updated_at) * (Number(item.updated_at) < 1e12 ? 1000 : 1)).toLocaleDateString() : t('sidebarTimeUnknown'); }
+const theme = ref('system');
+const creatingKind = ref(null); // 'project' | 'conversation' | null
+const REMOTE_NODE_PREFIX = 'node:';
+function nodeCreationKey(node) {
+  const id = typeof node === 'string' ? node : node?.id;
+  if (!id) return '';
+  const text = String(id);
+  return text.startsWith(REMOTE_NODE_PREFIX) ? text : `${REMOTE_NODE_PREFIX}${text}`;
+}
+function parseNodeConnectionId(deviceId) {
+  const text = String(deviceId || '');
+  if (!text || text === 'none' || text === 'local') return '';
+  return text.startsWith(REMOTE_NODE_PREFIX) ? text.slice(REMOTE_NODE_PREFIX.length) : text;
+}
+const creatingForProjectId = ref(null);
+const newItemTitle = ref('');
+const creationMode = ref('local');
+const firstSessionMessage = ref('');
+const nativeSetupReply = ref('');
+const remoteHarnesses = {dsh:'DSH',claude:'Claude Code',codex:'Codex',agy:'AGY',pi:'Pi',copilot:'Copilot',kimi:'Kimi Code',qoder:'Qoder',zcode:'ZCode',workbuddy:'WorkBuddy',goose:'Goose'};
+let nativeSetupTimer;
+const creationConnectionId = ref('');
+const creationDeviceId = ref('');
+const creationWorkspace = ref('');
+const creationWorkspaces = ref([]);
+const creationNodeSessionsCache = ref({});
+const creationLoading = ref(false);
+const creationNodeLoading = ref(false);
+const creationBusy = ref(false);
+const creationError = ref('');
+const remoteCreation = ref(null);
+const directoryCreationRevision = ref(0);
+const creationJournalKey = 'bob-dsh-create-v1';
+const creationToolOrder = ['dsh', 'claude', 'codex', 'agy', 'pi', 'copilot', 'kimi', 'qoder', 'zcode', 'workbuddy', 'goose'];
+const creationNodes = computed(() => (ctx.modelHub.value?.state?.remote_nodes || []).filter(node => node.enabled !== false));
+const pairedCreationOwners = computed(() => browserClient ? [] : creationNodes.value.filter(node =>
+  node.remark === 'web_host' || node.selectedProjectId === 'web_host'));
+const pairedCreationOwner = computed(() => pairedCreationOwners.value.length === 1 ? pairedCreationOwners.value[0] : null);
+const remoteCreationEnabled = computed(() => browserClient || Boolean(pairedCreationOwner.value));
+function dshSetupBridge(owner) {
+  if (!owner) return kernelBridge;
+  const mapTarget = (connectionId) => (connectionId === owner.id ? 'local' : connectionId);
+  const call = (command, args) => kernelBridge.pairedSessionSetup(owner.id, command, args);
+  return {
+    catalog: () => call('app_catalog'),
+    projectLinks: () => call('app_project_links'),
+    createProject: (projectId, title) => call('app_project_create', { projectId, title }),
+    dshInventory: (connectionId, refresh = false) =>
+      call('app_dsh_inventory', { connectionId: mapTarget(connectionId), refresh }),
+    dshWorkspaceGrant: (connectionId, path) =>
+      call('app_dsh_workspace_grant', { connectionId: mapTarget(connectionId), path }),
+    dshList: (connectionId) => call('app_dsh_list', { connectionId: mapTarget(connectionId) }),
+    dshCreate: async (connectionId, sessionId, workspace, title) => {
+      const res = await call('app_dsh_create', {
+        connectionId: mapTarget(connectionId),
+        sessionId,
+        workspace,
+        title,
+      });
+      if (connectionId === owner.id && res?.address?.connection_id === 'local') {
+        return { ...res, address: { ...res.address, connection_id: connectionId } };
+      }
+      return res;
+    },
+    nativeSetup: async (args) => {
+      const targetId = mapTarget(args?.connectionId);
+      const res = await call('app_native_setup', { ...args, connectionId: targetId });
+      if (args?.connectionId === owner.id && res?.address?.connection_id === 'local') {
+        return { ...res, address: { ...res.address, connection_id: args.connectionId } };
+      }
+      return res;
+    },
+    projectLinkSet: (args) =>
+      call('app_project_link_set', {
+        ...args,
+        ...(args?.connectionId ? { connectionId: mapTarget(args.connectionId) } : {}),
+      }),
+  };
+}
+const creationNode = computed(() => creationNodes.value.find(node => node.id === creationConnectionId.value));
+let workspaceRead = 0;
+
+function workspacesForNodeTool(inventory, tool) {
+  return [...new Set((inventory?.workspaces || []).filter(w=>w.read_only!==true).map(w=>w.path).filter(Boolean))].sort();
+}
+let inventoryTimer;
+async function pollCreationInventory(connectionId, deviceId) {
+  if(!creatingKind.value || creationDeviceId.value!==deviceId)return;
+  try {
+    const inventory=await dshSetupBridge(pairedCreationOwner.value).dshInventory(connectionId,false);
+    if(!creatingKind.value || creationDeviceId.value!==deviceId)return;
+    creationNodeSessionsCache.value={...creationNodeSessionsCache.value,[connectionId]:inventory};
+    if(!creationMode.value){const tool=inventory.tools?.find(t=>t.installed===true&&t.can_create);if(tool)selectCreationTool(tool.id);}
+    if(inventory.refreshing)inventoryTimer=setTimeout(()=>pollCreationInventory(connectionId,deviceId),2000);
+  }catch{creationError.value='createNodeUnavailable';}
+}
+
+const creationAvailableTools = computed(() => {
+  const deviceId = creationDeviceId.value;
+  if (!deviceId) return [];
+  if (deviceId === 'none') {
+    return [{ id: 'none', labelKey: 'createProjectOnly', kind: 'projectOnly', workspaces: [], count: 0, available: true, loaded: true }];
+  }
+  if (deviceId === 'local') {
+    return [{ id: 'local', labelKey: 'createLocalAssistant', kind: 'local', workspaces: [], count: 0, available: true, loaded: true }];
+  }
+  if (!remoteCreationEnabled.value) return [];
+  const connectionId = parseNodeConnectionId(deviceId);
+  if (!connectionId) return [];
+  const hasCache = Object.hasOwn(creationNodeSessionsCache.value, connectionId);
+  const rows = creationNodeSessionsCache.value[connectionId] || [];
+  return creationToolOrder.map((tool) => {
+    const workspaces = workspacesForNodeTool(rows, tool);
+    return {
+      id: tool,
+      label: remoteHarnesses[tool],
+      kind: 'remote',
+      workspaces,
+      count: workspaces.length,
+      available: rows?.tools?.some(item=>item.id===tool && item.installed===true && item.can_create===true) || false,
+      state: rows?.tools?.find(item=>item.id===tool)?.auth_state || 'unknown',
+      stale: rows?.stale===true || rows?.tools?.find(item=>item.id===tool)?.stale===true,
+      loaded: hasCache,
+    };
+  });
+});
+
+async function loadCreationWorkspaces() {
+  const read = ++workspaceRead;
+  creationWorkspace.value = '';
+  creationWorkspaces.value = [];
+  creationError.value = '';
+  const node = creationNode.value;
+  const tool = creationMode.value;
+  if (node?.id && !parseNodeConnectionId(creationDeviceId.value)) {
+    creationDeviceId.value = nodeCreationKey(node);
+  }
+  creationLoading.value = Boolean(node && Object.hasOwn(remoteHarnesses,tool));
+  if (!creationLoading.value) return;
+  try {
+    const rows = await dshSetupBridge(pairedCreationOwner.value).dshInventory(node.id);
+    if (read !== workspaceRead) return;
+    if (!Array.isArray(rows?.tools)) throw Error('DSH_DIRECTORY_INVALID');
+    const normalized = rows;
+    creationNodeSessionsCache.value = { ...creationNodeSessionsCache.value, [node.id]: normalized };
+    creationWorkspaces.value = workspacesForNodeTool(normalized, tool);
+
+  } catch {
+    if (read === workspaceRead) creationError.value = 'createNodeUnavailable';
+  } finally {
+    if (read === workspaceRead) creationLoading.value = false;
+  }
+}
+
+const layoutState = ref(
+  createLayoutState(
+    typeof window !== 'undefined' ? window : { innerWidth: 1180, innerHeight: 757 },
+    typeof navigator !== 'undefined' ? navigator : { userAgent: '' },
+  ),
+);
+function updateLayoutState() {
+  if (typeof window === 'undefined') return;
+  layoutState.value = createLayoutState(window, navigator);
+}
+
+let poll = null;
+let disposed = false;
+let releaseViewport = () => {};
+let draftSaveTimer = null;
+let scrollSaveTimer = null;
+const locallyAccepted = new Map();
+let unconfirmedRequest = null;
+
+const executionController = createExecutionController(kernelBridge);
+const directProviderEnabled = computed(
+  () =>
+    readiness.value?.mode === 'direct_provider' &&
+    readiness.value?.execution_available === true,
+);
+const executionEnabled = computed(
+  () =>
+    (readiness.value?.mode === 'codex_readonly' ||
+      readiness.value?.mode === 'direct_provider') &&
+    readiness.value?.execution_available === true,
+);
+const homeConfigured = computed(() => readiness.value?.mode === 'home_configured');
+const pairingStatusState = ref(null);
+const hasOnlineDeviceGroup = computed(() =>
+  (catalog.value?.device_groups || []).some(
+    g => g.availability_state === 'online' || g.immediate_execution_available,
+  ),
+);
+const devicePaired = computed(
+  () =>
+    homeConfigured.value ||
+    Boolean(ctx.onlineState?.connected) ||
+    ['connected', 'confirmed', 'paired', 'home_ready'].includes(
+      pairingStatusState.value?.state,
+    ) ||
+    Boolean(pairingStatusState.value?.paired_home) ||
+    Boolean(pairingStatusState.value?.online_node) ||
+    hasOnlineDeviceGroup.value,
+);
+const homeReachable = ref(false);
+const deviceOnline = computed(() => homeReachable.value && !homeFault.value);
+// The badge identifies the connected target, never infers it from this screen's size.
+const pairedHomeIdentity = computed(() => catalog.value?.device_groups?.find(group => group.role === 'paired_home')?.device_id);
+const connectionTarget = computed(() => browserClient
+  ? { kind: 'server', label: t('connectionWebNode') }
+  : homeConfigured.value || pairingStatusState.value?.role === 'replica'
+    ? { kind: 'home', label: pairedHomeIdentity.value ? t('connectionHome') + ' · ' + pairedHomeIdentity.value.slice(0, 6) : t('connectionHome') }
+    : { kind: 'local', label: t('connectionLocal') });
+const connectionLabel = computed(() => t('connectionTargetDetails', {
+  target: connectionTarget.value.label,
+  status: t(deviceOnline.value ? 'connectionStatusOnline' : 'connectionStatusUnknown'),
+}));
+
+const sendLabel = computed(() => executionEnabled.value || homeConfigured.value);
+const byMessage = computed(() => new Map(executions.value.map(run => [run.message_id, run])));
+
+function messageExecution(message) {
+  return (
+    byMessage.value.get(message.id) ||
+    executions.value.find(run => run.request_id === message.request_id && !!message.request_id)
+  );
+}
+function messageStatus(message) {
+  if (message.role === 'assistant') {
+    return [
+      'codex_execution',
+      'home_codex_execution',
+      'direct_provider',
+      'replica_direct_provider',
+      'native_session_result',
+    ].includes(message.source)
+      ? 'replySaved'
+      : 'probeReplySaved';
+  }
+  return executionStatusKey(messageExecution(message)) || statusKeys[message.send_state] || 'unknown';
+}
+
+const available = kernelBridge.available();
+const connectionKey = computed(() =>
+  !available
+    ? 'nativeRequired'
+    : directProviderEnabled.value
+      ? 'directProviderReady'
+      : executionEnabled.value
+        ? 'codexReadOnlyReady'
+        : homeConfigured.value
+          ? 'homeConfiguredHint'
+          : readiness.value
+            ? 'providerUnconfigured'
+            : 'loading',
+);
+
+const activeDrawer = ref('chat'); // 'chat' | 'schedule' | 'work' | 'knowledge' | 'settings'
+const previousNonSettingsDrawer = ref('chat');
+const settingsOpen = ref(false);
+const immersive = ref(false);
+try { immersive.value = localStorage.getItem('bob-immersive') === 'true'; } catch {}
+watch(immersive, value => { try { localStorage.setItem('bob-immersive', String(value)); } catch {} });
+const immersiveActive = computed(() => immersive.value && activeDrawer.value === 'chat' && !settingsOpen.value);
+const settingsView = ref('home'); // 'home' | 'device' | 'provider'
+const settingsTab = ref('model'); // 'model' | 'connection' | 'workspace' | 'tasks' | 'appearance' | 'about'
+const navigationOpen = ref(false);
+const devicePanel = ref(null);
+const deviceCapabilities = ref(null);
+
+const fallbackConversationTitle = computed(
+  () => messages.value.find(m => m.role === 'user')?.content?.slice(0, 60) || t('conversation'),
+);
+const activeConversationItem = computed(() =>
+  catalog.value?.conversations?.find(c => c.id === sessionId.value) || null,
+);
+const currentConversation = computed(
+  () => sessionId.value === assistantConversationId.value ? t('defaultAssistant') : (messages.value.length ? (activeConversationItem.value?.title || fallbackConversationTitle.value) : t('conversation')),
+);
+const totalUnreadCount = computed(() =>
+  (catalog.value?.conversations || []).reduce((sum, c) => sum + (c.unread_count || 0), 0),
+);
+const standaloneList = computed(() => {
+  if (catalog.value?.standalone_conversations) return recentFirst(catalog.value.standalone_conversations.filter(matchesSidebar));
+  if (!sessionId.value) return [];
+  return [
+    {
+      id: sessionId.value,
+      title: fallbackConversationTitle.value,
+      unread_count: 0,
+      target_device_online: true,
+      status_reason: '',
+    },
+  ];
+});
+const projectList = computed(() => recentFirst((catalog.value?.projects || []).map(p => ({...p, updated_at: Math.max(Number(p.updated_at)||0, ...(catalog.value?.conversations || []).filter(c => c.project_id === p.id).map(c => Number(c.updated_at)||0))}))).filter(p => (showLegacy.value || sidebarSearch.value.trim() || !isLegacyProject(p)) && (matchesSidebar(p) || projectConversations(p.id).length)));
+const legacyCount = computed(() => (catalog.value?.projects || []).filter(isLegacyProject).length);
+const deviceGroupList = computed(() => (catalog.value?.device_groups || []).map(g => ({...g, conversations: recentFirst((g.conversations || []).filter(c => !(catalog.value?.imported_project_ids || []).includes(c.project_id) && matchesSidebar(c)))})));
+function projectConversations(projectId) {
+  return (recentFirst(catalog.value?.conversations || [])).filter(c => c.project_id === projectId && (matchesSidebar(c) || matchesSidebar((catalog.value?.projects || []).find(p => p.id === projectId) || {})));
+}
+
+async function switchPrimaryDrawer(drawer) {
+  navigationOpen.value = false;
+  if (drawer === 'settings') {
+    toggleSettingsHome();
+    return;
+  }
+  previousNonSettingsDrawer.value = drawer;
+  activeDrawer.value = drawer;
+  settingsOpen.value = false;
+  if (drawer === 'schedule' || drawer === 'knowledge' || drawer === 'work' || drawer === 'inbox') {
+    if (available && kernelBridge.syncHome) {
+      void kernelBridge.syncHome().then(async status => {
+        if (status !== 'sync_checked' || disposed) return;
+        directorySyncRevision.value += 1;
+        const snap = await kernelBridge.catalog().catch(() => null);
+        if (snap && !disposed) applyCatalogPreferences(snap);
+        void ctx.loadModelHub();
+        void ctx.loadPersonalOps();
+        if (ctx.inbox?.loadInbox) void ctx.inbox.loadInbox();
+      }).catch(() => {});
+    }
+    await ctx.loadPersonalOps();
+    if (drawer === 'inbox' && ctx.inbox?.loadInbox) {
+      await ctx.inbox.loadInbox();
+      void ctx.inbox.loadTriageDraft?.(false);
+    }
+    if (drawer === 'work') {
+      await ctx.loadModelHub();
+    }
+  }
+}
+
+function toggleSettingsHome() {
+  if (settingsOpen.value && settingsView.value === 'home') {
+    settingsOpen.value = false;
+    activeDrawer.value = previousNonSettingsDrawer.value || 'chat';
+  } else {
+    if (activeDrawer.value !== 'settings') {
+      previousNonSettingsDrawer.value = activeDrawer.value;
+    }
+    activeDrawer.value = 'settings';
+    navigationOpen.value = false;
+    settingsView.value = 'home';
+    settingsTab.value = 'model';
+    settingsOpen.value = true;
+    void ctx.loadModelHub();
+    void ctx.loadPersonalOps();
+  }
+}
+
+async function switchSettingsTab(tab) {
+  settingsTab.value = tab;
+  settingsView.value = 'home';
+  if (tab === 'connection') {
+    await nextTick();
+    await devicePanel.value?.openDetails();
+  } else if (tab === 'model') {
+    await ctx.loadModelHub();
+  } else if (tab === 'workspace') {
+    await ctx.loadPersonalOps();
+  } else if (tab === 'tasks') {
+    if (available && sessionId.value && kernelBridge.routeGet) {
+      const r = await kernelBridge.routeGet(sessionId.value).catch(() => null);
+      if (r) ctx.executionRoute.value = r;
+    }
+  }
+}
+
+async function openDevices() {
+  if (activeDrawer.value !== 'settings') {
+    previousNonSettingsDrawer.value = activeDrawer.value;
+  }
+  activeDrawer.value = 'settings';
+  settingsView.value = 'home';
+  settingsTab.value = 'connection';
+  settingsOpen.value = true;
+  await nextTick();
+  await devicePanel.value?.openDetails();
+}
+
+const settingsPanel = ref(null);
+let settingsTrigger = null;
+watch(settingsOpen, async open => {
+  if (open) settingsTrigger = document.activeElement;
+  else if (activeDrawer.value === 'settings') {
+    activeDrawer.value = previousNonSettingsDrawer.value || 'chat';
+  }
+  await nextTick();
+  if (open) settingsPanel.value?.querySelector('button')?.focus();
+  else settingsTrigger?.focus();
+});
+watch(settingsView, async () => {
+  if (!settingsOpen.value) return;
+  await nextTick();
+  settingsPanel.value?.querySelector('button')?.focus();
+});
+
+function settingsKeydown(event) {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    settingsOpen.value = false;
+    return;
+  }
+  if (event.key !== 'Tab') return;
+  const controls = [
+    ...settingsPanel.value.querySelectorAll('button,select,input,textarea,summary,[tabindex="0"]'),
+  ].filter(el => !el.disabled && el.getClientRects().length);
+  const first = controls[0];
+  const last = controls.at(-1);
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last?.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first?.focus();
+  }
+}
+
+function formatMessageTime(ts) {
+  if (ts === null || ts === undefined || ts === '' || typeof ts === 'boolean') return '';
+  const raw = typeof ts === 'number' ? ts : Number(ts);
+  if (Number.isFinite(raw) && raw <= 0) return '';
+  const ms = Number.isFinite(raw) ? (raw < 1e12 && raw > 1e9 ? raw * 1000 : raw) : Date.parse(String(ts));
+  if (!Number.isFinite(ms) || ms < 946684800000) return '';
+  const d = new Date(ms);
+  const now = new Date();
+  const p = n => String(n).padStart(2, '0');
+  const hm = `${p(d.getHours())}:${p(d.getMinutes())}`;
+  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) return hm;
+  if (d.getFullYear() === now.getFullYear()) return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${hm}`;
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${hm}`;
+}
+
+const copyState = ref({});
+async function copyReply(message) {
+  try {
+    await navigator.clipboard.writeText(message.content);
+    copyState.value = { ...copyState.value, [message.id]: 'copied' };
+    setTimeout(() => {
+      if (copyState.value[message.id] === 'copied') {
+        const next = { ...copyState.value };
+        delete next[message.id];
+        copyState.value = next;
+      }
+    }, 1600);
+  } catch {
+    copyState.value = { ...copyState.value, [message.id]: 'copyFailed' };
+  }
+}
+
+const draft = ref('');
+const saving = ref(false);
+const loading = ref(true);
+const fault = ref(null);
+const input = ref(null);
+const historyRegion = ref(null);
+const composerAttachments = ref([]);
+const composerFileInput = ref(null);
+const historyPullUpDistance = ref(0);
+let historyTouchStartY = null;
+let historyWheelOverscroll = 0;
+let historyWheelResetTimer = null;
+
+function openComposerFilePicker() {
+  composerFileInput.value?.click?.();
+}
+
+function isTextComposerFile(f) {
+  const m = String(f?.type || '').toLowerCase();
+  const n = String(f?.name || '').toLowerCase();
+  if (m.startsWith('image/') || m.startsWith('audio/') || m.startsWith('video/') || m === 'application/pdf') return false;
+  if (m.startsWith('text/') || m.includes('json') || m.includes('yaml') || m.includes('xml') || m.includes('javascript')) return true;
+  return /\.(txt|md|json|ya?ml|csv|tsv|py|rs|js|mjs|cjs|ts|tsx|jsx|vue|html|css|scss|sh|bat|ps1|toml|ini|cfg|log|sql|gd|tscn)$/i.test(n);
+}
+
+async function handleComposerFiles(event) {
+  const files = Array.from(event?.target?.files || []);
+  for (const f of files) {
+    let content = '';
+    try {
+      if (isTextComposerFile(f) && typeof f.text === 'function' && (f.size || 0) <= 256 * 1024) {
+        content = await f.text();
+      }
+    } catch {}
+    composerAttachments.value.push({
+      id: crypto.randomUUID(),
+      name: f.name || 'file',
+      size: f.size || 0,
+      type: f.type || '',
+      content,
+    });
+  }
+  if (event?.target) event.target.value = '';
+}
+
+function removeComposerAttachment(id) {
+  composerAttachments.value = composerAttachments.value.filter(a => a.id !== id);
+}
+
+function formatComposerAttachments(list) {
+  if (!list?.length) return '';
+  return list
+    .map(a =>
+      a.content
+        ? `[Attachment: ${a.name}]\n\`\`\`\n${String(a.content).slice(0, 16384)}\n\`\`\``
+        : `[Attachment: ${a.name} (${a.size || 0} bytes)]`,
+    )
+    .join('\n\n');
+}
+
+function onHistoryTouchStart(event) {
+  const el = historyRegion.value;
+  const atBottom = !el || el.scrollHeight - el.scrollTop - el.clientHeight <= 16;
+  historyTouchStartY = atBottom ? (event?.touches?.[0]?.clientY ?? null) : null;
+  historyPullUpDistance.value = 0;
+}
+
+function onHistoryTouchMove(event) {
+  if (historyTouchStartY === null) return;
+  const y = event?.touches?.[0]?.clientY;
+  if (typeof y !== 'number') return;
+  const delta = historyTouchStartY - y;
+  const el = historyRegion.value;
+  const atBottom = !el || el.scrollHeight - el.scrollTop - el.clientHeight <= 20;
+  if (delta > 8 && atBottom) {
+    historyPullUpDistance.value = Math.min(72, Math.round((delta - 8) * 0.75));
+  } else if (delta <= 0) {
+    historyPullUpDistance.value = 0;
+  }
+}
+
+function onHistoryTouchEnd() {
+  const dist = historyPullUpDistance.value;
+  historyTouchStartY = null;
+  historyPullUpDistance.value = 0;
+  if (dist >= 36) {
+    void forceRefreshActiveConversation();
+  }
+}
+
+function onHistoryWheel(event) {
+  if (!(event?.deltaY > 24)) return;
+  const el = historyRegion.value;
+  const atBottom = !el || el.scrollHeight - el.scrollTop - el.clientHeight <= 8;
+  if (!atBottom) {
+    historyWheelOverscroll = 0;
+    return;
+  }
+  historyWheelOverscroll += event.deltaY;
+  if (historyWheelResetTimer) clearTimeout(historyWheelResetTimer);
+  historyWheelResetTimer = setTimeout(() => {
+    historyWheelOverscroll = 0;
+  }, 450);
+  if (historyWheelOverscroll >= 140) {
+    historyWheelOverscroll = 0;
+    void forceRefreshActiveConversation();
+  }
+}
+
+const remoteSyncPhase = ref('');
+const mainSyncPhase = ref('synced');
+let mainSyncPulseTimer = null;
+globalThis.__bobSetRemoteSyncPhase = phase => {
+  remoteSyncPhase.value = phase || '';
+};
+
+const deviceSyncPhase = computed(() => {
+  if (remoteConversation.value) {
+    return remoteSyncPhase.value || (deviceOnline.value ? 'synced' : 'offline');
+  }
+  if (saving.value || dispatchPending.value || activeExecution.value || mainSyncPhase.value === 'syncing') {
+    return 'syncing';
+  }
+  if (loading.value || mainSyncPhase.value === 'checking') {
+    return 'checking';
+  }
+  if (homeFault.value || (devicePaired.value && !deviceOnline.value)) {
+    return 'offline';
+  }
+  return 'synced';
+});
+
+async function forceRefreshActiveConversation() {
+  if (remoteConversation.value && typeof globalThis.__bobForceRefreshDsh === 'function') {
+    await globalThis.__bobForceRefreshDsh();
+    return;
+  }
+  mainSyncPhase.value = 'checking';
+  resetSyncBackoffAndReload();
+  void ctx.loadModelHub?.();
+}
+
+const hasJarvisBackgroundWorker = computed(
+  () =>
+    Boolean(
+      sessionId.value &&
+        sessionId.value === assistantConversationId.value &&
+        ctx.jarvisHome?.activeWorkerTasks?.value?.length > 0,
+    ),
+);
+const executionBlocked = computed(() => {
+  if (hasJarvisBackgroundWorker.value) {
+    return Boolean(ctx.jarvisHome?.jarvisStreaming?.value);
+  }
+  return blocksNewExecution(executions.value);
+});
+const activeExecution = computed(() => {
+  if (hasJarvisBackgroundWorker.value) {
+    return null;
+  }
+  return executions.value.find(run => canCancelExecution(run));
+});
+const canSend = computed(
+  () =>
+    !!sessionId.value &&
+    (!!draft.value.trim() || composerAttachments.value.length > 0) &&
+    !loading.value &&
+    !saving.value &&
+    !executionBlocked.value,
+);
+
+function resolveEffectiveTheme(value) {
+  if (value === 'light' || value === 'dark') return value;
+  return globalThis.matchMedia?.('(prefers-color-scheme: dark)')?.matches ? 'dark' : 'light';
+}
+
+function applyTheme(value) {
+  if (value === 'light' || value === 'dark') {
+    document.documentElement.dataset.theme = value;
+  } else {
+    delete document.documentElement.dataset.theme;
+  }
+  const effective = resolveEffectiveTheme(value);
+  if (available && kernelBridge.systemBarAppearance) {
+    void kernelBridge.systemBarAppearance(effective === 'light').catch(() => {});
+  }
+}
+
+if (typeof globalThis.matchMedia === 'function') {
+  const mq = globalThis.matchMedia('(prefers-color-scheme: dark)');
+  mq?.addEventListener?.('change', () => {
+    if (theme.value === 'system') applyTheme('system');
+  });
+}
+
+watch(locale, value => {
+  document.documentElement.lang = value;
+  if (available && kernelBridge.savePreferences) {
+    void kernelBridge.savePreferences({ locale: value }).catch(() => {});
+  }
+});
+
+watch(theme, value => {
+  applyTheme(value);
+  if (available && kernelBridge.savePreferences) {
+    void kernelBridge.savePreferences({ theme: value }).catch(() => {});
+  }
+});
+
+async function switchSidebarMode(mode) {
+  sidebarGroupMode.value = mode;
+  try { localStorage.setItem('bob-sidebar-mode', mode); } catch {}
+  if (available && kernelBridge.savePreferences && (mode === 'project' || mode === 'device')) {
+    await kernelBridge.savePreferences({ sidebarGroupMode: mode }).catch(() => {});
+  }
+}
+
+let pendingOrganizeRequest = false;
+
+async function organizeSessionsViaAgent() {
+  await openAssistant();
+  const promptText = t('smartGroupAgentPrompt');
+  draft.value = promptText;
+  controller.setDraft(promptText);
+  pendingOrganizeRequest = true;
+  try {
+    await send();
+  } finally {
+    pendingOrganizeRequest = false;
+  }
+}
+
+const controller = createSendController({
+  bridge: kernelBridge,
+  createIntent: (content, sentRevision) => ({
+    request_id: crypto.randomUUID(),
+    message_id: crypto.randomUUID(),
+    session_id: sessionId.value,
+    content,
+    expected_draft_revision: sentRevision,
+  }),
+  onAccepted: () => {},
+});
+
+function scheduleDraftSave(convId, text) {
+  if (newConversationPending.value) { clientState.blankDraft = text; saveClientState(clientState); return; }
+  if (!available || !convId || !kernelBridge.saveViewState) return;
+  if (draftSaveTimer) clearTimeout(draftSaveTimer);
+  draftSaveTimer = setTimeout(() => {
+    void kernelBridge
+      .saveViewState({ conversationId: convId, draft: text, markRead: false })
+      .catch(() => {});
+  }, 180);
+}
+
+function updateDraft(event) {
+  draft.value = event.target.value;
+  controller.setDraft(draft.value);
+  if (sessionId.value) {
+    void controller.prewarm();
+    scheduleDraftSave(sessionId.value, draft.value);
+  }
+}
+
+function focusComposer() {
+  if (sessionId.value) void controller.prewarm();
+}
+
+function onHistoryScroll() {
+  if (newConversationPending.value || !available || !sessionId.value || !historyRegion.value || !kernelBridge.saveViewState) return;
+  const offset = Math.max(0, Math.round(historyRegion.value.scrollTop));
+  const convId = sessionId.value;
+  if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
+  scrollSaveTimer = setTimeout(() => {
+    void kernelBridge
+      .saveViewState({ conversationId: convId, scrollOffset: offset, markRead: false })
+      .catch(() => {});
+  }, 220);
+}
+
+function nearBottom() {
+  const region = historyRegion.value;
+  return !region || region.scrollHeight - region.scrollTop - region.clientHeight < 48;
+}
+
+function applyCatalogPreferences(snap) {
+  if (!snap) return;
+  if (JSON.stringify(catalog.value) !== JSON.stringify(snap)) catalog.value = snap;
+  let localMode = null;
+  try { localMode = localStorage.getItem('bob-sidebar-mode'); } catch {}
+  if (localMode === 'smart') {
+    sidebarGroupMode.value = 'smart';
+  } else if (snap.preferences?.sidebar_group_mode) {
+    sidebarGroupMode.value = snap.preferences.sidebar_group_mode;
+  }
+  if (snap.preferences?.locale === 'zh-CN' || snap.preferences?.locale === 'en-US') {
+    locale.value = snap.preferences.locale;
+  }
+  if (snap.preferences?.theme) {
+    theme.value = snap.preferences.theme;
+    applyTheme(theme.value);
+  }
+}
+
+let syncFailureStreak = 0;
+let nextAllowedSyncAt = 0;
+
+const reload = singleFlight(async () => {
+  if (!sessionId.value || disposed) return;
+  const loadingSession = sessionId.value;
+  const prevMsgCount = messages.value.length;
+  mainSyncPhase.value = 'checking';
+  void refreshAssistantResults();
+  if (Date.now() >= nextAllowedSyncAt) {
+    void kernelBridge
+      .syncHome()
+      .then(async status => {
+        if (disposed) return;
+        if (status !== 'sync_in_progress') {
+          syncFailureStreak = 0;
+          nextAllowedSyncAt = 0;
+          homeFault.value = false;
+          if (status === 'sync_checked') {
+            homeReachable.value = true;
+            directorySyncRevision.value += 1;
+            void ctx.loadModelHub();
+            void ctx.loadPersonalOps();
+            if (activeDrawer.value === 'inbox') void ctx.inbox?.loadInbox();
+            const snap = await kernelBridge.catalog().catch(() => null);
+            if (snap && !disposed) applyCatalogPreferences(snap);
+          }
+        }
+      })
+      .catch(() => {
+        syncFailureStreak += 1;
+        const backoffMs = Math.min(60000, 3000 * Math.pow(2, syncFailureStreak - 1));
+        nextAllowedSyncAt = Date.now() + backoffMs;
+        homeFault.value = true;
+      });
+  }
+  const tasks = [
+    newConversationPending.value ? Promise.resolve([]) : kernelBridge.history(loadingSession),
+    kernelBridge.readiness(),
+    newConversationPending.value ? Promise.resolve([]) : kernelBridge.executions(loadingSession),
+    kernelBridge.catalog ? kernelBridge.catalog() : Promise.resolve(null),
+    kernelBridge.pairingStatus ? kernelBridge.pairingStatus() : Promise.resolve(null),
+  ];
+  const results = await Promise.allSettled(tasks);
+  if (disposed || loadingSession !== sessionId.value) return;
+  const follow = nearBottom();
+  if (results[0].status === 'fulfilled') {
+    const stored = results[0].value;
+    for (const message of stored) locallyAccepted.delete(message.id);
+    messages.value = [...stored, ...locallyAccepted.values()];
+    fault.value = null;
+  } else {
+    fault.value = 'historyFailed';
+  }
+  if (results[1].status === 'fulfilled') {
+    readiness.value = results[1].value;
+    if (browserClient) homeReachable.value = true;
+  }
+  else {
+    readiness.value = null;
+    homeReachable.value = false;
+    fault.value ||= 'statusFailed';
+  }
+  if (results[2].status === 'fulfilled') {
+    executions.value = results[2].value;
+    if (
+      unconfirmedRequest &&
+      executions.value.some(run => run.request_id === unconfirmedRequest)
+    ) {
+      unconfirmedRequest = null;
+      executionFault.value = null;
+    }
+  } else {
+    fault.value ||= 'executionReadFailed';
+  }
+  if (results[3].status === 'fulfilled' && results[3].value) {
+    applyCatalogPreferences(results[3].value);
+  }
+  if (results[4]?.status === 'fulfilled' && results[4].value) {
+    pairingStatusState.value = results[4].value;
+  }
+  if (fault.value || homeFault.value) {
+    mainSyncPhase.value = 'offline';
+  } else if (messages.value.length > prevMsgCount && prevMsgCount > 0) {
+    mainSyncPhase.value = 'syncing';
+    if (mainSyncPulseTimer) clearTimeout(mainSyncPulseTimer);
+    mainSyncPulseTimer = setTimeout(() => {
+      mainSyncPhase.value = 'synced';
+    }, 700);
+  } else {
+    mainSyncPhase.value = 'synced';
+  }
+  await nextTick();
+  if (follow && historyRegion.value) {
+    historyRegion.value.scrollTop = historyRegion.value.scrollHeight;
+  }
+});
+
+async function flushCurrentViewState() {
+  if (newConversationPending.value || !available || !sessionId.value || !kernelBridge.saveViewState) return;
+  if (draftSaveTimer) {
+    clearTimeout(draftSaveTimer);
+    draftSaveTimer = null;
+  }
+  const offset = historyRegion.value ? Math.max(0, Math.round(historyRegion.value.scrollTop)) : 0;
+  await kernelBridge
+    .saveViewState({
+      conversationId: sessionId.value,
+      draft: draft.value,
+      scrollOffset: offset,
+      markRead: true,
+    })
+    .catch(() => {});
+}
+
+async function openAssistant() {
+  navigationOpen.value = false;
+  settingsOpen.value = false;
+  activeDrawer.value = 'chat';
+  remoteConversation.value = null;
+  try { localStorage.removeItem('bob-active-remote'); } catch {}
+  if (assistantConversationId.value) {
+    await selectConversation(assistantConversationId.value);
+    return;
+  }
+  try {
+    const entry = await kernelBridge.assistantConversation();
+    assistantConversationId.value = entry.conversation_id;
+    await selectConversation(entry.conversation_id);
+  } catch { fault.value = 'startupFailed'; }
+}
+
+async function selectConversation(targetId, { replacingDeleted = false } = {}) {
+  const keepRemote = replacingDeleted && remoteConversation.value;
+  if (!keepRemote) {
+    remoteConversation.value = null;
+    try { localStorage.removeItem('bob-active-remote'); } catch {}
+    activeDrawer.value = 'chat';
+    settingsOpen.value = false;
+    navigationOpen.value = false;
+  }
+  if (!targetId) return;
+  if (targetId === sessionId.value) {
+    return;
+  }
+  if (replacingDeleted) {
+    clearTimeout(draftSaveTimer);
+    clearTimeout(scrollSaveTimer);
+  } else {
+    void flushCurrentViewState();
+  }
+  locallyAccepted.clear();
+  messages.value = [];
+  executions.value = [];
+  sessionId.value = targetId;
+  newConversationPending.value = false;
+  clientState.selectedConversation = targetId;
+  saveClientState(clientState);
+  if (available && kernelBridge.selectConversation) {
+    const snap = await kernelBridge.selectConversation(targetId).catch(() => null);
+    if (snap) applyCatalogPreferences(snap);
+  }
+  const targetItem = catalog.value?.conversations?.find(c => c.id === targetId);
+  const restoredDraft = targetItem?.view_state?.draft ?? '';
+  const restoredRev = targetItem?.view_state?.draft_revision ?? 0;
+
+  draft.value = restoredDraft;
+  controller.loadDraft(restoredDraft, restoredRev);
+  if (!keepRemote) navigationOpen.value = false;
+  await reload();
+  await nextTick();
+  if (historyRegion.value) historyRegion.value.scrollTop = historyRegion.value.scrollHeight;
+}
+
+async function deleteLocalConversation(id) {
+  const snapshot = await kernelBridge.deleteConversation(id);
+  applyCatalogPreferences(snapshot);
+  if (sessionId.value === id) {
+    await selectConversation(assistantConversationId.value || snapshot.selected_conversation_id, { replacingDeleted: true });
+  }
+}
+
+function beginCreateItem(kind, projectId) {
+  if (creationBusy.value) return;
+  let saved;
+  try {
+    saved = JSON.parse(localStorage.getItem(creationJournalKey) || 'null');
+  } catch {}
+  remoteCreation.value = saved || null;
+  creatingKind.value = saved?.kind || kind;
+  creatingForProjectId.value = saved?.projectId || projectId;
+  newItemTitle.value = saved?.title || '';
+  creationMode.value = saved ? saved.harness || 'dsh' : kind === 'project' ? 'none' : 'local';
+  firstSessionMessage.value = saved?.text || '';
+  nativeSetupReply.value = '';
+  creationConnectionId.value = saved?.connectionId || '';
+  creationDeviceId.value = saved ? (saved.connectionId ? nodeCreationKey(saved.connectionId) : 'local') : (kind === 'project' ? 'none' : 'local');
+  creationWorkspace.value = saved?.workspace || '';
+  creationWorkspaces.value = saved ? [saved.workspace] : [];
+  if (!saved) creationNodeSessionsCache.value = {};
+  creationNodeLoading.value = false;
+  creationLoading.value = false;
+  creationError.value = saved ? 'createRemoteRetry' : '';
+  workspaceRead++;
+  navigationOpen.value = false;
+}
+
+function chooseBestWorkspaceForSelection(workspaces) {
+  if (!Array.isArray(workspaces) || !workspaces.length) return '';
+  if (typeof catalog !== 'undefined' && creatingForProjectId.value) {
+    const project = (catalog.value?.projects || []).find(item => item.id === creatingForProjectId.value);
+    const hint = project?.workspace || '';
+    if (hint && workspaces.includes(hint)) return hint;
+  }
+  return workspaces[0];
+}
+
+async function selectCreationDevice(deviceId, forceRefresh = false) {
+  if (creationBusy.value || remoteCreation.value) return;
+  clearTimeout(inventoryTimer);
+  creationDeviceId.value = deviceId;
+  creationError.value = '';
+  creationWorkspace.value = '';
+  creationWorkspaces.value = [];
+  nativeSetupReply.value = '';
+  if (deviceId === 'none' || deviceId === 'local') {
+    creationMode.value = deviceId;
+    creationConnectionId.value = '';
+    creationNodeLoading.value = false;
+    creationLoading.value = false;
+    return;
+  }
+  const connectionId = parseNodeConnectionId(deviceId);
+  if (!connectionId) {
+    creationMode.value = '';
+    creationConnectionId.value = '';
+    creationNodeLoading.value = false;
+    creationLoading.value = false;
+    return;
+  }
+  creationConnectionId.value = connectionId;
+  creationLoading.value = false;
+  creationNodeLoading.value = true;
+  const read = ++workspaceRead;
+  try {
+    let rows = creationNodeSessionsCache.value[connectionId];
+    { // Read the node-owned snapshot, never rescan history from the UI.
+      rows = await dshSetupBridge(pairedCreationOwner.value).dshInventory(connectionId,forceRefresh);
+      if (read !== workspaceRead) return;
+      if (!Array.isArray(rows?.tools)) throw Error('DSH_DIRECTORY_INVALID');
+      creationNodeSessionsCache.value = {
+        ...creationNodeSessionsCache.value,
+        [connectionId]: rows,
+      };
+    }
+    const cached = creationNodeSessionsCache.value[connectionId] || [];
+    const usableTools = creationToolOrder.filter(tool => cached.tools?.some(item=>item.id===tool && item.installed===true && item.can_create===true));
+    if(cached.refreshing)inventoryTimer=setTimeout(()=>pollCreationInventory(connectionId,deviceId),2000);
+    if (usableTools.includes(creationMode.value)) {
+      selectCreationTool(creationMode.value);
+    } else if (usableTools.length) {
+      selectCreationTool(usableTools[0]);
+    } else {
+      creationMode.value = '';
+      creationError.value = cached.refreshing ? '' : 'createNoToolsOnDevice';
+    }
+  } catch {
+    if (read === workspaceRead) {
+      creationMode.value = '';
+      creationError.value = 'createNodeUnavailable';
+    }
+  } finally {
+    if (read === workspaceRead) creationNodeLoading.value = false;
+  }
+}
+
+function selectCreationTool(toolId) {
+  if (creationBusy.value || remoteCreation.value) return;
+  creationError.value = '';
+  creationMode.value = toolId;
+  if (toolId === 'none' || toolId === 'local') {
+    creationDeviceId.value = toolId;
+    creationConnectionId.value = '';
+    creationWorkspaces.value = [];
+    creationWorkspace.value = '';
+    return;
+  }
+  const rows = creationNodeSessionsCache.value[creationConnectionId.value];
+  if (!rows) {
+    void loadCreationWorkspaces();
+    return;
+  }
+  const workspaces = workspacesForNodeTool(rows, toolId);
+  creationWorkspaces.value = workspaces;
+  creationWorkspace.value = chooseBestWorkspaceForSelection(workspaces);
+
+}
+
+function startCreateProject() {
+  beginCreateItem('project', null);
+}
+
+function startCreateConversation(projectId = null) {
+  beginCreateItem('conversation', projectId);
+}
+
+function cancelCreateItem() {
+  if (creationBusy.value) return;
+  clearTimeout(nativeSetupTimer);
+  clearTimeout(inventoryTimer);
+  workspaceRead++;
+  creatingKind.value = null;
+}
+
+async function submitRemoteCreation(title, checking) {
+  const harness = creationMode.value;
+  const isDsh = harness === 'dsh';
+  const text = firstSessionMessage.value;
+  if (!isDsh && (!text.trim() || new TextEncoder().encode(text).length > 32000)) {
+    creationError.value = 'createFirstMessageRequired';
+    return;
+  }
+  const node = creationNode.value;
+  if (!node || !creationWorkspace.value) {
+    creationError.value = 'createNodeUnavailable';
+    return;
+  }
+  const owner = pairedCreationOwner.value;
+  if (!remoteCreationEnabled.value) {
+    creationError.value = 'createProjectLinkUnavailable';
+    return;
+  }
+  const bridge = dshSetupBridge(owner);
+  const attempt = remoteCreation.value || {
+    ownerId: owner?.id || null,
+    ownerEndpoint: owner?.url || owner?.baseUrl || null,
+    kind: creatingKind.value,
+    title,
+    projectId: creatingKind.value === 'project'
+      ? 'proj-' + crypto.randomUUID()
+      : creatingForProjectId.value,
+    connectionId: node.id,
+    endpoint: node.url || node.baseUrl || '',
+    workspace: creationWorkspace.value,
+    sessionId: 'session-' + crypto.randomUUID(),
+    ...(isDsh ? {} : {harness,text,requestId:'setup-' + crypto.randomUUID()}),
+  };
+  if (attempt.endpoint !== (node.url || node.baseUrl || '') || (attempt.ownerId || null) !== (owner?.id || null)
+      || (attempt.ownerEndpoint || null) !== (owner?.url || owner?.baseUrl || null)) {
+    creationError.value = 'createTargetChanged';
+    return;
+  }
+  if (!checking && attempt.projectId) {
+    const links = await bridge.projectLinks();
+    if (links?.writable === false || !Array.isArray(links?.links)) {
+      creationError.value = 'createProjectLinkUnavailable';
+      return;
+    }
+    if (attempt.kind !== 'project') {
+      const snap = await bridge.catalog();
+      if (!snap?.projects?.some(project => project.id === attempt.projectId)) {
+        creationError.value = 'createProjectMissing';
+        return;
+      }
+    }
+  }
+  try {
+    localStorage.setItem(creationJournalKey, JSON.stringify(attempt));
+  } catch {
+    creationError.value = 'createRetryStorageError';
+    return;
+  }
+  if (!checking) await bridge.dshWorkspaceGrant(attempt.connectionId, attempt.workspace);
+  remoteCreation.value = attempt;
+  if (!checking && attempt.kind === 'project') {
+    const snap = await bridge.createProject(attempt.projectId, attempt.title);
+    if (!snap?.projects?.some(project => project.id === attempt.projectId)) throw Error('PROJECT_CREATE_FAILED');
+    markRecentProject(attempt.projectId);
+    if (!owner) applyCatalogPreferences(snap);
+  }
+  let result;
+  let sessionId = attempt.sessionId;
+  if (isDsh) {
+    result = await bridge.dshCreate(node.id, sessionId, attempt.workspace, attempt.title || t('newConversation'));
+    if (result?.address?.connection_id !== node.id || result.address.session_id !== sessionId
+        || result.workspace !== attempt.workspace || result.source_kind !== 'dsh_native' || !result.title) {
+      throw Error('DSH_IDENTITY_MISMATCH');
+    }
+  } else {
+    const request = {connectionId:node.id, harness, workspace:attempt.workspace, requestId:attempt.requestId};
+    result = await bridge.nativeSetup({...request,action:'check'});
+    if (!checking && !attempt.sent && result?.request_id === attempt.requestId && result.status === 'missing') {
+      const dispatched = {...attempt,sent:true};
+      localStorage.setItem(creationJournalKey, JSON.stringify(dispatched));
+      remoteCreation.value = dispatched;
+      result = await bridge.nativeSetup({...request,action:'start',text:attempt.text});
+    }
+    if (result?.request_id !== attempt.requestId) throw Error(result?.error || 'HARNESS_IDENTITY_UNCONFIRMED');
+    nativeSetupReply.value = result.reply || '';
+    if (['accepted','running','persisting'].includes(result.status)) {
+      creationError.value = result.status === 'persisting' ? 'createNativePersisting' : 'createNativeRunning';
+      clearTimeout(nativeSetupTimer);
+      nativeSetupTimer = setTimeout(() => {
+        if (creatingKind.value && remoteCreation.value?.requestId === attempt.requestId) void submitCreateItem(true);
+      },result.status === 'persisting' ? 5000 : 2200);
+      return;
+    }
+    if (result.status !== 'ready') {
+      creationError.value = result.status === 'missing' && !remoteCreation.value?.sent ? 'createRemoteRetry' : 'createNativeUnconfirmed';
+      return;
+    }
+    sessionId = result.address?.session_id;
+    const prefix = harness === 'claude' ? 'claude-jsonl:' : harness+':';
+    if (result.address?.connection_id !== node.id || !sessionId?.startsWith(prefix) || sessionId !== result.session_id) {
+      throw Error('HARNESS_IDENTITY_UNCONFIRMED');
+    }
+    result = {title:attempt.title || t('newConversation'),workspace:attempt.workspace,source_kind:harness+'_native'};
+  }
+  if (attempt.projectId) {
+    creationError.value = 'createLinkUnconfirmed';
+    const links = await bridge.projectLinks();
+    const findLink = link => link.connection_id === node.id && link.harness === harness && link.session_id === sessionId;
+    const existing = links.links.find(findLink);
+    if (!existing) {
+      const saved = await bridge.projectLinkSet({connectionId: node.id, harness, sessionId,
+        projectId: attempt.projectId, expectedVersion: 0});
+      if (saved?.links?.find(findLink)?.project_id !== attempt.projectId) throw Error('PROJECT_LINK_UNCONFIRMED');
+    } else if (existing.project_id !== attempt.projectId) {
+      throw Error('PROJECT_LINK_CONFLICT');
+    }
+  }
+  localStorage.removeItem(creationJournalKey);
+  remoteCreation.value = null;
+  creationError.value = '';
+  creatingKind.value = null;
+  directoryCreationRevision.value++;
+  if (owner) void reload();
+  await selectRemoteConversation({node, session: {id: sessionId, harness, title: result.title,
+    workspace: result.workspace, source_kind: result.source_kind}});
+}
+
+async function submitCreateItem(checking = false) {
+  if (!available || !creatingKind.value || creationBusy.value) return;
+  const title = newItemTitle.value.trim();
+  if (creatingKind.value === 'project' && !title) return;
+  if (!['none', 'local'].includes(creationMode.value) && !Object.hasOwn(remoteHarnesses, creationMode.value)) {
+    creationError.value = 'createNoToolsOnDevice';
+    return;
+  }
+  if (new TextEncoder().encode(title).length > 256) {
+    creationError.value = 'createTitleTooLong';
+    return;
+  }
+  creationBusy.value = true;
+  creationError.value = '';
+  try {
+    if (Object.hasOwn(remoteHarnesses,creationMode.value)) await submitRemoteCreation(title, checking === true);
+    else await submitLocalCreation(title);
+  } catch {
+    if (!creationError.value) creationError.value = remoteCreation.value ? 'createRemoteRetry' : 'createItemFailed';
+  } finally {
+    creationBusy.value = false;
+  }
+}
+
+async function submitLocalCreation(title) {
+  if (creatingKind.value === 'project') {
+    if (!title || !kernelBridge.createProject) return;
+    const pid = `proj-${crypto.randomUUID().slice(0, 8)}`;
+    const snap = await kernelBridge.createProject(pid, title).catch(() => null);
+    if (!snap) throw Error('PROJECT_CREATE_FAILED');
+    markRecentProject(pid);
+    applyCatalogPreferences(snap);
+    if (creationMode.value === 'local') {
+      creatingKind.value = 'conversation';
+      creatingForProjectId.value = pid;
+      await submitLocalCreation(title);
+      return;
+    }
+    creatingKind.value = null;
+    newItemTitle.value = '';
+  } else if (creatingKind.value === 'conversation') {
+    if (!kernelBridge.createConversation) return;
+    await flushCurrentViewState();
+    const cid = `conv-${crypto.randomUUID().slice(0, 8)}`;
+    const pid = creatingForProjectId.value;
+    const snap = await kernelBridge
+      .createConversation(cid, pid, title || t('newConversation'))
+      .catch(() => null);
+    if (!snap) throw Error('CONVERSATION_CREATE_FAILED');
+    creatingKind.value = null;
+    creatingForProjectId.value = null;
+    newItemTitle.value = '';
+    remoteConversation.value = null;
+    try { localStorage.removeItem('bob-active-remote'); } catch {}
+    applyCatalogPreferences(snap);
+    locallyAccepted.clear();
+    sessionId.value = cid;
+    draft.value = '';
+    controller.loadDraft('', 0);
+    navigationOpen.value = false;
+    await reload();
+  }
+}
+
+async function cancel(execution) {
+  if (!canCancelExecution(execution) || cancelPending.value.has(execution.id)) return;
+  cancelPending.value = new Set([...cancelPending.value, execution.id]);
+  try {
+    const receipt = await executionController.cancel(execution);
+    executions.value = executions.value.map(run => (run.id === receipt.id ? receipt : run));
+    executionFault.value = null;
+  } catch {
+    executionFault.value = 'cancelUnconfirmed';
+  } finally {
+    const pending = new Set(cancelPending.value);
+    pending.delete(execution.id);
+    cancelPending.value = pending;
+    await reload();
+  }
+}
+
+async function focusPairedComposer() {
+  await reload();
+  await ctx.loadModelHub?.();
+  await ctx.loadPersonalOps?.();
+  await nextTick();
+  input.value?.focus();
+}
+
+async function startup() {
+  loading.value = true;
+  fault.value = null;
+  if (!available) {
+    loading.value = false;
+    return;
+  }
+  try {
+    const state = await kernelBridge.bootstrap();
+    const initialCatalog = await kernelBridge.catalog();
+    applyCatalogPreferences(initialCatalog);
+    const entry = await kernelBridge.assistantConversation();
+    assistantConversationId.value = entry.conversation_id;
+    const selected = chooseStartupConversation(clientState, initialCatalog);
+    newConversationPending.value = false;
+    sessionId.value = selected || entry.conversation_id;
+    if (newConversationPending.value) {
+      draft.value = clientState.blankDraft || '';
+      controller.loadDraft(draft.value, 0);
+    }
+    await reload();
+    await ctx.loadModelHub();
+    await ctx.loadPersonalOps();
+    void ctx.jarvisHome?.refreshJarvisState?.(sessionId.value);
+    const activeItem = catalog.value?.conversations?.find(c => c.id === sessionId.value);
+    if (activeItem?.view_state && !draft.value) {
+      draft.value = activeItem.view_state.draft || '';
+      controller.loadDraft(draft.value, activeItem.view_state.draft_revision || 0);
+    }
+  } catch {
+    fault.value = 'startupFailed';
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function openAssistantSessionDraft(text) {
+  const [command, ...fields] = text.split('|').map(part => part.trim());
+  const natural = /^新建\s*(DSH|Claude(?: Code)?|Codex|AGY|Pi|Copilot)\s*(?:会话|对话)$/i.exec(command);
+  const tool = natural ? natural[1].split(' ')[0].toLowerCase() : command.startsWith('/new-') ? command.slice(5) : '';
+  if (!Object.hasOwn(remoteHarnesses,tool)) return false;
+  startCreateConversation();
+  if (remoteCreation.value) return true;
+  if (!remoteCreationEnabled.value || fields.length > 4) {
+    creationError.value = 'createAssistantCommandHelp';
+    return true;
+  }
+  creationMode.value = tool;
+  const [device, workspace, project, title] = fields;
+  newItemTitle.value = title || '';
+  if (project) {
+    const matches = (catalog.value?.projects || []).filter(p => p.id === project || p.title === project);
+    if (matches.length === 1) creatingForProjectId.value = matches[0].id;
+    else {
+      creationError.value = 'createProjectMissing';
+      return true;
+    }
+  }
+  if (device) {
+    const matches = creationNodes.value.filter(node => [node.id,node.name,node.label].includes(device));
+    if (matches.length !== 1) {
+      creationError.value = 'createAssistantDeviceMissing';
+      return true;
+    }
+    creationConnectionId.value = matches[0].id;
+    await loadCreationWorkspaces();
+    if (workspace && creationWorkspaces.value.includes(workspace)) creationWorkspace.value = workspace;
+    else if (workspace && !creationError.value) creationError.value = 'createNoToolWorkspaces';
+  }
+  return true;
+}
+
+async function send() {
+  if (sessionId.value && sessionId.value === assistantConversationId.value && !composerAttachments.value.length
+      && /^(?:\/new-(?:dsh|claude|codex|agy|pi|copilot|kimi|qoder|zcode|workbuddy|goose)|新建\s*(?:DSH|Claude(?: Code)?|Codex|AGY|Pi|Copilot|Kimi(?: Code)?|Qoder|ZCode|WorkBuddy|Goose)\s*(?:会话|对话))(?:\s*\||$)/i.test(draft.value.trim())
+      && await openAssistantSessionDraft(draft.value.trim())) return;
+  if (!canSend.value) return;
+  const attBlock = formatComposerAttachments(composerAttachments.value);
+  const sentText = [draft.value.trim(), attBlock].filter(Boolean).join('\n\n') || draft.value;
+  const organizePrompt = typeof t === 'function' ? t('smartGroupAgentPrompt') : '';
+  const isOrganizeTurn = Boolean(
+    pendingOrganizeRequest || (organizePrompt && sentText.trim() === organizePrompt.trim()),
+  );
+  pendingOrganizeRequest = false;
+  if (!executionEnabled.value && !homeConfigured.value && !isOrganizeTurn) {
+    fault.value = 'sendNotConfigured';
+    input.value?.focus();
+    return;
+  }
+  saving.value = true;
+  fault.value = null;
+  if (attBlock) {
+    controller.setDraft(sentText);
+  }
+  const shouldExecute = executionEnabled.value || isOrganizeTurn;
+  try {
+    if (newConversationPending.value) {
+      await kernelBridge.createConversation(sessionId.value, null, sentText.trim().slice(0, 60));
+      newConversationPending.value = false;
+      clientState.selectedConversation = sessionId.value;
+      saveClientState(clientState);
+    }
+    const receipt = await controller.send();
+    if (receipt) {
+      composerAttachments.value = [];
+      clientState.blankDraft = '';
+      saveClientState(clientState);
+    }
+    if (receipt && !messages.value.some(message => message.id === receipt.message_id)) {
+      const message = {
+        id: receipt.message_id,
+        request_id: receipt.request_id,
+        role: 'user',
+        content: sentText,
+        send_state: 'local_saved',
+        created_at: Date.now(),
+      };
+      locallyAccepted.set(message.id, message);
+      messages.value.push(message);
+    }
+    draft.value = controller.snapshot().draft;
+    await nextTick();
+    input.value?.focus();
+    if (receipt && shouldExecute) {
+      dispatchPending.value = true;
+      executionFault.value = null;
+      try {
+        const execution = isOrganizeTurn && typeof kernelBridge.assistantExecute === 'function'
+          ? await kernelBridge.assistantExecute(receipt.request_id)
+          : (browserClient && sessionId.value === assistantConversationId.value && directProviderEnabled.value
+              ? (typeof ctx.jarvisHome?.runJarvisTurn === 'function'
+                  ? await ctx.jarvisHome.runJarvisTurn({ sessionId: sessionId.value, requestId: receipt.request_id, messageId: receipt.message_id, content: sentText })
+                  : await kernelBridge.assistantExecute(receipt.request_id))
+              : await executionController.dispatch(receipt));
+        assistantNextPoll = 0;
+        void refreshAssistantResults();
+        executions.value = [
+          ...executions.value.filter(run => run && (!execution || run.id !== execution.id)),
+          ...(execution ? [execution] : []),
+        ];
+        if (isOrganizeTurn) {
+          directorySyncRevision.value += 1;
+          const refreshedCatalog = await kernelBridge.catalog?.().catch(() => null);
+          if (refreshedCatalog) applyCatalogPreferences(refreshedCatalog);
+        }
+      } catch {
+        unconfirmedRequest = receipt.request_id;
+        executionFault.value = 'executionStartUnconfirmed';
+      } finally {
+        dispatchPending.value = false;
+      }
+    }
+    await reload();
+    void ctx.loadPersonalOps();
+  } catch {
+    draft.value = controller.snapshot().draft;
+    fault.value = 'saveFailed';
+  } finally {
+    saving.value = false;
+  }
+}
+
+function keydown(event) {
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    void send();
+  }
+}
+
+const statusKeys = {
+  reply_saved: 'probeReplySaved',
+  local_saved: 'localSaved',
+  queued_for_wakeup: 'waitingHome',
+  not_dispatched: 'waitingHome',
+  dispatching: 'sending',
+  dispatched: 'waitingReceipt',
+  unknown_send: 'unknown',
+  peer_accepted: 'homeReceived',
+  rejected: 'rejected',
+  cancelled_local: 'cancelled',
+  needs_attention: 'attention',
+};
+
+  function resetSyncBackoffAndReload() {
+    if (!disposed && available) {
+      nextAllowedSyncAt = 0;
+      void reload();
+    }
+  }
+
+  function startPolling() {
+    if (!disposed && available) {
+      let idleTick = 0;
+      poll = setInterval(() => {
+        if (typeof document !== 'undefined' && document.hidden) return;
+        const isActiveExecution = Boolean(
+          activeExecution.value ||
+            dispatchPending.value ||
+            saving.value ||
+            ctx.jarvisHome?.activeWorkerTasks?.value?.length,
+        );
+        if (!isActiveExecution) {
+          idleTick = (idleTick + 1) % 40;
+          if (idleTick !== 0) return;
+        } else {
+          idleTick = 0;
+        }
+        void reload();
+      }, 1500);
+    }
+  }
+
+  function disposeChatSession() {
+    disposed = true;
+    clearTimeout(nativeSetupTimer);
+    if (draftSaveTimer) clearTimeout(draftSaveTimer);
+    if (scrollSaveTimer) clearTimeout(scrollSaveTimer);
+    if (historyWheelResetTimer) clearTimeout(historyWheelResetTimer);
+    if (mainSyncPulseTimer) clearTimeout(mainSyncPulseTimer);
+    if (poll) clearInterval(poll);
+    ctx.jarvisHome?.stopWorkerPolling?.();
+  }
+
+  return Object.assign(ctx, {
+    available,
+    browserClient,
+    kernelBridge,
+    clientState,
+    saveClientState,
+    sessionId,
+    assistantConversationId,
+    jarvisHome: ctx.jarvisHome,
+    assistantLinks,
+    assistantPollFailed,
+    assistantLink,
+    openAssistantTarget,
+    newConversationPending,
+    restoreRemoteSelection,
+    messages,
+    readiness,
+    executions,
+    executionFault,
+    homeFault,
+    cancelPending,
+    dispatchPending,
+    catalog,
+    directorySyncRevision,
+    sidebarGroupMode,
+    sidebarSearch,
+    remoteConversation,
+    selectRemoteConversation,
+    expandedProjects,
+    showLegacy,
+    projectExpanded,
+    toggleProject,
+    activityText,
+    theme,
+    creatingKind,
+    creatingForProjectId,
+    newItemTitle,
+    firstSessionMessage,
+    nativeSetupReply,
+    remoteHarnesses,
+    creationMode,
+    creationConnectionId,
+    creationDeviceId,
+    creationWorkspace,
+    creationWorkspaces,
+    creationLoading,
+    creationNodeLoading,
+    creationBusy,
+    creationError,
+    remoteCreation,
+    remoteCreationEnabled,
+    creationNodes,
+    creationAvailableTools,
+    loadCreationWorkspaces,
+    selectCreationDevice,
+    selectCreationTool,
+    cancelCreateItem,
+    directoryCreationRevision,
+    layoutState,
+    updateLayoutState,
+    locallyAccepted,
+    directProviderEnabled,
+    executionEnabled,
+    homeConfigured,
+    pairingStatusState,
+    devicePaired,
+    homeReachable,
+    deviceOnline,
+    connectionTarget,
+    connectionLabel,
+    sendLabel,
+    messageExecution,
+    messageStatus,
+    connectionKey,
+    activeDrawer,
+    previousNonSettingsDrawer,
+    settingsOpen,
+    immersive,
+    immersiveActive,
+    settingsView,
+    settingsTab,
+    navigationOpen,
+    devicePanel,
+    deviceCapabilities,
+    fallbackConversationTitle,
+    activeConversationItem,
+    currentConversation,
+    totalUnreadCount,
+    standaloneList,
+    projectList,
+    legacyCount,
+    deviceGroupList,
+    projectConversations,
+    switchPrimaryDrawer,
+    toggleSettingsHome,
+    switchSettingsTab,
+    openDevices,
+    settingsPanel,
+    settingsKeydown,
+    formatMessageTime,
+    copyState,
+    copyReply,
+    draft,
+    saving,
+    loading,
+    fault,
+    input,
+    historyRegion,
+    composerAttachments,
+    composerFileInput,
+    openComposerFilePicker,
+    handleComposerFiles,
+    removeComposerAttachment,
+    historyPullUpDistance,
+    onHistoryTouchStart,
+    onHistoryTouchMove,
+    onHistoryTouchEnd,
+    onHistoryWheel,
+    deviceSyncPhase,
+    forceRefreshActiveConversation,
+    executionBlocked,
+    activeExecution,
+    canSend,
+    switchSidebarMode,
+    organizeSessionsViaAgent,
+    controller,
+    updateDraft,
+    focusComposer,
+    onHistoryScroll,
+    applyCatalogPreferences,
+    reload,
+    flushCurrentViewState,
+    openAssistant,
+    selectConversation,
+    deleteLocalConversation,
+    startCreateProject,
+    startCreateConversation,
+    submitCreateItem,
+    cancel,
+    focusPairedComposer,
+    startup,
+    send,
+    keydown,
+    resetSyncBackoffAndReload,
+    startPolling,
+    disposeChatSession,
+  });
+}

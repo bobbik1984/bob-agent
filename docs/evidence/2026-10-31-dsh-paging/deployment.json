@@ -1,0 +1,15 @@
+{
+  "release": {
+    "release": "dsh-paging-20261031-r1",
+    "baseCommit": "4186208ced91839cefe9f1efecb11d032cfa412b",
+    "sourceSha256": "77dbf9e6606fa597fa072c2636c6ae49949c9f46d5fee84b2f28db4def102a1a",
+    "apk": false
+  },
+  "binarySha256": "43e6a183f23ed0300f5c92f7f53f04ce6fc8d28a49bd6242a4308b57f27fdc37",
+  "webSha256": "60da0993d6c52ea145fef7fb31f12e3ffbc1fc28f969156b421410aaa8f717f7",
+  "oldBinaryReadsNewSchema": true,
+  "productionIdle": true,
+  "deployed": true,
+  "backup": "/opt/bob-online/backups/assistant-instance-1793459597",
+  "rollbackUsed": false
+}

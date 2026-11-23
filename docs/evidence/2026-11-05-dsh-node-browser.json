@@ -1,0 +1,18 @@
+[
+  {
+    "width": 390,
+    "messages": 10,
+    "input_visible": true,
+    "image_preview": true,
+    "returned_to_session": true,
+    "errors": []
+  },
+  {
+    "width": 1180,
+    "messages": 10,
+    "input_visible": true,
+    "image_preview": true,
+    "returned_to_session": true,
+    "errors": []
+  }
+]

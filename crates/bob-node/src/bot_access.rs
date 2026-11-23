@@ -1,0 +1,518 @@
+//! External project assistants: deny-by-default, no execution RPC forwarding.
+use crate::{NodeContext, hash_token};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::{fs, io::Write, path::Path};
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Grant {
+    pub username: String,
+    pub token_hash: String,
+    pub expires_at: i64,
+    #[serde(default)]
+    pub no_expiry: bool,
+    pub revoked: bool,
+    pub projects: Vec<String>,
+    #[serde(default)]
+    pub all_projects: bool,
+    pub sessions: Vec<Session>,
+    pub organize: bool,
+    #[serde(default)]
+    pub todos_read: bool,
+    #[serde(default)]
+    pub todos_create: bool,
+    #[serde(default)]
+    pub todos_unassigned: bool,
+    #[serde(default)]
+    pub todos_update: bool,
+    #[serde(default)]
+    pub briefing_read: bool,
+    #[serde(default)]
+    pub orders_submit: bool,
+    #[serde(default)]
+    pub orders_read: bool,
+    #[serde(default)]
+    pub delegate_ask: bool,
+    #[serde(default)]
+    pub delegate_harnesses: Vec<String>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Session { pub connection_id: String, pub harness: String, pub session_id: String }
+
+fn authorize(dir: &Path, header: Option<&str>, now: i64) -> Result<Grant, &'static str> {
+    let token = header.and_then(|h| h.strip_prefix("Bearer ")).filter(|s| s.starts_with("bob_bot_"))
+        .ok_or("BOT_AUTH_REQUIRED")?;
+    let grants: Vec<Grant> = serde_json::from_slice(&fs::read(dir.join("bot-grants.json")).map_err(|_| "BOT_AUTH_REQUIRED")?)
+        .map_err(|_| "BOT_AUTH_REQUIRED")?;
+    grants.into_iter().find(|g| g.token_hash == hash_token(token) && !g.revoked && (g.no_expiry || g.expires_at > now))
+        .ok_or("BOT_AUTH_REQUIRED")
+}
+fn audit(dir: &Path, user: &str, action: &str, outcome: &str, now: i64) -> Result<(), &'static str> {
+    let mut f = fs::OpenOptions::new().create(true).append(true).open(dir.join("bot-audit.jsonl")).map_err(|_| "BOT_AUDIT_UNAVAILABLE")?;
+    writeln!(f, "{}", json!({"at":now,"actor":user,"action":action,"outcome":outcome})).map_err(|_| "BOT_AUDIT_UNAVAILABLE")?;
+    f.sync_data().map_err(|_| "BOT_AUDIT_UNAVAILABLE")
+}
+pub fn handle(ctx: &mut NodeContext, header: Option<&str>, body: &Value, now: i64) -> (u16, Value) {
+    let mut g=match authorize(&ctx.runtime.data_dir,header,now) {Ok(g)=>g,Err(e)=>return (401,json!({"error":e}))};
+    // Expand only authenticated owner-granted scope, freshly on each request.
+    if g.all_projects {
+        g.projects=match ctx.app.catalog_snapshot() {
+            Ok(c)=>c.projects.into_iter().map(|p|p.id).collect(),
+            Err(_)=>return (503,json!({"error":"BOT_READ_FAILED"})),
+        };
+    }
+    if body["jsonrpc"] != "2.0" || !body.is_object() {return (400,json!({"error":"BOT_BODY_INVALID"}));}
+    let id=body.get("id").cloned().unwrap_or(Value::Null);
+    let method=body["method"].as_str().unwrap_or("");
+    let result=match method {
+        "initialize" => Ok(json!({"protocolVersion":"2025-03-26","capabilities":{"tools":{}},"serverInfo":{"name":"bob-project-assistant","version":"0.1.0"}})),
+        "notifications/initialized" => return (202,json!({})),
+        "ping" => Ok(json!({})),
+        "tools/list" => {
+            let mut tools=vec![
+                json!({"name":"bob_projects","description":"Read explicitly granted project metadata. No node execution.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}),
+                json!({"name":"bob_project_sessions","description":"Read granted existing project/session associations.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})];
+            if g.organize {tools.push(json!({"name":"bob_associate_session","description":"Associate an explicitly granted session with a granted project using version CAS. Does not execute or send messages.","inputSchema":{"type":"object","properties":{"connection_id":{"type":"string"},"harness":{"type":"string"},"session_id":{"type":"string"},"project_id":{"type":"string"},"expected_version":{"type":"integer","minimum":0}},"required":["connection_id","harness","session_id","project_id","expected_version"],"additionalProperties":false}}));}
+            if g.todos_read {tools.push(json!({"name":"bob_todos","description":"List authorized todos: omit project_id for all, null for independent todos, or an ID for a project. At most 100 items; paginate with offset.","inputSchema":{"type":"object","properties":{"project_id":{"type":["string","null"]},"offset":{"type":"integer","minimum":0}},"additionalProperties":false}}));}
+            if g.todos_create {tools.push(json!({"name":"bob_todo_create","description":"Create a todo. Project, start and deadline are optional; infer dates from user intent; date-only uses timing.start_date/due_date, precise times use start_at/due_at; preserve original wording and interpretation. Retry with the same request_id and identical payload. Times are Unix milliseconds.","inputSchema":{"type":"object","properties":{"project_id":{"type":["string","null"]},"request_id":{"type":"string","maxLength":128},"title":{"type":"string","maxLength":256},"start_at":{"type":["integer","null"],"minimum":1},"due_at":{"type":["integer","null"],"minimum":1},"notes":{"type":"string","maxLength":16384},"timing":timing_schema()},"required":["request_id","title"],"additionalProperties":false}}));}
+            if g.todos_update {tools.push(json!({"name":"bob_todo_update","description":"Patch an existing authorized todo, never create another. Read latest id/version first. Omitted fields are preserved, null timestamps clear; timing replaces date precision/provenance. Retry identical request_id/payload; stale versions are refused. No deletion or node execution.","inputSchema":{"type":"object","properties":{"id":{"type":"string"},"request_id":{"type":"string","maxLength":128},"expected_version":{"type":"integer","minimum":1},"project_id":{"type":["string","null"]},"title":{"type":"string","maxLength":256},"start_at":{"type":["integer","null"],"minimum":1},"due_at":{"type":["integer","null"],"minimum":1},"notes":{"type":"string","maxLength":16384},"timing":timing_schema()},"required":["id","request_id","expected_version"],"additionalProperties":false}}));}
+            if g.briefing_read {tools.push(json!({"name":"bob_briefing","description":"Read desensitized global project briefing, open project todos, and recent dispatch orders within explicitly granted project scope.","inputSchema":{"type":"object","properties":{"project_id":{"type":["string","null"]},"include_todos":{"type":"boolean"}},"additionalProperties":false}}));}
+            if g.orders_submit {tools.push(json!({"name":"bob_order_submit","description":"Submit a human-gated chief-of-staff dispatch order for an authorized project. Always enters pending_approval until approved by the owner. Idempotent on per-actor request_id.","inputSchema":{"type":"object","properties":{"request_id":{"type":"string","maxLength":128},"project_id":{"type":"string","maxLength":128},"title":{"type":"string","maxLength":256},"instruction":{"type":"string","maxLength":16384},"target_node":{"type":"string","enum":["auto","x1t","x1c","vps1","vps2","vps3"]},"priority":{"type":"string","enum":["low","normal","high","urgent"]},"deliverables":{"type":"array","items":{"type":"string","maxLength":256},"maxItems":16}},"required":["request_id","project_id","title","instruction"],"additionalProperties":false}}));}
+            if g.orders_read {tools.push(json!({"name":"bob_orders","description":"List dispatch orders and worker receipts across all chief seats within explicitly granted project scope.","inputSchema":{"type":"object","properties":{"project_id":{"type":["string","null"]},"order_id":{"type":["string","null"]},"status":{"type":"string","enum":["pending_approval","approved","rejected","running","completed","failed"]},"offset":{"type":"integer","minimum":0}},"additionalProperties":false}}));}
+            if g.delegate_ask {
+                tools.push(json!({
+                    "name": "bob_delegate_ask",
+                    "description": "Cross-CLI delegation: ask another enabled coding agent harness on an authorized workspace for a second opinion, review, or verification. Enforces tool_policy and runs under L1 verify stage.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "harness": {"type": "string", "enum": bob_runtime::harness_registry::DISPATCHABLE_TOOL_IDS},
+                            "prompt": {"type": "string", "maxLength": 16384},
+                            "connection_id": {"type": "string", "maxLength": 128},
+                            "session_id": {"type": "string", "maxLength": 128},
+                            "workspace": {"type": "string", "maxLength": 4096},
+                            "project_id": {"type": ["string", "null"], "maxLength": 128},
+                            "title": {"type": "string", "maxLength": 256},
+                            "dod": {"type": "array", "items": {"type": "string", "maxLength": 256}, "maxItems": 8}
+                        },
+                        "required": ["harness", "prompt"],
+                        "additionalProperties": false
+                    }
+                }));
+                tools.push(json!({
+                    "name": "bob_delegation_status",
+                    "description": "Poll status and child summary of cross-CLI delegations created by this actor.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "run_id": {"type": ["string", "null"], "maxLength": 128},
+                            "active_only": {"type": "boolean"}
+                        },
+                        "additionalProperties": false
+                    }
+                }));
+            }
+            Ok(json!({"tools":tools}))
+        }
+        "tools/call" => {
+            let name=body["params"]["name"].as_str().unwrap_or("");
+            // Log only fixed tool identifiers, never attacker text or request payloads.
+            let logged=if matches!(name,"bob_projects"|"bob_project_sessions"|"bob_associate_session"|"bob_todos"|"bob_todo_create"|"bob_todo_update"|"bob_briefing"|"bob_order_submit"|"bob_orders"|"bob_delegate_ask"|"bob_delegation_status"){name}else{"denied_tool"};
+            if audit(&ctx.runtime.data_dir,&g.username,logged,"attempt",now).is_err(){return (503,json!({"error":"BOT_AUDIT_UNAVAILABLE"}));}
+            let access=crate::project_service::ProjectAccess {
+                projects:g.projects.clone(),
+                sessions:g.sessions.iter().map(|s|(s.connection_id.clone(),s.harness.clone(),s.session_id.clone())).collect(),
+                organize:g.organize,
+            };
+            let empty=json!({});
+            let args=body["params"].get("arguments").unwrap_or(&empty);
+            let out: Result<Value, String> = if matches!(name,"bob_todos"|"bob_todo_create"|"bob_todo_update") {
+                crate::todo_service::execute(ctx,&g.username,&g.projects,g.todos_read,g.todos_create,g.todos_update,g.todos_unassigned,name,args,now).map_err(str::to_string)
+            } else if matches!(name,"bob_briefing"|"bob_order_submit"|"bob_orders") {
+                crate::chief_service::execute(ctx,&g.username,&g.projects,g.all_projects,g.briefing_read,g.orders_submit,g.orders_read,name,args,now).map_err(str::to_string)
+            } else if matches!(name,"bob_delegate_ask"|"bob_delegation_status") {
+                execute_delegation(&ctx.runtime.data_dir, &g, name, args)
+            } else {crate::project_service::execute(ctx,&access,name,args,now).map_err(str::to_string)};
+            let outcome=if out.is_ok(){"success"}else{"denied_or_conflict"};
+            if audit(&ctx.runtime.data_dir,&g.username,logged,outcome,now).is_err(){return (503,json!({"error":"BOT_RECEIPT_UNKNOWN_CHECK_VERSION"}));}
+            Ok(match out {Ok(v)=>json!({"content":[{"type":"text","text":v.to_string()}],"isError":false}),Err(e)=>json!({"content":[{"type":"text","text":e}],"isError":true})})
+        }
+        _ => Err("BOT_METHOD_DENIED"),
+    };
+    (200,match result {Ok(v)=>json!({"jsonrpc":"2.0","id":id,"result":v}),Err(e)=>json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":e}})})
+}
+
+
+fn execute_delegation(data_dir: &Path, g: &Grant, name: &str, args: &Value) -> Result<Value, String> {
+    if !g.delegate_ask {
+        return Err("BOT_SCOPE_DENIED".to_string());
+    }
+    let actor_conv_id = format!("delegate:{}", g.username);
+    if name == "bob_delegation_status" {
+        let store = bob_runtime::orchestrator::OrchestrationStore::open(data_dir)
+            .map_err(|e| e.to_string())?;
+        let run_id = args
+            .get("run_id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let active_only = args
+            .get("active_only")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let mut runs: Vec<Value> = store
+            .list_runs(Some(&actor_conv_id))
+            .into_iter()
+            .filter(|r| run_id.map_or(true, |id| r.run_id == id))
+            .filter(|r| !active_only || r.status.is_active())
+            .map(|r| {
+                json!({
+                    "run_id": r.run_id,
+                    "harness": r.harness,
+                    "connection_id": r.connection_id,
+                    "session_id": r.session_id,
+                    "status": format!("{:?}", r.status).to_lowercase(),
+                    "stage": r.stage.label(),
+                    "current_round": r.current_round,
+                    "dod_satisfied": r.dod_satisfied,
+                    "last_child_summary": r.last_child_summary,
+                    "review_summary": r.review_summary,
+                    "updated_at": r.updated_at,
+                })
+            })
+            .collect();
+        runs.truncate(20);
+        return Ok(json!({"ok": true, "delegations": runs}));
+    }
+
+    // bob_delegate_ask
+    let harness = args
+        .get("harness")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "HARNESS_REQUIRED".to_string())?;
+    let prompt = args
+        .get("prompt")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && s.len() <= 16_384)
+        .ok_or_else(|| "PROMPT_REQUIRED".to_string())?;
+    if !bob_runtime::harness_registry::is_dispatchable_tool(harness) {
+        return Err(format!("HARNESS_TOOL_UNSUPPORTED: {harness}"));
+    }
+    if !g.delegate_harnesses.is_empty() && !g.delegate_harnesses.iter().any(|h| h == harness) {
+        return Err("BOT_DELEGATE_HARNESS_DENIED".to_string());
+    }
+    let conn_id = args
+        .get("connection_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("local");
+    let session_id = args
+        .get("session_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let workspace = args
+        .get("workspace")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    if let Some(pid) = args
+        .get("project_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        if !g.all_projects && !g.projects.iter().any(|p| p == pid) {
+            return Err("BOT_PROJECT_SCOPE_DENIED".to_string());
+        }
+    }
+    let effective_tool = session_id
+        .map(bob_runtime::tool_policy::session_tool)
+        .unwrap_or(harness);
+    bob_runtime::tool_policy::require(data_dir, conn_id, effective_tool)
+        .map_err(|e| e.to_string())?;
+
+    if conn_id == "local" && session_id.is_none() {
+        if workspace.is_empty() {
+            return Err("WORKSPACE_REQUIRED_FOR_DELEGATION".to_string());
+        }
+        bob_runtime::host_tools::WorkspaceGrantStore::open(data_dir)
+            .map_err(|e| e.to_string())?
+            .resolve_authorized_path(workspace, false)
+            .map_err(|e| e.to_string())?;
+    }
+
+    let mut dispatch_args = json!({
+        "connection_id": conn_id,
+        "harness": harness,
+        "workspace": workspace,
+        "prompt": prompt,
+        "title": args.get("title").and_then(Value::as_str).unwrap_or("Cross-CLI Second Opinion"),
+        "stage": "verify",
+        "autonomy_mode": "L1",
+        "conversation_id": actor_conv_id,
+    });
+    if let Some(sid) = session_id {
+        dispatch_args["session_id"] = json!(sid);
+    }
+    if let Some(pid) = args.get("project_id").and_then(Value::as_str) {
+        dispatch_args["project_id"] = json!(pid);
+    }
+    if let Some(dod) = args.get("dod").and_then(Value::as_array) {
+        dispatch_args["dod"] = Value::Array(dod.clone());
+    }
+    crate::orchestration::execute_dispatch_to_node_session(data_dir, &dispatch_args)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{BobNodeConfig, spawn_node_server};
+    use std::{io::{Read,Write},net::TcpStream};
+    const TOKEN: &str="bob_bot_test_only_not_a_real_credential";
+    fn setup() -> (tempfile::TempDir,NodeContext) {
+        let d=tempfile::tempdir().unwrap();
+        let c=BobNodeConfig{bind_addr:"127.0.0.1:0".into(),data_dir:d.path().into(),static_dir:None,legacy_db_path:None};
+        let mut ctx=NodeContext::open(&c).unwrap();
+        for id in ["allowed","other-allowed","private"] {ctx.app.create_project(id,id,1).unwrap();}
+        save(d.path(),true,false,10000);
+        (d,ctx)
+    }
+    fn save(p:&Path,organize:bool,revoked:bool,expires:i64) {
+        let grant=Grant{username:"grok_bot".into(),token_hash:hash_token(TOKEN),expires_at:expires,revoked,no_expiry:false,all_projects:false,
+            projects:vec!["allowed".into(),"other-allowed".into()],
+            sessions:vec![Session{connection_id:"test-node".into(),harness:"dsh".into(),session_id:"session-a".into()}],organize,todos_read:false,todos_create:false,todos_unassigned:false,todos_update:false,briefing_read:false,orders_submit:false,orders_read:false,delegate_ask:false,delegate_harnesses:Vec::new()};
+        fs::write(p.join("bot-grants.json"),serde_json::to_vec(&vec![grant]).unwrap()).unwrap();
+    }
+    fn rpc(ctx:&mut NodeContext,name:&str,args:Value)->Value {
+        handle(ctx,Some(&format!("Bearer {TOKEN}")),&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":args}}),10).1
+    }
+    fn args()->Value {json!({"connection_id":"test-node","harness":"dsh","session_id":"session-a","project_id":"allowed","expected_version":0})}
+    #[test] fn bot_read_projection_is_scoped() {
+        let (_d,mut c)=setup();let r=rpc(&mut c,"bob_projects",json!({}));
+        let s=r.to_string();assert!(s.contains("other-allowed"));assert!(!s.contains("private"));assert!(!s.contains("draft"));assert!(!s.contains(TOKEN));
+    }
+    #[test] fn bot_organize_persists_with_conflict_protection() {
+        let (d,mut c)=setup();assert_eq!(rpc(&mut c,"bob_associate_session",args())["result"]["isError"],false);
+        assert_eq!(rpc(&mut c,"bob_associate_session",args())["result"]["isError"],true);
+        drop(c);let cfg=BobNodeConfig{bind_addr:"127.0.0.1:0".into(),data_dir:d.path().into(),static_dir:None,legacy_db_path:None};
+        let mut c=NodeContext::open(&cfg).unwrap();assert!(rpc(&mut c,"bob_project_sessions",json!({})).to_string().contains("session-a"));
+    }
+    #[test] fn bot_readonly_cannot_organize() {
+        let (d,mut c)=setup();save(d.path(),false,false,10000);
+        assert_eq!(rpc(&mut c,"bob_associate_session",args())["result"]["isError"],true);
+        assert_eq!(c.app.project_session_links().unwrap()["links"].as_array().unwrap().len(),0);
+    }
+    #[test] fn bot_scope_denies_other_project_and_session() {
+        let (_d,mut c)=setup();let mut a=args();a["project_id"]=json!("private");
+        assert_eq!(rpc(&mut c,"bob_associate_session",a)["result"]["isError"],true);
+        let mut a=args();a["session_id"]=json!("secret");assert_eq!(rpc(&mut c,"bob_associate_session",a)["result"]["isError"],true);
+    }
+    #[test] fn bot_cannot_move_from_ungranted_project() {
+        let (_d,mut c)=setup();c.app.set_project_session_link("test-node","dsh","session-a",Some("private"),0,1).unwrap();
+        let mut a=args();a["expected_version"]=json!(1);assert_eq!(rpc(&mut c,"bob_associate_session",a)["result"]["isError"],true);
+    }
+    #[test] fn bot_revocation_expiry_and_missing_auth() {
+        let (d,mut c)=setup();let b=json!({"jsonrpc":"2.0","id":1,"method":"tools/list"});
+        assert_eq!(handle(&mut c,None,&b,10).0,401);
+        save(d.path(),true,true,10000);assert_eq!(handle(&mut c,Some(&format!("Bearer {TOKEN}")),&b,10).0,401);
+        save(d.path(),true,false,10);assert_eq!(handle(&mut c,Some(&format!("Bearer {TOKEN}")),&b,10).0,401);
+    }
+    #[test] fn bot_execution_and_argument_injection_denied() {
+        let (_d,mut c)=setup();for name in ["app_dsh_prompt","app_subagent_execute","shell","app_remote_node_save"] {
+            assert_eq!(rpc(&mut c,name,json!({}))["result"]["isError"],true);
+        }
+        assert_eq!(rpc(&mut c,"bob_projects",json!({"command":"anything"}))["result"]["isError"],true);
+    }
+    #[test] fn bot_http_token_cannot_use_owner_rpc() {
+        let (d,c)=setup();drop(c);
+        let server=spawn_node_server(BobNodeConfig{bind_addr:"127.0.0.1:0".into(),data_dir:d.path().into(),static_dir:None,legacy_db_path:None}).unwrap();
+        let mut stream=TcpStream::connect(server.local_addr).unwrap();
+        write!(stream,"POST /api/rpc/app_catalog HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {TOKEN}\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}").unwrap();
+        let mut out=String::new();stream.read_to_string(&mut out).unwrap();assert!(out.starts_with("HTTP/1.1 403"));server.shutdown();
+    }
+    #[test] fn bot_audit_contains_no_credentials_or_payload() {
+        let (d,mut c)=setup();rpc(&mut c,"bob_projects",json!({}));
+        let audit=fs::read_to_string(d.path().join("bot-audit.jsonl")).unwrap();assert!(!audit.contains(TOKEN));assert!(audit.contains("grok_bot"));assert!(audit.contains("success"));
+    }
+    fn allow_todos(p:&Path) {
+        let mut grants:Vec<Grant>=serde_json::from_slice(&fs::read(p.join("bot-grants.json")).unwrap()).unwrap();
+        grants[0].todos_read=true;grants[0].todos_create=true;
+        fs::write(p.join("bot-grants.json"),serde_json::to_vec(&grants).unwrap()).unwrap();
+    }
+    fn todo_args()->Value {json!({"project_id":"allowed","request_id":"request-1","title":"Review","start_at":1000,"notes":"Check result"})}
+    fn value(r:Value)->Value {serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap()}
+    #[test] fn todo_retry_survives_restart_and_does_not_duplicate() {
+        let (d,mut c)=setup();allow_todos(d.path());
+        let first=value(rpc(&mut c,"bob_todo_create",todo_args()));
+        assert_eq!(first["replayed"],false);
+        assert_eq!(c.app.list_schedule_items().unwrap().len(),1);
+        drop(c);
+        let cfg=BobNodeConfig{bind_addr:"127.0.0.1:0".into(),data_dir:d.path().into(),static_dir:None,legacy_db_path:None};
+        let mut c=NodeContext::open(&cfg).unwrap();
+        let again=value(rpc(&mut c,"bob_todo_create",todo_args()));
+        assert_eq!(again["todo"]["id"],first["todo"]["id"]);assert_eq!(again["replayed"],true);
+        assert_eq!(c.app.list_schedule_items().unwrap().len(),1);
+        let mut altered=todo_args();altered["title"]=json!("Changed");
+        assert_eq!(rpc(&mut c,"bob_todo_create",altered)["result"]["isError"],true);
+    }
+    #[test] fn todo_scope_defaults_and_revocation_are_enforced() {
+        let (d,mut c)=setup();assert_eq!(rpc(&mut c,"bob_todo_create",todo_args())["result"]["isError"],true);
+        allow_todos(d.path());let mut a=todo_args();a["project_id"]=json!("private");
+        assert_eq!(rpc(&mut c,"bob_todo_create",a)["result"]["isError"],true);
+        assert_eq!(rpc(&mut c,"bob_todos",json!({"project_id":"private"}))["result"]["isError"],true);
+        assert!(c.app.list_schedule_items().unwrap().is_empty());
+        save(d.path(),false,true,10000);
+        assert_eq!(rpc(&mut c,"bob_todo_create",todo_args())["error"],"BOT_AUTH_REQUIRED");
+    }
+    #[test] fn todo_reads_filter_personal_and_other_project_items() {
+        let (d,mut c)=setup();allow_todos(d.path());
+        c.app.create_schedule_item_with_kind("private-todo",Some("private"),None,"Secret","todo",1000,None,None,"Private",1).unwrap();
+        value(rpc(&mut c,"bob_todo_create",todo_args()));
+        let list=value(rpc(&mut c,"bob_todos",json!({"project_id":"allowed"})));
+        assert_eq!(list["todos"].as_array().unwrap().len(),1);assert!(!list.to_string().contains("Secret"));
+        assert_eq!(rpc(&mut c,"bob_todos",json!({"project_id":"allowed","offset":-1}))["result"]["isError"],true);
+    }
+
+    #[test] fn explicit_non_expiring_grant_still_revokes() {
+        let (d,mut c)=setup();
+        let mut grants:Vec<Grant>=serde_json::from_slice(&fs::read(d.path().join("bot-grants.json")).unwrap()).unwrap();
+        grants[0].expires_at=0;grants[0].no_expiry=true;
+        fs::write(d.path().join("bot-grants.json"),serde_json::to_vec(&grants).unwrap()).unwrap();
+        assert_eq!(rpc(&mut c,"bob_projects",json!({}))["result"]["isError"],false);
+        grants[0].revoked=true;
+        fs::write(d.path().join("bot-grants.json"),serde_json::to_vec(&grants).unwrap()).unwrap();
+        assert_eq!(rpc(&mut c,"bob_projects",json!({}))["error"],"BOT_AUTH_REQUIRED");
+    }
+
+    #[test] fn all_projects_includes_new_projects_without_execution() {
+        let (d,mut c)=setup();allow_todos(d.path());
+        let path=d.path().join("bot-grants.json");
+        let mut grants:Vec<Grant>=serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        grants[0].all_projects=true;grants[0].organize=false;grants[0].sessions.clear();
+        fs::write(&path,serde_json::to_vec(&grants).unwrap()).unwrap();
+        c.app.create_project("future","Future",11).unwrap();
+        assert!(rpc(&mut c,"bob_projects",json!({})).to_string().contains("future"));
+        let mut a=todo_args();a["project_id"]=json!("future");
+        assert_eq!(rpc(&mut c,"bob_todo_create",a)["result"]["isError"],false);
+        assert_eq!(rpc(&mut c,"app_dsh_prompt",json!({}))["result"]["isError"],true);
+        assert_eq!(rpc(&mut c,"bob_associate_session",args())["result"]["isError"],true);
+    }
+
+    #[test] fn independent_todo_dates_and_filters() {
+        let (d,mut c)=setup();allow_todos(d.path());
+        let a=json!({"request_id":"independent","title":"No project or dates"});
+        assert_eq!(rpc(&mut c,"bob_todo_create",a.clone())["result"]["isError"],true);
+        let path=d.path().join("bot-grants.json");
+        let mut grants:Vec<Grant>=serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        grants[0].todos_unassigned=true;
+        fs::write(&path,serde_json::to_vec(&grants).unwrap()).unwrap();
+        let first=value(rpc(&mut c,"bob_todo_create",a.clone()));
+        assert!(first["todo"]["project_id"].is_null());assert!(first["todo"]["start_at"].is_null());
+        assert!(first["todo"]["due_at"].is_null());
+        let mut due=a.clone();due["request_id"]=json!("deadline");due["due_at"]=json!(2000);
+        let second=value(rpc(&mut c,"bob_todo_create",due.clone()));assert_eq!(second["todo"]["due_at"],2000);
+        let mut both=due.clone();both["request_id"]=json!("both");both["start_at"]=json!(1000);
+        assert_eq!(rpc(&mut c,"bob_todo_create",both.clone())["result"]["isError"],false);
+        both["request_id"]=json!("invalid");both["start_at"]=json!(3000);
+        assert_eq!(rpc(&mut c,"bob_todo_create",both)["result"]["isError"],true);
+        value(rpc(&mut c,"bob_todo_create",todo_args()));
+        assert_eq!(value(rpc(&mut c,"bob_todos",json!({})))["todos"].as_array().unwrap().len(),4);
+        assert_eq!(value(rpc(&mut c,"bob_todos",json!({"project_id":null})))["todos"].as_array().unwrap().len(),3);
+        assert_eq!(value(rpc(&mut c,"bob_todos",json!({"project_id":"allowed"})))["todos"].as_array().unwrap().len(),1);
+        assert_eq!(value(rpc(&mut c,"bob_todo_create",a))["replayed"],true);
+        let id=second["todo"]["id"].as_str().unwrap();
+        let edited=c.app.edit_todo_item(id,1,"Edited",None,Some(1500),Some(2000),"",12).unwrap();
+        assert_eq!(edited.end_at,Some(2000));
+        let cleared=c.app.edit_todo_item(id,2,"Edited",None,None,None,"",13).unwrap();
+        assert_eq!(cleared.start_at,0);assert_eq!(cleared.end_at,None);
+        assert!(c.app.edit_todo_item(id,2,"Stale",None,None,None,"",14).is_err());
+    }
+
+    #[test] fn todo_semantic_dates_update_cas_and_scope() {
+        let(d,mut c)=setup();allow_todos(d.path());
+        let path=d.path().join("bot-grants.json");
+        let mut g:Vec<Grant>=serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        g[0].todos_unassigned=true;
+        fs::write(&path,serde_json::to_vec(&g).unwrap()).unwrap();
+        let created=value(rpc(&mut c,"bob_todo_create",json!({"request_id":"date-create","title":"Date-only","timing":{"due_date":"2026-11-15","time_zone":"Asia/Shanghai"}})));
+        let id=created["todo"]["id"].clone();
+        assert_eq!(created["todo"]["timing"]["due_date"],"2026-11-15");
+        let a=json!({"id":id,"request_id":"date-update","expected_version":1,"timing":{"due_date":"2026-11-17","source_text":"next Tuesday"}});
+        assert_eq!(rpc(&mut c,"bob_todo_update",a.clone())["result"]["isError"],true);
+        g[0].todos_update=true;fs::write(&path,serde_json::to_vec(&g).unwrap()).unwrap();
+        let updated=value(rpc(&mut c,"bob_todo_update",a.clone()));assert_eq!(updated["todo"]["version"],2);
+        assert_eq!(value(rpc(&mut c,"bob_todo_update",a.clone()))["replayed"],true);
+        let mut stale=a.clone();stale["request_id"]=json!("stale");assert_eq!(rpc(&mut c,"bob_todo_update",stale)["result"]["isError"],true);
+        let mut denied=a.clone();denied["project_id"]=json!("private");denied["expected_version"]=json!(2);denied["request_id"]=json!("other-project");
+        assert_eq!(rpc(&mut c,"bob_todo_update",denied)["result"]["isError"],true);
+        let precise=value(rpc(&mut c,"bob_todo_update",json!({"id":id,"request_id":"precise","expected_version":2,"due_at":2000000})));
+        assert!(precise["todo"]["timing"]["due_date"].is_null());assert_eq!(precise["todo"]["due_at"],2000000);
+        let bad=json!({"id":id,"request_id":"bad-date","expected_version":3,"timing":{"due_date":"2026-02-30"}});
+        assert_eq!(rpc(&mut c,"bob_todo_update",bad)["result"]["isError"],true);
+        let dual=json!({"id":id,"request_id":"double-date","expected_version":3,"due_at":1000,"timing":{"due_date":"2026-11-15"}});
+        assert_eq!(rpc(&mut c,"bob_todo_update",dual)["result"]["isError"],true);
+        let cleared=value(rpc(&mut c,"bob_todo_update",json!({"id":id,"request_id":"clear","expected_version":3,"due_at":null,"timing":{}})));
+        assert!(cleared["todo"]["due_at"].is_null());assert_eq!(c.app.list_schedule_items().unwrap().len(),1);
+        assert_eq!(c.app.list_schedule_items().unwrap()[0].notes,"");
+        drop(c);let cfg=BobNodeConfig{bind_addr:"127.0.0.1:0".into(),data_dir:d.path().into(),static_dir:None,legacy_db_path:None};
+        let mut c=NodeContext::open(&cfg).unwrap();assert_eq!(value(rpc(&mut c,"bob_todo_update",a))["replayed"],true);
+        g[0].revoked=true;fs::write(path,serde_json::to_vec(&g).unwrap()).unwrap();
+        assert_eq!(rpc(&mut c,"bob_todo_update",json!({}))["error"],"BOT_AUTH_REQUIRED");
+    }
+
+    #[test] fn cross_cli_delegation_respects_scope_policy_and_status_isolation() {
+        let (d, mut c) = setup();
+        // Deny by default when delegate_ask is false
+        assert_eq!(rpc(&mut c, "bob_delegate_ask", json!({"harness": "kimi", "prompt": "review"}))["result"]["isError"], true);
+        assert_eq!(rpc(&mut c, "bob_delegation_status", json!({}))["result"]["isError"], true);
+
+        // Enable delegate_ask with allowlist
+        let path = d.path().join("bot-grants.json");
+        let mut g: Vec<Grant> = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        g[0].delegate_ask = true;
+        g[0].delegate_harnesses = vec!["kimi".into(), "claude".into()];
+        fs::write(&path, serde_json::to_vec(&g).unwrap()).unwrap();
+
+        // tools/list advertises delegation tools only when granted
+        let list_res = handle(&mut c, Some(&format!("Bearer {TOKEN}")), &json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}), 10).1;
+        let list_str = list_res.to_string();
+        assert!(list_str.contains("bob_delegate_ask"));
+        assert!(list_str.contains("bob_delegation_status"));
+
+        // Non-allowlisted harness rejected
+        let denied_h = rpc(&mut c, "bob_delegate_ask", json!({"harness": "codex", "prompt": "review"}));
+        assert_eq!(denied_h["result"]["isError"], true);
+        assert!(denied_h["result"]["content"][0]["text"].as_str().unwrap().contains("BOT_DELEGATE_HARNESS_DENIED"));
+
+        // Disabled tool in tool_policy is rejected even when in delegate_harnesses
+        bob_runtime::tool_policy::set(d.path(), "local", "claude", false, true).unwrap();
+        let disabled = rpc(&mut c, "bob_delegate_ask", json!({"harness": "claude", "prompt": "review", "workspace": d.path().to_str().unwrap()}));
+        assert_eq!(disabled["result"]["isError"], true);
+        assert!(disabled["result"]["content"][0]["text"].as_str().unwrap().contains("TOOL_DISABLED"));
+
+        // Ungranted project rejected
+        let bad_proj = rpc(&mut c, "bob_delegate_ask", json!({"harness": "kimi", "prompt": "review", "project_id": "private"}));
+        assert_eq!(bad_proj["result"]["isError"], true);
+        assert!(bad_proj["result"]["content"][0]["text"].as_str().unwrap().contains("BOT_PROJECT_SCOPE_DENIED"));
+
+        // Unrecognized/non-dispatchable harness (e.g. doubao) rejected
+        let non_disp = rpc(&mut c, "bob_delegate_ask", json!({"harness": "doubao", "prompt": "review"}));
+        assert_eq!(non_disp["result"]["isError"], true);
+        assert!(non_disp["result"]["content"][0]["text"].as_str().unwrap().contains("HARNESS_TOOL_UNSUPPORTED"));
+
+        // Delegation status returns only this actor's runs
+        let status = value(rpc(&mut c, "bob_delegation_status", json!({})));
+        assert_eq!(status["ok"], true);
+        assert_eq!(status["delegations"], json!([]));
+    }
+
+}
+
+fn timing_schema()->Value {json!({"type":"object","description":"Date-only ISO YYYY-MM-DD remains all-day, not fabricated midnight. Precise timestamps and date-only of the same boundary are mutually exclusive. Interpret relative words using original message reference_at and user time_zone. Record assumptions in inference_note.","properties":{"start_date":{"type":["string","null"]},"due_date":{"type":["string","null"]},"time_zone":{"type":["string","null"],"maxLength":64},"source_text":{"type":["string","null"],"maxLength":4096},"reference_at":{"type":["integer","null"]},"inference_note":{"type":["string","null"],"maxLength":4096}},"additionalProperties":false})}

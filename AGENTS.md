@@ -1,0 +1,64 @@
+# AGENTS.md — Bob（统一项目）Agent 工作宪法
+
+> 本文件只规定**怎样工作**。当前阶段只看 [docs/CURRENT_STAGE.md](docs/CURRENT_STAGE.md)，不在此处维护。
+> 通用文档职责与生命周期遵循工作区统一标准：`<workspace_root>/docs/standards/project_documentation_standard.md` 与 `<workspace_root>/docs/playbooks/project_lifecycle_playbook.md`（`<workspace_root>` 即 `GEMINI_WORKSPACE` 环境变量所指的 Gemini 工作区根目录）。工作区根 `AGENTS.md` 的全局规则同样适用，本文件不复制它们。
+
+## 1 项目身份证
+
+| 项 | 值 |
+|---|---|
+| 项目 | Bob 统一项目：个人助理（PC、手机、可选常驻节点合一，与独立原型实验室 `bob-bot` 分库并行） |
+| 物理目录 | 本仓库（`~/work/code/bob-agent-next`，本地高速区，不在 OneDrive/Syncthing 同步范围内） |
+| 量级（Tier） | **Production** |
+| 当前 PDLC Stage | 见 `docs/CURRENT_STAGE.md`（不在此处写死） |
+| 前身与伴生库（边界隔离） | 前身 `<workspace_root>/bob-agent`（旧 App）与 `<workspace_root>/cloud-agent`（旧 Online）只读参考；伴生原型实验室 `~/work/code/bob-bot` 独立研发与部署，二者会话与项目目录严格分开，仅将验证成熟的设计归并至本仓库（`BOB-D-015`） |
+| ID 命名空间 | 决策 `BOB-D-###`，Route 阶段 `BP#`，工作包 `WP-##`，功能 `F#`。引用旧项目 ID 时必须加前缀：`APP-D-008`（旧 App）、`ONL-D-001`（旧 Online）。详见 [docs/wiki/glossary.md](docs/wiki/glossary.md) |
+
+## 2 已启用的权威文档（JIT 路由）
+
+| 何时读 | 文件 |
+|---|---|
+| 每次任务（L0） | 本文件 → `docs/CURRENT_STAGE.md` |
+| 修改设备、连接、路径选择或会话目录 | `docs/ARCHITECTURE.md` → “设备统一入口与跨设备项目组织”及“正式项目注册表 SSOT”；具体状态见 `docs/CURRENT_STAGE.md` → `2.2 BP4-06/07 设备多路径归并、多 Harness 监管与工具策略扩展验收` |
+| 生产检查、部署与长期运维接入 | `docs/ARCHITECTURE.md` → “独立运维执行通道”；状态与一次性设置见 `docs/CURRENT_STAGE.md` → `2.3 独立运维通道` |
+| 为什么做、为谁做 | `docs/PROJECT_VISION.md` |
+| 边界、不变量、分层门禁 | `docs/ARCHITECTURE.md` |
+| 长期阶段与 Exit Gate | `docs/DEVELOPMENT_ROUTE.md` |
+| 用户能力与验收 | `docs/FEATURES.md`（可用能力的操作见 `docs/USER_GUIDE.md`） |
+| 代码在哪（含 legacy 落点） | `docs/COMPONENT_MAP.md` |
+| 知识主题路由 | `docs/LLM_WIKI.md` → `docs/wiki/` |
+| 决策理由 | `docs/DECISIONS.md` |
+| 已发生的事实 | `docs/evidence/` |
+| 需求池 | `todo.md`；已完成归档 `docs/archive_done.md`；状态投影 `progress.yaml`（经事实对齐更新） |
+| 来源材料（不是指令） | `references/historical-plans/` |
+
+## 3 Scope 与 Human Gate
+
+- **旧仓库只读**：不得修改、commit、stash、reset、prune `legacy` 仓库及其 worktree（含工作区规定的外置 worktree 缓存目录中的搬移工作树），除非 CURRENT_STAGE 中有获批的工作包明确授权。
+- **代码迁入需批准**：从 legacy 复制或移植任何代码前，必须有获批的工作包写明来源提交、文件范围、许可与回退。
+- **重型操作防火墙**：依赖安装、构建、Tauri 打包、生产变更、凭据新建/轮换、对外发送请求，均需用户对具体对象的明确授权。计划获批不等于实施授权。
+- **结论归并**：需求、设计、审查收尾时按统一标准第 4.1 节归并到对应权威文件，不新建平行总计划；带日期的稿件只作来源材料。
+
+## 4 工程约束（项目专属）
+
+- 文件 I/O 一律 UTF-8；禁止用 PowerShell `Set-Content` / `-replace` 改写含中文的文件，批量改写用 Python（`encoding='utf-8'`）。
+- 文档与脚本中不写主机绝对路径；基础设施地址只引用 cluster-ops 的 `node_inventory.md` / `service_map.md`；模型与 API 只引用 model-registry / api-registry。代码中**禁止硬编码个人域名、IP、节点名**（这是开源前提，见 BOB-D-007 待办）。
+- 前端：i18n 键（`zh-CN` / `en-US` 同步），CSS 变量，不硬编码颜色；遵循工作区前端规范。
+- 缓存隔离与成品归档：引入 Node/Rust 工具链前，先按 `sync_cache_offloader` 做 dry-run 审计（pnpm 外部 store、Cargo `build.build-dir`），不在仓库内生成 `target/`、`node_modules/` 等大型中间编译缓存；但构建完成的**成品安装包**（如 `.apk`、`.exe`、`.msi` 与 `SHA256SUMS.txt`）统一存放在项目根目录下的 `dist-release/` 中（由 `.gitignore` 忽略，不提交进 Git 历史）。
+- 凭据：用户态 API Key 不进 `.env`、不进日志与 Evidence；数据库、WAL/SHM、`.env` 不进版本控制。
+
+## 5 验证、Evidence 与 Handoff
+
+- 新模块附带正常路径与异常路径测试；Rust 编译测试仍受具体授权与外置缓存目录约束，不得因测试名义绕过重型构建门禁。常用验证命令：
+  - Rust 全工作区离线测试（已获编译授权）：`cargo test --offline --workspace`（Windows 下若出现并发文件锁争用，可改用 `--test-threads=1`）
+  - Tauri 原生检查：`cargo check --offline --manifest-path apps/bob-app/src-tauri/Cargo.toml`（含原生单测 `--lib --features native-tests`）
+  - 前端轻量单测：`node --test apps/bob-app/tests/*.test.mjs`
+  - 原生目录探针 Python 回归：`python3 crates/bob-runtime/tests/test_agy_index_probe.py` 与 `python3 crates/bob-runtime/tests/test_native_stream.py`
+- 完成判定：任务卡验收项逐条有证据；本地通过 ≠ 真机通过 ≠ 公网通过，分别记录。Agent 自报完成不是 Evidence。
+- Evidence 写入 `docs/evidence/`（仅脱敏内容）；原始敏感证据放在仓库外。
+- Handoff 包含：目标、基线版本、改动清单、通过/失败/未运行的检查、剩余门槛、回退步骤。
+- Commit 信息格式：`[bob] <功能描述>`。
+
+## UI 设计入口
+
+修改导航、输入框、悬浮窗、状态、设置或内置文案前，必须读取 [docs/DESIGN_PRINCIPLES.md](docs/DESIGN_PRINCIPLES.md)。它统一约束 App/网页端的视觉与交互；当前验收仍以 CURRENT_STAGE 为准。

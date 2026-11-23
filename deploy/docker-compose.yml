@@ -1,0 +1,52 @@
+services:
+  bob-node:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: bob-node:latest
+    container_name: bob-node
+    restart: unless-stopped
+    shm_size: '1gb'
+    environment:
+      - BOB_NODE_BIND=0.0.0.0:8787
+      - BOB_NODE_DATA_DIR=/var/lib/bob-node
+      - BOB_NODE_STATIC_DIR=/usr/share/bob-app/dist
+      - BOB_NODE_PUBLIC_URL=https://${BOB_PUBLIC_DOMAIN:-bob.example.com}
+      - BOB_NODE_LABEL=${BOB_NODE_LABEL:-Cloud Node}
+    volumes:
+      - bob_data:/var/lib/bob-node
+    expose:
+      - "8787"
+    ports:
+      - "${BOB_BIND_ADDR:-127.0.0.1:8787}:8787"
+    networks:
+      - bob_net
+
+  caddy:
+    image: caddy:2.9-alpine
+    container_name: bob-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      - BOB_PUBLIC_DOMAIN=${BOB_PUBLIC_DOMAIN:-bob.example.com}
+    volumes:
+      - ./Caddyfile.example:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      bob-node:
+        condition: service_healthy
+    networks:
+      - bob_net
+
+volumes:
+  bob_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  bob_net:
+    driver: bridge

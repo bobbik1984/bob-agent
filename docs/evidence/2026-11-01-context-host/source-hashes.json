@@ -1,0 +1,10 @@
+{
+  "crates/bob-node/src/context_capsule.rs": "d3351d22be0c0a3b37d833678165aaee92a504f9fe453e64d8753c75a63bf919",
+  "crates/bob-node/src/lib.rs": "660141a2df1a55c000e57d4c73f0401117f00f40b308771fee168e7774ac538a",
+  "crates/bob-node/src/assistant.rs": "ce71eb389e450f37188e56dd78c71aa218bd01fa740b5d9232c38166b54f5641",
+  "crates/bob-runtime/src/project_context.rs": "ce6c7455fd800788bacd365b1850c0dc65ad3e4cc29526cac58be3ade8c01fb9",
+  "crates/bob-runtime/src/workspace_context.rs": "5ec7c6b806d717c6fc255a8ccaf371e4366c7e6b8ff16b2cfd40b2ef37ddd75a",
+  "apps/bob-app/src/components/ProjectContextPane.vue": "3afc7cfecb44962350c12e3b438be43886083e139b0a4d3a513a88a1479d25df",
+  "apps/bob-app/src/kernel-bridge.mjs": "9fa660c620256fb61fac566265e52746a4748c6eaa92a818c5ccefca48c277fe",
+  "apps/bob-app/src/App.vue": "c5e63b4251a16c1a389844dc44bd2ec0e1ac3e82190a5fb76a5dbb3788346482"
+}

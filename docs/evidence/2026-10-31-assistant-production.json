@@ -1,0 +1,15 @@
+{
+  "release": {
+    "release": "assistant-instance-20261031",
+    "baseCommit": "4186208ced91839cefe9f1efecb11d032cfa412b",
+    "sourceSha256": "29135b622d3fed8408a733a8c1dfe059dd277bf1dd96cd91a0f2c24556c39ca3",
+    "apk": false
+  },
+  "productionViaAuthenticatedSshTunnel": true,
+  "realModelReply": true,
+  "refreshPersistence": true,
+  "noRemoteDispatch": true,
+  "width390": true,
+  "pageErrors": [],
+  "publicAuthenticatedBrowser": "not run"
+}

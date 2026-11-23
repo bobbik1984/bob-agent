@@ -1,0 +1,109 @@
+{
+  "change": "DSH reply execution context for relative file links",
+  "date": "2026-11-10",
+  "production_binary_sha256": "023c757d9b689d23d4d8b73922bd22dbedac95ebda19e5be421567e2cfb14ef4",
+  "web_asset": "index-DYrYB2wQ.js",
+  "tests": {
+    "frontend": 171,
+    "context": 5,
+    "transport": 22
+  },
+  "real_files": [
+    "README.md",
+    "docs/UPDATES.md",
+    "docs/CURRENT_STAGE.md",
+    "progress.yaml",
+    "todo.md"
+  ],
+  "candidate_checks": [
+    "exact on-disk byte equality",
+    "resolved path includes project subdirectory",
+    "second read not_modified without bytes"
+  ],
+  "production_checks": [
+    "five previews returned ok through actual online RPC",
+    "correct resolved_path and sha256",
+    "web HTTP hash verified"
+  ],
+  "browser": {
+    "result": "passed",
+    "scope": "Actual production service through private loopback tunnel, Edge 1180x900",
+    "checks": [
+      "Open original session from sidebar",
+      "Click docs/UPDATES.md",
+      "Resolved project path in title",
+      "Markdown rendered, no error alert"
+    ],
+    "public_login": "not independently tested"
+  },
+  "apk": "not built",
+  "limits": [
+    "literal leading cd and structured cwd supported; dynamic shell cwd is not inferred",
+    "conflicting linked roots fail closed; explicit per-message identity remains future work",
+    "current workspace file, not historical artifact version"
+  ],
+  "rollback": {
+    "online": "/opt/bob-online/operator-backups/quota-device-20261110-032703-4902ef51",
+    "x1t": "node-access-20261104-r2.before-preview-context-1794280173"
+  },
+  "source_sha256": {
+    "crates/bob-runtime/src/dsh_file_context.rs": "5ff591f6851c439b2b0927cb4d775ab5394a42b8973e3bb552a5c7cbfc571246",
+    "crates/bob-runtime/src/dsh_transport.rs": "f24d0ee268b44fab71ec5efe697bc464867f3840c542fc4d6893eb4892913a2d",
+    "apps/bob-app/src/components/DshFilePreview.vue": "59b55427a94262a628540f13d5592db24c8ae3c7c923f5e5e94ede782c773ba9"
+  },
+  "followup": {
+    "reason": "User reproduced ambiguity after first release; original evidence did not cover latest reply multi-directory context",
+    "binary_sha256": "e74cb8cd83a27341c91468035ea72bd131ef98d02b242d146ff49c5d126bfb51",
+    "web_asset": "index-5RSNqkJJ.js",
+    "tests": {
+      "frontend_targeted": 45,
+      "context": 5,
+      "transport": 23
+    },
+    "native_session": "session-0c9e3e62-de8a-47af-a817-9e67eb3cd495",
+    "real_verification": {
+      "cold_message_sequence": 4811,
+      "cold_files": 5,
+      "latest_message_sequence": 5045,
+      "latest_links": 4,
+      "byte_equality": true,
+      "not_modified": true,
+      "production_files_ok": 5
+    },
+    "deployed": [
+      "X1T node",
+      "Hostinger node and web"
+    ],
+    "rollback": {
+      "online": "/opt/bob-online/operator-backups/quota-device-20261110-074659-b72e00cc",
+      "x1t": "node-access-20261104-r2.before-preview-context-1794296817"
+    },
+    "browser": {
+      "passed": true,
+      "location": "Existing Chromium on production host, real service via loopback; independent public login not exercised",
+      "session_opened": true,
+      "message_sequence": 5045,
+      "clicked": "docs/UPDATES.md",
+      "title": "bob-bot/docs/UPDATES.md",
+      "rendered_text_length": 6573,
+      "visible_errors": 0,
+      "request_message_sequence_verified": true,
+      "screenshot": "2026-11-10-message-preview-browser.png",
+      "windows_tunnel": "failed with resets; server-local browser avoided the faulty validation path"
+    },
+    "mobile": "not tested; no APK",
+    "dashboard": {
+      "local_http_status": 200,
+      "rows": 19,
+      "assistant_access": "not implemented or granted",
+      "external_agent_access": "not granted"
+    },
+    "source_sha256": {
+      "crates/bob-runtime/src/dsh_file_context.rs": "da709e1a8c8afa316bc3dda9ec3706bd87ab3fc21339073ee529906d72593c4e",
+      "crates/bob-runtime/src/dsh_transport.rs": "b69e9fce6e6b62117cd3a363dea436873d9932fc0d059bf3d6c19c93758b9d3e",
+      "crates/bob-node/src/lib.rs": "6aaf9626faadd9a936eeee8a4460cbdf115b847bd8caf2df02caa0f3e272a90e",
+      "apps/bob-app/src/components/DshSessions.vue": "75a3b8505f8e44abb5a50f1b9e3468b8a19c642fa5c4b63503a6ba2e72d2e299",
+      "apps/bob-app/src/persistent-preview-cache.mjs": "c40596544dbcfd38849e7693207cd66921a2e32a98d236041c4eebe6d5122925"
+    }
+  }
+}

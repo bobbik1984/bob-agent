@@ -1,0 +1,63 @@
+{
+  "marker": "BOB-DSH-READONLY-RECOVERY-20261031-01",
+  "session": "session-dab36d32-af81-4daf-96e1-2e6692cfaaac",
+  "sentRequests": 1,
+  "receipts": [
+    {
+      "ok": true,
+      "result": {
+        "request_id": "37211e1d-df64-4d0c-9684-dda1fff7df59",
+        "session_id": "session-dab36d32-af81-4daf-96e1-2e6692cfaaac",
+        "status": "accepted"
+      }
+    }
+  ],
+  "userSequences": [
+    9465
+  ],
+  "replySequences": [
+    9468
+  ],
+  "sameSessionSet": true,
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "realPhone": false,
+  "draftAfterReload": true,
+  "historyAfterReload": true,
+  "dimensions": {
+    "width": 390,
+    "scroll": 384
+  },
+  "recovery": {
+    "checks": [
+      "unknown preserved pending and draft",
+      "accepted exact receipt cleared pending",
+      "reload kept recovery",
+      "no prompt dispatched"
+    ],
+    "passed": 4,
+    "simulatedReceipt": true,
+    "receiptBackend": "actual local bob-node candidate",
+    "historyBackend": "existing authenticated service",
+    "realPhone": false
+  },
+  "baseline": "4186208ced91839cefe9f1efecb11d032cfa412b + uncommitted changes",
+  "sourceSha256": {
+    "apps/bob-app/src-tauri/src/direct_llm.rs": "1a7325bf15aa1eaec7acccb451b59fd3288e431934f4b39b60d028df6722d7b3",
+    "apps/bob-app/src-tauri/src/lib.rs": "2fa569294800bc6a9b4763b16c3389650f27daefe3dd68c48f995823024e3dae",
+    "crates/bob-runtime/src/dsh_transport.rs": "223c726f909f2d6b875ed476bb57463ef8d63b0031efc455c39b200d5ba16e1e",
+    "crates/bob-node/src/lib.rs": "c8e5f5a243a5e17468ff0deada4debaf377410836ad74b43ae73dddd07812873",
+    "apps/bob-app/src/components/DshSessions.vue": "741a9988d1c5007fce37cec10db1bc210ac4409b51db3e004b97e0ef2759543f",
+    "apps/bob-app/src/kernel-bridge.mjs": "a1568e824d7211fd6fe81ec5fbb5ac33cfd67bcd4984097c72044b3cb35f0033",
+    "apps/bob-app/tests/dsh-mobile-recovery.test.mjs": "2f926057b5f3d7d8c2b430006729f83cede600931b6c9e0c4048e9ed2d3db44f",
+    "apps/bob-app/tests/dsh-receipt-bridge.test.mjs": "43eee3922a8963aa924887d134282c6afd1d3f4ed6c9f4f02b04628302663426"
+  },
+  "privateEvidenceSha256": {
+    "real-continuation.json": "d660d59d18a9010b4f52d002152a5edd878ca32faaee5b01ab8cb40eb8658cf1",
+    "real-continuation-390.png": "ee80d44cf18393ff305e637992c2d0a0536ccb7d896255652fc76afc99f67fd9",
+    "recovery-browser.json": "3a234f931c1ab86507ff26425e2e53b2380ee5fddbf222e21c2c038ea44fc9a8",
+    "recovery-390.png": "783e54981e668c798e7ba9e6e54013015f3354c60bdd8d0659e0975b7ba6e537"
+  }
+}

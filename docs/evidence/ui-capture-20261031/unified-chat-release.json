@@ -1,0 +1,22 @@
+{
+  "commit": "db3569906a761aa841d545fb8f2251988b984a8c",
+  "release": "unified-chat-20261031",
+  "dshNativeTransport": "verified-web",
+  "deployed": true,
+  "backup": "/opt/bob-online/backups/unified-chat-1793440234",
+  "frontendOnly": true,
+  "databaseChanged": false,
+  "serviceRestarted": false,
+  "localHttpReadback": "passed",
+  "assetsReadback": "passed",
+  "precheckCorrections": [
+    "runtime-injection",
+    "preserve-CRLF-bytes"
+  ],
+  "firstAttemptRolledBack": true,
+  "secondRollbackRenameFailed": true,
+  "currentVersionExplicitlyVerified": true,
+  "publicBrowser": "four-tab navigation, real DOS sidebar search and original history passed",
+  "localDraftRefresh": "passed; test draft cleared without sending",
+  "viewport": 390
+}

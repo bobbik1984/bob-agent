@@ -1,0 +1,64 @@
+project:
+  name: bob-agent
+  directory: bob-agent
+  version: 1.0.1
+  status: development
+  tier: Production
+  tech:
+  - Rust
+  - Tauri v2
+  - Vue 3
+  - Desktop
+  - Android
+  - Web (bob-node)
+  current_task: 基线 7978e2e 已完成 BOB-D-015（WP-J1–WP-J6）、BOB-D-017（WP-C1 多参谋长总线与去 X1C 底座）、WP-E1 本地全栈与 WP-E1-M 长期记忆/多问题覆盖、正式项目 SSOT（bob-agent/bob-bot 分立）与 /opt 运行态排除；当前推进 WP-E1 线上实景接管/真机终验与 Stage 3 收集箱分拣、再依次启动 WP-E2–WP-E4。
+  development_plan: docs/CURRENT_STAGE.md
+phases:
+- name: ✅ 已交付基座：单一 Rust 内核、三端同源、Jarvis 主脑与多参谋长总线 (BP0–BP5 / WP-J1–J6 / WP-C1)
+  tasks:
+  - text: BP0–BP3 单一纯 Rust 内核 (bob-kernel/transport/runtime/node) 与三端同源 UI、凭据脱敏及扫码配对
+    status: done
+  - text: BOB-D-015 (WP-J1–WP-J6) 全栈交付：BobNativeHarness 流式主脑、水滴与小组件桌面、3 分钟沙箱试用、Routine/做梦晨报/推送、bob-browser CDP、PC 受控工具与 V1→V2 批注
+    status: done
+  - text: BOB-D-017 (WP-C1) 去 X1C 远程优先底座与可插拔多参谋长 MCP 总线：chief_briefing 与 chief_service（bob_briefing / bob_order_submit / bob_orders）并入人工审批流
+    status: done
+  - text: 正式项目 SSOT（project_registry.yaml 严格分开 bob-agent 与 bob-bot）、收集箱手动输入新项目、/opt 运行态守护排除与测试会话归档哨兵（7978e2e）
+    status: done
+- name: 🧠 WP-E1 实景闭环、主助理连续性与长期记忆 (WP-E1 / WP-E1-M)
+  tasks:
+  - text: Resident Clerk + Async Worker、OnboardingWizard、UTC+8 ISO 日期防偏移、CAS 日程原位修改与失败回告（本地门禁与 VPS2 发布通过）
+    status: done
+  - text: WP-E1-M 长期记忆（来源作用域/CAS 纠正遗忘/16 条阶段摘要/历史召回/逐问题覆盖/旧审批失效）通过 258 项回归与 Gemini/DeepSeek 真实验证并上线
+    status: done
+  - text: WP-E1.1 常驻节点 Headless Chromium + fonts-noto-cjk 3～5 个真实办公站点 390px 接管与 Cookie 重启保活实测
+    status: todo
+  - text: WP-E1.4 真实商业 LLM 对话生成 ≥2 个白领小组件与 3 分钟试用回退调优
+    status: todo
+  - text: 桌面/手机浏览器视觉与 Android 真机覆盖安装终验（水滴与键盘适配、三天日历拖动、记忆/连续性、零对话与归档跨端同步）
+    status: todo
+- name: 🏗️ BP4 多节点 Harness 监管、工具策略与跨端增强
+  tasks:
+  - text: 节点工具清单/目录授权分离与工具停用策略已在三节点发布（历史只读、重启/重启用通过）；TP4 审批中停用/离线恢复/手机开关矩阵继续
+    status: in_progress
+  - text: 节点工程会话三档权限预设（read_only / workspace_auto / full_auto + 灾难命令硬拦截）、执行记录折叠与 VAPID Web Push 通知
+    status: done
+  - text: 外部独立 CLI（Claude/AGY/Codex TUI）实时旁观、DSH 待问答全链路、X1T Claude rate_limits 回调与跨 Harness 成果渲染
+    status: in_progress
+  - text: 跨节点工作区交接素材传输、主对话任务草案卡挂载与主助理自然语言代建会话
+    status: todo
+- name: 📥 BOB-D-014 收集箱分拣与外部消费端验收
+  tasks:
+  - text: 单一收集箱、每日分拣草案引擎与手动新建正式项目下拉已上线；待补每日定时触发、确认写入 todo.md（Waiting for PC）与「展开想法」Step 4
+    status: in_progress
+  - text: 外部 Bot（grok_bot / meta_muse）消费端真实调用待办修改与多参谋长派单闭环及手机端读回
+    status: todo
+- name: 🚀 WP-E2 → WP-E4 系统性进化与开源发行 (BOB-D-016 / BP6)
+  tasks:
+  - text: '[WP-E2] 纯 Rust 办公文档（PDF/.xlsx/.docx/.csv）读写生成直连 V1→V2 批注，以及标准化 ChannelAdapter（飞书/Telegram/微信桥增强）'
+    status: todo
+  - text: '[WP-E3] 三路径零门槛安装体系：CI 多架构预编译镜像 + 90 秒单行脚本 + 1Panel/NAS 模板；桌面端托盘首次 3 步向导与手机扫码直连'
+    status: todo
+  - text: '[WP-E4] 纯 Rust MCP Streamable HTTP + OAuth 2.1 客户端（默认 SideEffect 门禁）与内嵌 rquickjs .bobpkg 沙箱及统一能力目录'
+    status: todo
+  - text: '[BP6] 开源许可证、依赖审计、彻底去个人化配置注入（BOB-D-007）与旧 0.9.x 迁移收口'
+    status: todo

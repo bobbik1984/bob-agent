@@ -1,0 +1,201 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+import { markRecentProject } from '../src/recent-projects.mjs';
+import { nodeCreationKey } from '../src/conversation-directory.mjs';
+
+const chatSessionSrc = readFileSync(new URL('../src/composables/useChatSession.mjs', import.meta.url), 'utf8');
+const modalSrc = readFileSync(new URL('../src/components/SidebarCreateForm.vue', import.meta.url), 'utf8');
+const dshSrc = readFileSync(new URL('../src/components/DshSessions.vue', import.meta.url), 'utf8');
+const zhJson = JSON.parse(readFileSync(new URL('../src/locales/zh-CN.json', import.meta.url), 'utf8'));
+const enJson = JSON.parse(readFileSync(new URL('../src/locales/en-US.json', import.meta.url), 'utf8'));
+
+const readSection = (src, from, through) => src.slice(src.indexOf(from), src.indexOf(through));
+
+function mountCreateModalState(bridge, projects = [], remoteNodes = null) {
+  const storage = new Map();
+  const navigationOpen = { value: true };
+  const ctx = vm.createContext({
+    markRecentProject, setTimeout, clearTimeout,
+    ref: value => ({ value }),
+    computed: get => ({ get value() { return get(); } }),
+    ctx: {
+      modelHub: {
+        value: {
+          state: {
+            remote_nodes: remoteNodes || [
+              { id: 'vps2', name: 'VPS2 Build Host', url: 'https://vps2.example.invalid/' },
+              { id: 'empty-node', name: 'Empty Node', url: 'https://empty.example.invalid/' },
+            ],
+          },
+        },
+      },
+    },
+    catalog: { value: { projects } },
+    kernelBridge: bridge,
+    localStorage: {
+      getItem: key => storage.get(key),
+      setItem: (key, value) => storage.set(key, value),
+      removeItem: key => storage.delete(key),
+    },
+    crypto: { randomUUID: () => 'hierarchy-uuid' },
+    TextEncoder,
+    available: true,
+    browserClient: true,
+    navigationOpen,
+    t: key => key,
+    applyCatalogPreferences: () => {},
+    selectRemoteConversation: () => {},
+  });
+  const script = [
+    readSection(chatSessionSrc, 'const creatingKind =', 'const layoutState ='),
+    readSection(chatSessionSrc, 'function beginCreateItem(', 'async function cancel(execution)'),
+    `globalThis.actions = {
+      startCreateProject,
+      startCreateConversation,
+      creatingKind,
+      creatingForProjectId,
+      creationDeviceId,
+      creationConnectionId,
+      creationMode,
+      creationWorkspace,
+      creationWorkspaces,
+      creationAvailableTools,
+      creationError,
+      selectCreationDevice,
+      selectCreationTool,
+      cancelCreateItem,
+      navigationOpen,
+    }`,
+  ].join('\n');
+  vm.runInContext(script, ctx);
+  return ctx.actions;
+}
+
+test('create modal cascades Project -> Device -> Available Tools on Device -> Best Workspace', async () => {
+  const actions = mountCreateModalState(
+    {
+      dshInventory: async (nodeId) => {
+        if (nodeId === 'vps2') {
+          return {tools:['codex','agy','dsh'].map(id=>({id,installed:true,can_create:true})),
+            workspaces:[{path:'/srv/alpha'},{path:'/srv/beta'}]};
+        }
+        return {tools:[],workspaces:[]};
+      },
+    },
+    [{ id: 'proj-beta', title: 'Beta', workspace: '/srv/beta' }],
+  );
+
+  actions.startCreateConversation('proj-beta');
+  assert.equal(actions.creatingKind.value, 'conversation');
+  assert.equal(actions.creatingForProjectId.value, 'proj-beta');
+  assert.equal(actions.creationDeviceId.value, 'local');
+  assert.equal(actions.navigationOpen.value, false);
+
+  await actions.selectCreationDevice('vps2');
+  assert.equal(actions.creationDeviceId.value, 'vps2');
+  assert.equal(actions.creationConnectionId.value, 'vps2');
+  // Auto-selects first available remote tool ('dsh') and exposes availability counts
+  assert.equal(actions.creationMode.value, 'dsh');
+  const toolMap = Object.fromEntries(actions.creationAvailableTools.value.map(item => [item.id, item]));
+  assert.equal(toolMap.dsh.available, true);
+  assert.equal(toolMap.dsh.count, 2);
+  assert.equal(toolMap.agy.available, true);
+  assert.equal(toolMap.agy.count, 2);
+  assert.equal(toolMap.claude.available, false);
+  assert.equal(toolMap.claude.count, 2);
+  assert.equal(toolMap.pi.available, false);
+
+  // Switching to AGY picks workspace matching the selected project's workspace hint
+  actions.selectCreationTool('agy');
+  assert.equal(actions.creationMode.value, 'agy');
+  assert.deepEqual(Array.from(actions.creationWorkspaces.value), ['/srv/alpha', '/srv/beta']);
+  assert.equal(actions.creationWorkspace.value, '/srv/beta');
+
+  // Selecting an empty device surfaces explicit unavailable error and clears tool
+  await actions.selectCreationDevice('empty-node');
+  assert.equal(actions.creationMode.value, '');
+  assert.equal(actions.creationError.value, 'createNoToolsOnDevice');
+});
+
+test('VPS2 host node (id="local") is isolated from built-in local chat via node:local key', async () => {
+  const actions = mountCreateModalState(
+    {
+      dshInventory: async (nodeId) => {
+        if (nodeId === 'local') {
+          return {tools:['claude','dsh'].map(id=>({id,installed:true,can_create:true})),
+            workspaces:[{path:'/opt/quant_lab'},{path:'/srv/dsh-host'}]};
+        }
+        return {tools:[],workspaces:[]};
+      },
+    },
+    [{ id: 'proj-quant', title: 'Quant Lab', workspace: '/opt/quant_lab' }],
+    [
+      { id: 'local', isLocal: true, label: 'VPS2', baseUrl: 'http://127.0.0.1:53020', remark: 'web_host' },
+      { id: '5dc9cf0011223344', label: 'X1T', baseUrl: 'https://x1-tablet.example.com' },
+    ],
+  );
+
+  actions.startCreateConversation('proj-quant');
+  assert.equal(actions.creationDeviceId.value, 'local');
+  assert.equal(actions.creationMode.value, 'local');
+  assert.equal(nodeCreationKey({ id: 'local' }), 'node:local');
+  assert.notEqual(nodeCreationKey({ id: 'local' }), 'local');
+
+  await actions.selectCreationDevice(nodeCreationKey({ id: 'local' }));
+  assert.equal(actions.creationDeviceId.value, 'node:local');
+  assert.equal(actions.creationConnectionId.value, 'local');
+  assert.equal(actions.creationMode.value, 'dsh');
+  const toolMap = Object.fromEntries(actions.creationAvailableTools.value.map(item => [item.id, item]));
+  assert.equal(toolMap.dsh.available, true);
+  assert.equal(toolMap.claude.available, true);
+
+  actions.selectCreationTool('claude');
+  assert.equal(actions.creationWorkspace.value, '/opt/quant_lab');
+
+  await actions.selectCreationDevice('local');
+  assert.equal(actions.creationDeviceId.value, 'local');
+  assert.equal(actions.creationConnectionId.value, '');
+  assert.equal(actions.creationMode.value, 'local');
+});
+
+test('SidebarCreateForm uses Teleport frosted modal without hardcoded colors or emojis', () => {
+  assert.match(modalSrc, /<Teleport to="body">/);
+  assert.match(modalSrc, /backdrop-filter:\s*blur\(/);
+  assert.doesNotMatch(modalSrc, /#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/);
+});
+
+test('DshSessions permits opening and resuming resumable interrupted AGY CLI sessions', () => {
+  assert.match(dshSrc, /function canReadOrResume\(/);
+  assert.match(dshSrc, /dsh-interrupted-banner/);
+  assert.doesNotMatch(dshSrc, /#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/);
+});
+
+test('zh-CN.json and en-US.json keep 100% key parity for all creation, quota, and resume keys', () => {
+  const zhKeys = Object.keys(zhJson).sort();
+  const enKeys = Object.keys(enJson).sort();
+  assert.deepEqual(zhKeys, enKeys);
+  for (const required of [
+    'createStepProjectTitle',
+    'createStepDevice',
+    'createStepTool',
+    'createStepWorkspace',
+    'createDetachedDaemonHint',
+    'quotaAutoCheckpointSynced',
+    'agyCliInterruptedTitle',
+    'agyResumeNowBtn',
+  ]) {
+    assert.ok(zhJson[required], `missing zh-CN key: ${required}`);
+    assert.ok(enJson[required], `missing en-US key: ${required}`);
+  }
+});
+
+test('installed tool with zero history and zero workspace grants remains selectable', async()=>{
+ const a=mountCreateModalState({dshInventory:async()=>({tools:[{id:'pi',installed:true,can_create:true,auth_state:'unknown'}],workspaces:[]}),dshList:()=>{throw Error('history must not be queried')}});
+ a.startCreateConversation();await a.selectCreationDevice('vps2');
+ assert.equal(a.creationMode.value,'pi');assert.equal(a.creationError.value,'');
+ assert.equal(a.creationAvailableTools.value.find(t=>t.id==='pi').available,true);
+ assert.equal(a.creationWorkspaces.value.length,0);
+ a.creationWorkspace.value='/srv/new-project';assert.equal(a.creationWorkspace.value,'/srv/new-project');
+});

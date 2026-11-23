@@ -1,0 +1,329 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createKernelBridge } from '../src/kernel-bridge.mjs';
+import { createSendController } from '../src/send-controller.mjs';
+import { createLayoutState, getProviderLogo } from '../src/layout-mode.mjs';
+import { createOnlineWorkClient } from '../src/online-client.mjs';
+import { httpInvoke } from '../src/http-bridge.mjs';
+
+test('IPC maps stable identities and payload without inventing remote acceptance',async()=>{
+ const calls=[];const bridge=createKernelBridge(async(command,args)=>{calls.push({command,args});return {request_id:args?.requestId,message_id:args?.messageId};},()=>true);
+ await bridge.bootstrap();await bridge.history('session');await bridge.prewarm();const receipt=await bridge.acceptMessage({request_id:'request',message_id:'message',session_id:'session',content:'text'});
+ assert.deepEqual(calls.map(x=>x.command),['app_bootstrap','app_history','app_prewarm','app_accept']);assert.deepEqual(calls[3].args,{requestId:'request',messageId:'message',sessionId:'session',content:'text'});assert.equal(receipt.request_id,'request');assert.equal(receipt.accepted,undefined);
+});
+test('browser without native host cannot silently save in another store',async()=>{
+ let invoked=0;const bridge=createKernelBridge(()=>{invoked++;},()=>false);
+ for(const action of [()=>bridge.bootstrap(),()=>bridge.history('s'),()=>bridge.acceptMessage({}),()=>bridge.prewarm()])await assert.rejects(action(),/NATIVE_HOST_REQUIRED/);
+ assert.equal(invoked,0);
+});
+test('lost native response retains draft and same request identity through bridge',async()=>{
+ const ids=[];let generated=0;const bridge=createKernelBridge(async(command,args)=>{assert.equal(command,'app_accept');ids.push(args.requestId);if(ids.length===1)throw Error('IPC_LOST');return {request_id:args.requestId,message_id:args.messageId};},()=>true);
+ const ui=createSendController({bridge,createIntent:content=>({request_id:`r${++generated}`,message_id:'m',session_id:'s',content}),onAccepted:()=>{}});
+ ui.setDraft('hello');await assert.rejects(ui.send());assert.equal(ui.snapshot().draft,'hello');await ui.send();assert.deepEqual(ids,['r1','r1']);assert.equal(ui.snapshot().draft,'');
+});
+
+test('execution IPC passes identities without a renderer-supplied command or result', async()=>{
+ const calls=[];const bridge=createKernelBridge(async(command,args)=>{calls.push({command,args});return {};},()=>true);
+ await bridge.execute('request');await bridge.executions('session');await bridge.cancel('execution');
+ assert.deepEqual(calls,[{command:'app_execute',args:{requestId:'request'}},{command:'app_executions',args:{sessionId:'session'}},{command:'app_cancel',args:{executionId:'execution'}}]);
+});
+test('execution commands require the native host too',async()=>{
+ const bridge=createKernelBridge(()=>assert.fail('must not invoke'),()=>false);
+ for(const action of [()=>bridge.execute('r'),()=>bridge.executions('s'),()=>bridge.cancel('e')])await assert.rejects(action(),/NATIVE_HOST_REQUIRED/);
+});
+
+test('Home sync carries no renderer credential or fabricated result',async()=>{
+ const calls=[];const bridge=createKernelBridge(async(command,args)=>{calls.push({command,args});return 'provider_unconfigured';},()=>true);
+ assert.equal(await bridge.syncHome(),'provider_unconfigured');assert.deepEqual(calls,[{command:'app_home_sync',args:undefined}]);
+ const unavailable=createKernelBridge(()=>assert.fail('no native'),()=>false);await assert.rejects(()=>unavailable.syncHome(),/NATIVE_HOST_REQUIRED/);
+});
+
+test('catalog, view-state and preferences IPC map multi-session arguments cleanly',async()=>{
+ const calls=[];const bridge=createKernelBridge(async(command,args)=>{calls.push({command,args});return {ok:true};},()=>true);
+ await bridge.catalog();
+ await bridge.createProject('proj-1','Bob Agent');
+ await bridge.createConversation('conv-2','proj-1','Session 2');
+ await bridge.selectConversation('conv-2');
+ await bridge.deleteConversation('conv-2');
+ await bridge.saveViewState({conversationId:'conv-2',draft:'hello',scrollAnchorMessageId:'m1',scrollOffset:120,markRead:true});
+ await bridge.savePreferences({sidebarGroupMode:'device',locale:'zh-CN',theme:'dark'});
+ assert.deepEqual(calls,[
+  {command:'app_catalog',args:undefined},
+  {command:'app_project_create',args:{projectId:'proj-1',title:'Bob Agent'}},
+  {command:'app_conversation_create',args:{conversationId:'conv-2',projectId:'proj-1',title:'Session 2'}},
+  {command:'app_conversation_select',args:{conversationId:'conv-2'}},
+  {command:'app_conversation_delete',args:{conversationId:'conv-2'}},
+  {command:'app_view_state_save',args:{conversationId:'conv-2',draft:'hello',scrollAnchorMessageId:'m1',scrollOffset:120,markRead:true}},
+  {command:'app_preferences_save',args:{sidebarGroupMode:'device',locale:'zh-CN',theme:'dark'}}
+ ]);
+});
+
+test('direct provider BYOK, ModelHub and execution route IPC map arguments cleanly',async()=>{
+ const calls=[];const bridge=createKernelBridge(async(command,args)=>{calls.push({command,args});return {ok:true};},()=>true);
+ await bridge.providerGet();
+ await bridge.providerSave({providerKind:'openai_compatible',label:'OpenAI',baseUrl:'https://api.openai.com/v1',modelId:'gpt-4o-mini',apiKey:'sk-test',clearKey:false,enabled:true});
+ await bridge.providerTest();
+ await bridge.modelHubGet();
+ await bridge.providerKeySet('deepseek','sk-ds',false);
+ await bridge.modelRoleAssign({role:'main',providerId:'deepseek',modelId:'deepseek-chat',modelName:'DeepSeek V4 Flash',providerName:'DeepSeek'});
+ await bridge.providerVariantSet('qwen','coding');
+ await bridge.routeGet('conv-1');
+ await bridge.routeSet('conv-1','direct_byok');
+ assert.deepEqual(calls,[
+  {command:'app_provider_get',args:undefined},
+  {command:'app_provider_save',args:{providerKind:'openai_compatible',label:'OpenAI',baseUrl:'https://api.openai.com/v1',modelId:'gpt-4o-mini',apiKey:'sk-test',clearKey:false,enabled:true}},
+  {command:'app_provider_test',args:undefined},
+  {command:'app_model_hub_get',args:undefined},
+  {command:'app_provider_key_set',args:{providerId:'deepseek',apiKey:'sk-ds',clearKey:false}},
+  {command:'app_model_role_assign',args:{role:'main',modelEntryId:'deepseek::deepseek-chat'}},
+  {command:'app_provider_variant_set',args:{providerId:'qwen',variant:'coding'}},
+  {command:'app_route_get',args:{sessionId:'conv-1'}},
+  {command:'app_route_set',args:{sessionId:'conv-1',route:'direct_byok'}}
+ ]);
+});
+
+test('responsive aspect-ratio layout resolves mobile portrait vs desktop landscape accurately',()=>{
+ const portrait=createLayoutState({innerWidth:390,innerHeight:844},{userAgent:'Mozilla/5.0 (Linux; Android 14; Pixel 8)'});
+ assert.equal(portrait.layoutMode,'mobile-portrait');
+ assert.equal(portrait.aspect,'portrait');
+ assert.equal(portrait.isCompact,true);
+ const landscape=createLayoutState({innerWidth:1180,innerHeight:757},{userAgent:'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'});
+ assert.equal(landscape.layoutMode,'desktop-wide');
+ assert.equal(landscape.aspect,'landscape');
+ assert.equal(landscape.isCompact,false);
+ assert.equal(getProviderLogo('deepseek'),'/logos/deepseek.png');
+ assert.equal(getProviderLogo('gemini'),'/logos/gemini.svg');
+});
+
+test('personal ops IPC maps schedule, note, capture, memory and decision commands cleanly',async()=>{
+ const calls=[];const bridge=createKernelBridge(async(command,args)=>{calls.push({command,args});return {ok:true};},()=>true);
+ await bridge.personalSnapshot();
+ await bridge.scheduleCreate({id:'s1',kind:'todo',title:'Review',startAt:1793408400000,notes:'n'});
+ await bridge.scheduleStatus('s1','completed');
+ await bridge.noteUpsert({id:'n1',title:'Note',body:'Body',tags:['t1']});
+ await bridge.captureCreate({id:'c1',messageId:'m1',content:'Snippet'});
+ await bridge.memoryState('mem-1','active');
+ await bridge.decisionRecord({id:'d1',body:'Use canonical SQLite snapshot'});
+ await bridge.decisionStatus('d1','accepted');
+ assert.deepEqual(calls,[
+  {command:'app_personal_snapshot',args:undefined},
+  {command:'app_schedule_create',args:{id:'s1',projectId:null,taskId:null,title:'Review',kind:'todo',startAt:1793408400000,endAt:null,reminderAt:null,notes:'n',timing:{}}},
+  {command:'app_schedule_status',args:{id:'s1',status:'completed'}},
+  {command:'app_note_upsert',args:{id:'n1',projectId:null,conversationId:null,title:'Note',bodyMarkdown:'Body',tags:['t1']}},
+  {command:'app_capture_create',args:{id:'c1',sourceMessageId:'m1',contentRef:'Snippet',projectId:null,newProjectTitle:null,mediaId:null}},
+  {command:'app_memory_state',args:{id:'mem-1',newState:'active'}},
+  {command:'app_decision_record',args:{id:'d1',projectId:null,taskId:null,sourceMessageId:null,body:'Use canonical SQLite snapshot',rationaleJson:'{}',status:'proposed',supersedesId:null}},
+  {command:'app_decision_status',args:{id:'d1',status:'accepted'}}
+ ]);
+});
+
+test('personal ops IPC maps scheduleDelete, noteDelete, ticketUpsert and ticketRecognize cleanly',async()=>{
+ const calls=[];const bridge=createKernelBridge(async(command,args)=>{calls.push({command,args});return {ok:true};},()=>true);
+ await bridge.scheduleDelete('s1');
+ await bridge.noteDelete('n1');
+ await bridge.ticketUpsert({id:'t1',title:'G101 北京南 - 上海虹桥',category:'train',ticketMeta:{seat:'06F'},startAt:1793408400000});
+ await bridge.ticketRecognize('media-1','gemini::gemini-2.5-flash','t1');
+ assert.deepEqual(calls,[
+  {command:'app_schedule_delete',args:{id:'s1'}},
+  {command:'app_note_delete',args:{id:'n1'}},
+  {command:'app_ticket_upsert',args:{id:'t1',title:'G101 北京南 - 上海虹桥',category:'train',ticketMeta:{seat:'06F'},startAt:1793408400000,endAt:null,notesSummary:''}},
+  {command:'app_ticket_recognize',args:{mediaId:'media-1',modelRef:'gemini::gemini-2.5-flash',id:'t1'}}
+ ]);
+});
+
+test('RV-06 canonical Rust-serialized personal_snapshot.json fixture matches kernel schema',()=>{
+ const __dirname=path.dirname(fileURLToPath(import.meta.url));
+ const fixturePath=path.join(__dirname,'fixtures','personal_snapshot.json');
+ const snap=JSON.parse(fs.readFileSync(fixturePath,'utf-8'));
+ assert.ok(Array.isArray(snap.schedules)&&snap.schedules.length>=2);
+ assert.ok(snap.schedules.some(s=>s.kind==='event'&&s.status==='completed'&&s.start_at>=1e12));
+ assert.ok(snap.schedules.some(s=>s.kind==='todo'&&s.status==='scheduled'&&s.start_at>=1e12));
+ assert.ok(Array.isArray(snap.memories)&&snap.memories.length>=1);
+ assert.equal(typeof snap.memories[0].body,'string');
+ assert.ok(['candidate','active','superseded','forgotten'].includes(snap.memories[0].state));
+ assert.ok(Array.isArray(snap.decisions)&&snap.decisions.length>=1);
+ assert.equal(typeof snap.decisions[0].body,'string');
+ assert.ok(['proposed','accepted','superseded','rejected'].includes(snap.decisions[0].status));
+});
+
+test('OL-02..OL-04 Online Work Service client executes PKCE S256 pairing and read-only /api/client/v1 queries',async()=>{
+ const requests=[];
+ const fetchImpl=async(url,opts={})=>{
+  const body=opts.body?JSON.parse(opts.body):null;
+  requests.push({url,method:opts.method||'GET',headers:opts.headers||{},body});
+  if(url.endsWith('/api/client/v1/pairings')){
+   assert.equal(body.challenge_method,'S256');
+   assert.ok(body.challenge.length>=40);
+   return {ok:true,status:200,json:async()=>({pairing_id:'pr-1',user_code:'ABCD-1234',verification_uri:'http://127.0.0.1:8787/pair'})};
+  }
+  if(url.endsWith('/api/client/v1/pairings/pr-1/exchange')){
+   assert.ok(body.verifier.length>=43);
+   return {ok:true,status:200,json:async()=>({access_token:'tok-online-1',device_id:'dev-online-1',scopes:['projects:read','tasks:read']})};
+  }
+  if(url.endsWith('/api/client/v1/projects')){
+   return {ok:true,status:200,json:async()=>({items:[{id:'p-cloud-1',title:'Cloud Agent Deployment'}]})};
+  }
+  if(url.endsWith('/api/client/v1/projects/p-cloud-1/tasks')){
+   return {ok:true,status:200,json:async()=>({items:[{id:'t-cloud-1',title:'Verify /api/client/v1',status:'running'}]})};
+  }
+  if(url.includes('/api/client/v1/projects/p-cloud-1/messages')){
+   return {ok:true,status:200,json:async()=>({items:[{id:'m-cloud-1',role:'assistant',content:'Cloud task running'}]})};
+  }
+  if(url.endsWith('/api/client/v1/credentials/self/revoke')){
+   return {ok:true,status:200,json:async()=>({revoked:true})};
+  }
+  return {ok:false,status:404,json:async()=>({error:'not_found'})};
+ };
+ const origin='http://127.0.0.1:8787';
+ const client=createOnlineWorkClient({fetchImpl});
+ const start=await client.beginPairing({origin,clientInstanceId:'ci-1',clientName:'Pixel 8'});
+ assert.equal(start.user_code,'ABCD-1234');
+ const exchanged=await client.exchangePairing({origin,pairingId:'pr-1',clientInstanceId:'ci-1',verifier:start.verifier});
+ assert.equal(exchanged.access_token,'tok-online-1');
+ const projects=await client.fetchProjects({origin,token:exchanged.access_token});
+ assert.equal(projects.items[0].id,'p-cloud-1');
+ const tasks=await client.fetchProjectTasks({origin,token:exchanged.access_token,projectId:'p-cloud-1'});
+ assert.equal(tasks.items[0].status,'running');
+ const msgs=await client.fetchProjectMessages({origin,token:exchanged.access_token,projectId:'p-cloud-1'});
+ assert.equal(msgs.items[0].content,'Cloud task running');
+ const rev=await client.revokeSelf({origin,token:exchanged.access_token});
+ assert.equal(rev.revoked,true);
+});
+
+test('RV-17 and OL-02..OL-07 native bridge maps promoteConversation and Online commands without exposing raw token',async()=>{
+ const calls=[];
+ const bridge=createKernelBridge(async(command,args)=>{calls.push({command,args});return {ok:true};},()=>true);
+ await bridge.promoteConversation({conversationId:'conv-1',projectId:'proj-1',title:'Promoted Project'});
+ await bridge.onlineBeginPairing({nodeId:'node-1',baseUrl:'https://bob-online.example.com',deviceName:'Pixel 8'});
+ await bridge.onlineExchangePairing({nodeId:'node-1',baseUrl:'https://bob-online.example.com',pairingId:'pr-1',code:'123456',verifier:'v-1'});
+ await bridge.onlineSync({nodeId:'node-1',baseUrl:'https://bob-online.example.com',projectId:'proj-1',taskId:'task-1'});
+ await bridge.onlineSubmitOperation({nodeId:'node-1',baseUrl:'https://bob-online.example.com',operationType:'create_revision',taskId:'task-1',requestId:'req-op-1',payload:{instruction:'V2'}});
+ await bridge.onlineRevoke({nodeId:'node-1',baseUrl:'https://bob-online.example.com'});
+ assert.deepEqual(calls.map(c=>c.command),[
+  'app_conversation_promote',
+  'app_online_begin_pairing',
+  'app_online_exchange_pairing',
+  'app_online_sync',
+  'app_online_submit_operation',
+  'app_online_revoke'
+ ]);
+ assert.deepEqual(calls[0].args,{conversationId:'conv-1',projectId:'proj-1',title:'Promoted Project'});
+ assert.equal(calls[3].args.token,undefined);
+});
+
+test('capture image bridge binds recognition to saved original and disclosed model', async () => {
+ const calls=[];
+ const bridge=createKernelBridge(async (command,args)=>{calls.push({command,args});return {};},()=>true);
+ await bridge.captureMediaPut('image/png','encoded-fixture');
+ await bridge.captureMediaGet(null,'capture-1');
+ await bridge.captureRecognize('image-sha','provider::vision');
+ assert.deepEqual(calls,[
+  {command:'app_capture_media_put',args:{mime:'image/png',base64:'encoded-fixture'}},
+  {command:'app_capture_media_get',args:{mediaId:null,captureId:'capture-1'}},
+  {command:'app_capture_recognize',args:{mediaId:'image-sha',modelRef:'provider::vision'}},
+ ]);
+});
+
+test('BP4-06 Claude harness bridge maps capability, session, prompt, cancel, reconcile and review commands cleanly', async () => {
+ const calls=[];
+ const bridge=createKernelBridge(async (command,args)=>{calls.push({command,args});return {ok:true};},()=>true);
+ await bridge.claudeCapabilities('node-x1t');
+ await bridge.claudeSessions('node-x1t');
+ await bridge.claudeHistory('node-x1t','claude:winter-shelter');
+ await bridge.claudePrompt({connectionId:'node-x1t',sessionId:'claude:winter-shelter',text:'Build V2',requestId:'req-c-2',parentVersionId:'v1'});
+ await bridge.claudeCancel('node-x1t','claude:winter-shelter','req-c-2');
+ await bridge.claudeReconcile('node-x1t','claude:winter-shelter');
+ await bridge.claudeReview({connectionId:'node-x1t',sessionId:'claude:winter-shelter',versionId:'v2',verdict:'accepted',note:'Verified'});
+ await bridge.claudeArtifacts('node-x1t','claude:winter-shelter');
+ await bridge.claudePreview('node-x1t','claude:winter-shelter','index.html','v1');
+ assert.deepEqual(calls,[
+  {command:'app_claude_capabilities',args:{connectionId:'node-x1t'}},
+  {command:'app_claude_sessions',args:{connectionId:'node-x1t'}},
+  {command:'app_claude_history',args:{connectionId:'node-x1t',sessionId:'claude:winter-shelter'}},
+  {command:'app_claude_prompt',args:{connectionId:'node-x1t',sessionId:'claude:winter-shelter',text:'Build V2',requestId:'req-c-2',parentVersionId:'v1',detachedHoldMs:null}},
+  {command:'app_claude_cancel',args:{connectionId:'node-x1t',sessionId:'claude:winter-shelter',requestId:'req-c-2'}},
+  {command:'app_claude_reconcile',args:{connectionId:'node-x1t',sessionId:'claude:winter-shelter'}},
+  {command:'app_claude_review',args:{connectionId:'node-x1t',sessionId:'claude:winter-shelter',versionId:'v2',verdict:'accepted',note:'Verified'}},
+  {command:'app_claude_artifacts',args:{connectionId:'node-x1t',sessionId:'claude:winter-shelter'}},
+  {command:'app_claude_preview',args:{connectionId:'node-x1t',sessionId:'claude:winter-shelter',path:'index.html',versionId:'v1'}},
+ ]);
+});
+
+
+test('BP4-05 bounded subagent bridge maps dispatch, execute, cancel, reconcile, status and list commands cleanly', async () => {
+  const calls = [];
+  const bridge = createKernelBridge(async (command, args) => { calls.push({ command, args }); return { ok: true }; }, () => true);
+  const sampleGrant = { parent_task_id: 'task-1', depth: 1, max_budget_usd: 0.05 };
+  const sampleReq = { request_id: 'sub-1', role: 'read_only_researcher', prompt: 'Audit codebase' };
+  const sampleActions = [{ tool: 'read_file', relative_path: 'lib.rs' }];
+
+  await bridge.subagentDispatch(sampleGrant, sampleReq);
+  await bridge.subagentExecute(sampleGrant, 'subagent-sub-1', sampleActions);
+  await bridge.subagentCancel('task-1', 'subagent-sub-1', 'PARENT_CANCELLED');
+  await bridge.subagentReconcile();
+  await bridge.subagentStatus('subagent-sub-1');
+  await bridge.subagentList('task-1');
+
+  assert.deepEqual(calls, [
+    { command: 'app_subagent_dispatch', args: { grant: sampleGrant, request: sampleReq } },
+    { command: 'app_subagent_execute', args: { grant: sampleGrant, runId: 'subagent-sub-1', actions: sampleActions } },
+    { command: 'app_subagent_cancel', args: { parentTaskId: 'task-1', runId: 'subagent-sub-1', reason: 'PARENT_CANCELLED' } },
+    { command: 'app_subagent_reconcile', args: {} },
+    { command: 'app_subagent_status', args: { runId: 'subagent-sub-1' } },
+    { command: 'app_subagent_list', args: { parentTaskId: 'task-1' } },
+  ]);
+});
+
+test('BOB-D-014 unified inbox commands map list, capture, triage set, draft, and close', async () => {
+  const calls = [];
+  const bridge = createKernelBridge(async (command, args) => { calls.push({ command, args }); return { ok: true }; }, () => true);
+
+  await bridge.inboxList('unsorted');
+  await bridge.inboxCapture({ id: 'cap-1', content: 'Spark idea', mediaId: 'img-1' });
+  await bridge.inboxTriageSet({
+    captureId: 'cap-1',
+    destination: { kind: 'calendar', refId: 'sched-1', label: 'Tomorrow' },
+    batchId: 'batch-1',
+    expectedVersion: 0,
+  });
+  await bridge.inboxTriageDraft({ regenerate: true });
+  await bridge.inboxTriageClose({ batchId: 'batch-1', status: 'applied' });
+
+  assert.deepEqual(calls, [
+    { command: 'app_inbox_list', args: { status: 'unsorted' } },
+    { command: 'app_inbox_capture', args: { id: 'cap-1', content: 'Spark idea', mediaId: 'img-1' } },
+    {
+      command: 'app_inbox_triage_set',
+      args: {
+        captureId: 'cap-1',
+        destination: { kind: 'calendar', refId: 'sched-1', label: 'Tomorrow' },
+        batchId: 'batch-1',
+        expectedVersion: 0,
+      },
+    },
+    { command: 'app_inbox_triage_draft', args: { regenerate: true } },
+    { command: 'app_inbox_triage_close', args: { batchId: 'batch-1', status: 'applied' } },
+  ]);
+});
+
+test('todo dates and project stay optional and legacy deadline never becomes a start',async()=>{
+ const calls=[];const bridge=createKernelBridge(async(command,args)=>{calls.push(args);return args;},()=>true);
+ await bridge.scheduleCreate({id:'plain',title:'Plain',kind:'todo'});
+ assert.equal(calls[0].projectId,null);assert.equal(calls[0].startAt,null);assert.equal(calls[0].endAt,null);
+ await bridge.scheduleCreate({id:'due',title:'Deadline',kind:'todo',dueAtMs:2000});
+ assert.equal(calls[1].startAt,null);assert.equal(calls[1].endAt,2000);
+ await bridge.scheduleEdit({id:'due',expectedVersion:1,title:'Clear',projectId:null,startAt:null,endAt:null});
+ assert.equal(calls[2].startAt,null);assert.equal(calls[2].endAt,null);
+});
+
+test('date-only precision and provenance pass unchanged through create and edit',async()=>{
+ const calls=[];const bridge=createKernelBridge(async(command,args)=>{calls.push(args);return args;},()=>true);
+ const timing={due_date:'2026-11-15',time_zone:'Asia/Shanghai',source_text:'11/15前'};
+ await bridge.scheduleCreate({id:'civil',title:'Pay',kind:'todo',timing});
+ assert.deepEqual(calls[0].timing,timing);assert.equal(calls[0].endAt,null);
+ await bridge.scheduleEdit({id:'civil',expectedVersion:1,timing:{due_date:null}});
+ assert.equal(calls[1].timing.due_date,null);
+});

@@ -1,0 +1,91 @@
+{
+  "captures": [
+    {
+      "content_ref": "速记：优先对齐 Schedule / Memory / Decision 契约与单点快照",
+      "content_sha256": "2d861ee236bfcfe63adb54061f754546575f2a4b84e419cb8f459a0caf54be3d",
+      "created_at": 1762000010000,
+      "id": "cap-fixture-1",
+      "origin_device_id": "fixture-device-0001",
+      "source_message_id": "msg-fixture-1"
+    }
+  ],
+  "decisions": [
+    {
+      "body": "前后端测试统一消费 Rust 序列化导出的 personal_snapshot.json，禁止手写字典",
+      "id": "dec-fixture-1",
+      "project_id": "proj-default",
+      "rationale_json": "{\"task\":\"RV-06\"}",
+      "source_message_id": "msg-fixture-1",
+      "status": "accepted",
+      "supersedes_id": null,
+      "task_id": null,
+      "version": 2
+    }
+  ],
+  "memories": [
+    {
+      "body": "所有文件读写显式指定 UTF-8 编码，时间戳统一使用 13 位 Unix 毫秒",
+      "id": "mem-fixture-1",
+      "source_capture_id": "cap-fixture-1",
+      "source_message_id": "msg-fixture-1",
+      "state": "active",
+      "supersedes_id": null,
+      "version": 2
+    }
+  ],
+  "notes": [
+    {
+      "acceptance": "home",
+      "body_markdown": "# 核心契约\n- 日程状态：scheduled | completed | cancelled\n- 记忆状态：proposed | active | superseded | forgotten",
+      "conversation_id": null,
+      "created_at": 1762000010000,
+      "id": "note-fixture-1",
+      "origin_device_id": "fixture-device-0001",
+      "project_id": null,
+      "tags": [
+        "architecture",
+        "contract"
+      ],
+      "title": "Bob 跨平台统一架构笔记",
+      "updated_at": 1762000010000,
+      "version": 1
+    }
+  ],
+  "pending_sync_count": 0,
+  "schedules": [
+    {
+      "acceptance": "home",
+      "created_at": 1762000010000,
+      "end_at": null,
+      "id": "sched-event-1",
+      "kind": "event",
+      "notes": "核对手机端、桌面端与云端 Web 契约",
+      "origin_device_id": "fixture-device-0001",
+      "project_id": null,
+      "reminder_at": null,
+      "start_at": 1762010000000,
+      "status": "completed",
+      "task_id": null,
+      "title": "跨平台架构评审会议",
+      "updated_at": 1762000010000,
+      "version": 2
+    },
+    {
+      "acceptance": "home",
+      "created_at": 1762000010000,
+      "end_at": null,
+      "id": "sched-todo-1",
+      "kind": "todo",
+      "notes": "待办事项回归",
+      "origin_device_id": "fixture-device-0001",
+      "project_id": null,
+      "reminder_at": null,
+      "start_at": 1762020000000,
+      "status": "scheduled",
+      "task_id": null,
+      "title": "完成 RV-01 至 RV-13 回归验证",
+      "updated_at": 1762000010000,
+      "version": 1
+    }
+  ]
+}
