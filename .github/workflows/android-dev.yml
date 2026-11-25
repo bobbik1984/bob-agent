@@ -1,8 +1,17 @@
 name: Android development APK
 on:
   workflow_dispatch:
+    inputs:
+      build_kind:
+        description: "Build kind on main/1.0.2 (release or debug)"
+        required: false
+        default: "release"
+        type: choice
+        options:
+          - release
+          - debug
   push:
-    branches: ["1.0.1", "1.0.2"]
+    branches: ["main", "1.0.1", "1.0.2"]
     paths: [".github/workflows/android-dev.yml", "apps/bob-app/**", "crates/**", "Cargo.lock", "Cargo.toml"]
 permissions:
   contents: read
@@ -141,8 +150,12 @@ jobs:
           printf '\ndistributionUrl=file://%s\ndistributionSha256Sum=%s\n' "$archive" "$checksum" >> "$wrapper"
       - name: Build independent ARM64 APK
         run: |
-          if [ "${{ github.ref_name }}" = "1.0.2" ]; then
-            pnpm exec tauri android build --target aarch64 --apk --ci
+          if [ "${{ github.ref_name }}" = "1.0.2" ] || [ "${{ github.ref_name }}" = "main" ]; then
+            if [ "${{ inputs.build_kind }}" = "debug" ]; then
+              pnpm exec tauri android build --debug --target aarch64 --apk --ci
+            else
+              pnpm exec tauri android build --target aarch64 --apk --ci
+            fi
           else
             pnpm exec tauri android build --debug --target aarch64 --apk --ci
           fi
@@ -185,7 +198,7 @@ jobs:
           cd "$RUNNER_TEMP/bob-apk"
           sha256sum *.apk > SHA256SUMS
           KIND="debug-not-release"
-          if [ "${{ github.ref_name }}" = "1.0.2" ]; then KIND="release"; fi
+          if { [ "${{ github.ref_name }}" = "1.0.2" ] || [ "${{ github.ref_name }}" = "main" ]; } && [ "${{ inputs.build_kind }}" != "debug" ]; then KIND="release"; fi
           printf 'commit=%s\nrun=%s\npackage=org.bobagent.nextdev\nkind=%s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" "$KIND" > BUILD.txt
       - uses: actions/upload-artifact@v4
         with:
