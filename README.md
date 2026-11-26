@@ -2,7 +2,7 @@
 
 **One Bob, many devices. Work keeps going. You own it.**
 
-Bob 是一个按使用深度平滑生长的个人与工作流 Agent 系统（官网与手册：[bob.example.com](https://bob.example.com)）。
+Bob 是一个按使用深度平滑生长的个人与工作流 Agent 系统（官网与手册：[bob.bobbik.org](https://bob.bobbik.org)）。
 
 ### 产品形态（横向能力倍增）：`0.1 · 1 · X`
 
@@ -10,7 +10,7 @@ Bob 是一个按使用深度平滑生长的个人与工作流 Agent 系统（官
 
 | 形态 | 组合方式 | 核心价值 |
 | :--- | :--- | :--- |
-| **`0.1`** | [`bob-bot`](https://github.com/bobbik1984/bob-bot)（云端轻网关 + 浏览器 PWA） | **手机免安装、任意终端有浏览器即可直控**（无大厂 App 与移动端跨境网络依赖）；支持 iOS PWA Web Push / 潜在 Android APK 端云协同与 5 秒虚拟浏览器接管 2FA |
+| **`0.1`** | [`bob-bot`](https://github.com/bobbik1984/bob-bot)（云端轻网关 + 浏览器 PWA） | **手机免安装、任意终端有浏览器即可直控**（无大厂 App 与移动端跨境网络依赖）；支持 iOS PWA Web Push / 潜在 Android APK 端云协同与虚拟浏览器手机快速接管 2FA |
 | **`1`** | **`bob-agent`（本仓库端侧客户端）** | 安装在手机（Android 1.0 APK）或电脑上**自主运行**；纯 Rust 单一内核（~38MB / ~50MB 常驻内存）、本地 SQLite 三层记忆与 OS 凭据保险箱 |
 | **`X`** | `bob-online` + `bob-agent` + 多节点 | 7×24 云端主权中枢串联多台 PC / VPS / 移动节点，单一主窗口统筹调度、三档节点权限、连续同错熔断与外部 MCP 参谋长总线 |
 

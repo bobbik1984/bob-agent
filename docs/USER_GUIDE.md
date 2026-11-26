@@ -1,8 +1,8 @@
 # Bob — User Guide（v1.0.2 · 0.1 / 1 / X）
 
-> **在线完整版中英手册**：[bob.example.com/guide.html](https://bob.example.com/guide.html)（EN: [guide_en.html](https://bob.example.com/guide_en.html)）
+> **在线完整版中英手册**：[bob.bobbik.org/guide.html](https://bob.bobbik.org/guide.html)（EN: [guide_en.html](https://bob.bobbik.org/guide_en.html)）
 >
-> **产品组合口径**：`0.1`（[`bob-bot`](https://github.com/bobbik1984/bob-bot) 免装任意浏览器 PWA，支持 iOS Web Push / 潜在 APK 端云协同与 5 秒 2FA 虚拟浏览器接管）→ `1`（本仓库 `bob-agent` 端侧自主客户端，纯 Rust 单一内核 + 本地 SQLite 三层记忆 + OS 凭据保险箱）→ `X`（`bob-online` + `bob-agent` + 多节点完全体）。
+> **产品组合口径**：`0.1`（[`bob-bot`](https://github.com/bobbik1984/bob-bot) 免装任意浏览器 PWA，支持 iOS Web Push / 潜在 APK 端云协同与手机快速 2FA 虚拟浏览器接管）→ `1`（本仓库 `bob-agent` 端侧自主客户端，纯 Rust 单一内核 + 本地 SQLite 三层记忆 + OS 凭据保险箱）→ `X`（`bob-online` + `bob-agent` + 多节点完全体）。
 >
 > **工程验收边界声明**：当前统一网页已上线，Android 1.0 APK 与桌面端/多节点能力范围均以 [CURRENT_STAGE](CURRENT_STAGE.md) 为准，网页发布不代表 APK 同步更新。前身 `v0.9.x` 保留于 `legacy/v0.9` 用于尚未完全迁移的过渡能力（`BOB-D-001`）。
 
@@ -10,7 +10,7 @@
 
 ## 0. 快速导航（按使用深度选择）
 
-- **只想免装体验（`0.1`）**：在任意手机/电脑浏览器打开个人 `bob-bot` 网关，无需绑定特定大厂 App 或移动端跨境网络；遇 2FA 弹出 390px 虚拟浏览器点 5 秒即可接力并保存为每日 Routine。
+- **只想免装体验（`0.1`）**：在任意手机/电脑浏览器打开个人 `bob-bot` 网关，无需绑定特定大厂 App 或移动端跨境网络；遇 2FA 弹出 390px 虚拟浏览器手机快速点按即可接力并保存为每日 Routine。
 - **单机本地隐私与离线自主（`1`）**：安装 Android 1.0 APK（首次可选开启系统生物识别安全锁），在「设置 → 模型」填入自有 API Key（BYOK + 快慢双模 + 月度预算硬熔断），即可使用主助理续聊、日历 15 分钟拖动、灵感速记（`Ctrl+Shift+N`）与本地 SQLite 三层记忆（见下文「主助理长期记忆与多问题回答」）。
 - **多机互联与外部参谋长（`X`）**：在「设置 → 连接」输入 `bob-node` 地址或在节点终端运行 `bob-node qr` 扫码配对，按「项目 / 智能 / 设备」管理多节点工程会话（`read_only` / `workspace_auto` / `full_auto` 三档权限 + 灾难命令硬拦截），并可经 `/api/bot/v1/mcp` 接入无状态外部参谋长。
 
