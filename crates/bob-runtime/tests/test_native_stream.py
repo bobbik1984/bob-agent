@@ -1701,4 +1701,14 @@ class NativeTests(unittest.TestCase):
   self.assertEqual(rows_dead[0]['execution_status'],'unknown')
   self.assertEqual(rows_dead[0]['error_code'],'HARNESS_PROCESS_LOST')
 
+ def test_codex_multimodal_tool_frame_with_large_base64_image_does_not_abort_turn(self):
+  big_b64='data:image/jpeg;base64,'+('A'*350000)
+  tool_frame=self.codex_frame('item/completed',item={'id':'tool-img-1','type':'customToolCallOutput','status':'completed','output':[{'type':'input_image','image_url':big_b64}]})
+  rec,events=self.run_codex([tool_frame,self.codex_item('Inspected image cleanly'),self.codex_end()],{'turn':{'id':'turn-new'}})
+  self.assertEqual(rec['execution_status'],'completed')
+  self.assertEqual(rec['reply_text'],'Inspected image cleanly')
+  self.assertIsNone(rec.get('error_code'))
+  src_events=[e for e in events if e.get('kind')=='source_event']
+  self.assertTrue(any('[omitted ' in json.dumps(e.get('payload') or {}) for e in src_events))
+
 if __name__=='__main__':unittest.main()

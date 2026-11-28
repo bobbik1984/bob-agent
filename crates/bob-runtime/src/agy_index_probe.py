@@ -4513,6 +4513,25 @@ def _capture_external_codex_event(sid, raw, frame, observer_id=None):
     return _capture_codex_event(sid,raw,frame,observer_id)
 
 
+def _compact_source_event_value(val, depth=0):
+    if depth > 8:
+        return '[omitted nested]'
+    if isinstance(val, str):
+        if val.startswith('data:image/') and len(val) > 1024:
+            header = val.split(',', 1)[0][:64]
+            return f'{header},[omitted {len(val)} chars]'
+        if len(val) > 16384:
+            return val[:16384] + f'\n...[omitted {len(val) - 16384} chars]'
+        return val
+    if isinstance(val, list):
+        if len(val) > 64:
+            return [_compact_source_event_value(x, depth + 1) for x in val[:64]] + [f'[omitted {len(val) - 64} items]']
+        return [_compact_source_event_value(x, depth + 1) for x in val]
+    if isinstance(val, dict):
+        return {k: _compact_source_event_value(v, depth + 1) for k, v in val.items()}
+    return val
+
+
 def _capture_codex_event(sid, raw, frame, observer_id=None, request_id=None, expected_turn=None):
     """Persist source events without replaying snapshot-overlapping text deltas."""
     params=frame.get('params') or {}
@@ -4524,10 +4543,19 @@ def _capture_codex_event(sid, raw, frame, observer_id=None, request_id=None, exp
     method=frame.get('method')
     if not isinstance(method,str) or len(method)>256:return False
     # Source payloads are untrusted and bounded like the event journal itself.
+    # For non-agentMessage tool frames (e.g. inline base64 vision images or huge
+    # command outputs), compact oversized blobs in the observational copy so
+    # multimodal tool calls do not abort healthy Codex turns.
+    stored_params = params
     if len(json.dumps(frame,ensure_ascii=False).encode('utf-8'))>262144:
-        raise ValueError('HARNESS_OUTPUT_LIMIT')
+        item = params.get('item') if isinstance(params.get('item'), dict) else {}
+        if item.get('type') == 'agentMessage':
+            raise ValueError('HARNESS_OUTPUT_LIMIT')
+        stored_params = _compact_source_event_value(params)
+        if len(json.dumps({'method':method,'params':stored_params},ensure_ascii=False).encode('utf-8'))>262144:
+            raise ValueError('HARNESS_OUTPUT_LIMIT')
     request={'session_id':sid,'request_id':request_id or 'external-codex-'+raw+'-'+turn_id}
-    payload={'method':method,'params':params,'source':'codex-app-server','observer_id':observer_id}
+    payload={'method':method,'params':stored_params,'source':'codex-app-server','observer_id':observer_id}
     if 'id' in frame:payload['source_request_id']=frame['id']
     with closing(_stream_db()) as db,db:
         db.execute('BEGIN IMMEDIATE')
