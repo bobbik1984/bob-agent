@@ -724,6 +724,27 @@ def _reconcile(sid):
     return out
 
 
+def _normalize_preview_path(raw_path):
+    if not isinstance(raw_path, str) or not raw_path or len(raw_path) > 1024:
+        return None
+    if any(c in raw_path for c in '%?#\x00'):
+        return None
+    if os.name == 'nt':
+        if raw_path.startswith('\\\\') or raw_path.startswith('//'):
+            return None
+        normalized = raw_path.replace('\\', '/')
+        if re.match(r'^[A-Za-z]:/', normalized):
+            if ':' in normalized[2:]:
+                return None
+            return normalized
+        if ':' in normalized:
+            return None
+        return normalized
+    if any(c in raw_path for c in '\\:'):
+        return None
+    return raw_path
+
+
 def _native_file_references(message):
     """References observed in native history; never accept a caller's reference list."""
     body=message.get('text','')
@@ -744,13 +765,18 @@ def _native_file_references(message):
                 uri=urlsplit(reference)
                 if uri.scheme=='file' and not uri.netloc and not uri.query and not uri.fragment:
                     decoded=unquote(uri.path,errors='strict')
-                    if decoded.startswith('/') and '\x00' not in decoded:normalized.add(decoded)
+                    if os.name == 'nt' and re.match(r'^/[A-Za-z]:/', decoded):
+                        decoded = decoded[1:]
+                    safe_decoded = _normalize_preview_path(decoded)
+                    if safe_decoded and (safe_decoded.startswith('/') or (os.name == 'nt' and re.match(r'^[A-Za-z]:/', safe_decoded))):
+                        normalized.add(safe_decoded)
             except (ValueError,UnicodeError):pass
             continue
         cleaned=reference.split('#',1)[0].split('?',1)[0]
         cleaned=re.sub(r':\d+(?::\d+)?$','',cleaned)
-        if cleaned:normalized.add(cleaned)
-    return {x for x in normalized if x and not any(c in x for c in '\\:%?#\x00')}
+        safe_cleaned=_normalize_preview_path(cleaned)
+        if safe_cleaned:normalized.add(safe_cleaned)
+    return normalized
 
 def read_session_page(cfg, sid):
     ev, ws, h, jpath = [], '', 'dsh', ''
@@ -1085,6 +1111,35 @@ def read_session_page(cfg, sid):
 
 
 def _read_artifact_bytes(root,relative,limit=2*1024*1024):
+    if os.name == 'nt':
+        root_resolved = Path(root).resolve(strict=True)
+        cur = root_resolved
+        try:
+            for part in relative.parts:
+                cur = cur / part
+                st = os.lstat(cur)
+                if stat.S_ISLNK(st.st_mode) or bool(getattr(st, 'st_file_attributes', 0) & 0x400):
+                    raise ValueError('DSH_FILE_PATH_REJECTED')
+            target_resolved = cur.resolve(strict=True)
+            root_norm = os.path.normcase(str(root_resolved)).rstrip('\\/')
+            target_norm = os.path.normcase(str(target_resolved))
+            if not target_norm.startswith(root_norm + os.sep):
+                raise ValueError('DSH_FILE_OUTSIDE_WORKSPACE')
+            with open(target_resolved, 'rb') as stream:
+                before = os.fstat(stream.fileno())
+                if not stat.S_ISREG(before.st_mode):
+                    raise ValueError('DSH_FILE_PATH_REJECTED')
+                if before.st_size > limit:
+                    raise ValueError('DSH_FILE_TOO_LARGE')
+                data = stream.read(limit + 1)
+                after = os.fstat(stream.fileno())
+                if len(data) != before.st_size or (before.st_mtime_ns, before.st_ctime_ns, before.st_size) != (after.st_mtime_ns, after.st_ctime_ns, after.st_size):
+                    raise ValueError('DSH_FILE_CHANGED')
+            return data
+        except ValueError:
+            raise
+        except OSError:
+            raise ValueError('DSH_FILE_UNAVAILABLE')
     # Open each component without following symlinks. The held directory FDs
     # prevent path swaps between authorization and reading on node hosts.
     if not hasattr(os,'O_NOFOLLOW') or os.open not in os.supports_dir_fd:
@@ -1253,15 +1308,27 @@ def preview_native_file(cfg):
     sid, requested = cfg.get('sessionId', ''), cfg.get('path', '')
     if not re.fullmatch(r'(codex|claude-jsonl|agy|pi|copilot|kimi|qoder|zcode|workbuddy|goose):[A-Za-z0-9_-]{8,128}', sid):
         raise ValueError('DSH_SESSION_NOT_FOUND')
-    if not isinstance(requested, str) or not requested or len(requested)>1024 or any(c in requested for c in '\\:%?#\x00'):
+    norm_requested = _normalize_preview_path(requested)
+    if not norm_requested:
         raise ValueError('DSH_FILE_PATH_REJECTED')
     page=read_session_page(cfg,sid)
     workspace=page.get('workspace')
     if not workspace or not Path(workspace).is_absolute():raise ValueError('DSH_FILE_OUTSIDE_WORKSPACE')
     root=Path(workspace).resolve(strict=True)
-    candidate=Path(requested)
-    try:relative=candidate.relative_to(root) if candidate.is_absolute() else candidate
-    except ValueError:raise ValueError('DSH_FILE_OUTSIDE_WORKSPACE')
+    candidate=Path(norm_requested)
+    if candidate.is_absolute():
+        if os.name == 'nt':
+            root_norm = os.path.normcase(str(root)).rstrip('\\/')
+            cand_norm = os.path.normcase(str(candidate))
+            if not cand_norm.startswith(root_norm + os.sep):
+                raise ValueError('DSH_FILE_OUTSIDE_WORKSPACE')
+            rel_str = str(candidate)[len(root_norm) + 1:].replace('\\', '/')
+            relative = Path(rel_str)
+        else:
+            try:relative=candidate.relative_to(root)
+            except ValueError:raise ValueError('DSH_FILE_OUTSIDE_WORKSPACE')
+    else:
+        relative=candidate
     if not relative.parts or any(p in ('.','..') or (p.startswith('.') and p != '.bob_attachments') for p in relative.parts):
         raise ValueError('DSH_FILE_PATH_REJECTED')
     ext=relative.suffix.lower().lstrip('.')
@@ -1271,8 +1338,18 @@ def preview_native_file(cfg):
     for message in page.get('messages',[]):
         refs.update(message.get('file_references') or [])
         refs.update(_native_file_references(message))
-    if requested not in refs and relative.as_posix() not in refs and str(root/relative) not in refs:
-        raise ValueError('DSH_FILE_NOT_REFERENCED')
+    if os.name == 'nt':
+        norm_refs = {str(r).replace('\\', '/').lower() for r in refs if isinstance(r, str)}
+        cand_keys = {
+            norm_requested.lower(),
+            relative.as_posix().lower(),
+            (root / relative).as_posix().lower(),
+        }
+        if not (norm_refs & cand_keys):
+            raise ValueError('DSH_FILE_NOT_REFERENCED')
+    else:
+        if requested not in refs and relative.as_posix() not in refs and str(root/relative) not in refs:
+            raise ValueError('DSH_FILE_NOT_REFERENCED')
     byte_limit = 8 * 1024 * 1024 if ext in ('png', 'jpg', 'jpeg', 'webp') else 2 * 1024 * 1024
     data = _read_artifact_bytes(root, relative, limit=byte_limit)
     digest=hashlib.sha256(data).hexdigest()

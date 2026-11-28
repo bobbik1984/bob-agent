@@ -240,5 +240,49 @@ class IndexTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]['id'], 'codex:01a1da76-a592-7922-8dd4-b668fe263af5')
 
+    def test_windows_preview_native_file_allows_drive_paths_and_blocks_unsafe_paths(self):
+        import json, os
+        if os.name != 'nt':
+            return
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp) / 'longhua_3d_models'
+            qa = ws / 'escalator_fix' / 'qa'
+            qa.mkdir(parents=True)
+            img = qa / 'cycles_compare.jpg'
+            img.write_bytes(b'\xff\xd8\xff\xe0TEST_JPEG_BYTES')
+            other = qa / 'unreferenced.jpg'
+            other.write_bytes(b'\xff\xd8\xff\xe0NOPE')
+            outside = Path(tmp) / 'outside.jpg'
+            outside.write_bytes(b'\xff\xd8\xff\xe0OUT')
+
+            codex_root = Path(tmp) / 'codex'
+            sdir = codex_root / 'sessions' / '2026' / '11' / '28'
+            sdir.mkdir(parents=True)
+            raw_id = '01a21d81-4e24-7753-aaa1-b23b74224dac'
+            posix_img = img.resolve().as_posix()
+            rollout = sdir / f'rollout-2026-11-28T10-00-00-{raw_id}.jsonl'
+            rollout.write_text('\n'.join([
+                json.dumps({'type': 'session_meta', 'payload': {'id': raw_id, 'cwd': str(ws.resolve())}}),
+                json.dumps({'type': 'response_item', 'payload': {'type': 'message', 'role': 'assistant', 'content': [{'type': 'output_text', 'text': f'Rendered `{posix_img}` and `{str(img.resolve())}`'}]}}),
+            ]) + '\n', encoding='utf-8')
+
+            cfg = {'sessionId': f'codex:{raw_id}', 'codexDataDir': str(codex_root), 'path': posix_img, 'original': True}
+            res = probe.preview_native_file(cfg)
+            self.assertEqual(res['path'], posix_img)
+            self.assertEqual(res['extension'], 'jpg')
+            self.assertEqual(res['bytes'], len(b'\xff\xd8\xff\xe0TEST_JPEG_BYTES'))
+
+            # Reject unsafe Windows paths & unreferenced files
+            for bad, expected in [
+                (posix_img + ':Zone.Identifier', 'DSH_FILE_PATH_REJECTED'),
+                (r'\\server\share\a.jpg', 'DSH_FILE_PATH_REJECTED'),
+                (str(ws.resolve().as_posix()) + '/../outside.jpg', 'DSH_FILE_PATH_REJECTED'),
+                (outside.resolve().as_posix(), 'DSH_FILE_OUTSIDE_WORKSPACE'),
+                (other.resolve().as_posix(), 'DSH_FILE_NOT_REFERENCED'),
+            ]:
+                with self.assertRaisesRegex(ValueError, expected):
+                    probe.preview_native_file({**cfg, 'path': bad})
+
+
 if __name__ == '__main__':
     unittest.main()
