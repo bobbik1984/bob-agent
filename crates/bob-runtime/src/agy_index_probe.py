@@ -22,6 +22,11 @@ def _augment_user_path(env=None):
         str(home / '.npm-global/bin'),
         str(home / '.cargo/bin'),
     ]
+    if os.name == 'nt':
+        prefixes.extend([
+            str(home / 'AppData/Local/Programs/OpenAI/Codex/bin'),
+            str(home / 'AppData/Roaming/npm'),
+        ])
     nvm_versions = home / '.nvm/versions/node'
     try:
         if nvm_versions.is_dir():
@@ -2126,10 +2131,11 @@ def _release_claude_terminal_holder(exe, raw, env):
         proc_dir=Path('/proc')/str(pid)
         if hasattr(os,'getuid') and proc_dir.exists() and proc_dir.stat().st_uid!=os.getuid():
             raise ValueError('HARNESS_SESSION_BUSY')
-        cmdline=(proc_dir/'cmdline').read_bytes().decode('utf-8','ignore').lower() if (proc_dir/'cmdline').exists() else 'claude'
+        parts=_proc_cmdline_parts(pid)
+        cmdline=' '.join(parts).lower() if parts else 'claude'
         if 'claude' not in cmdline or 'native_worker' in cmdline:
             raise ValueError('HARNESS_SESSION_BUSY')
-        os.kill(pid,signal.SIGTERM)
+        _terminate_external_pid(pid)
     except ValueError:
         raise
     except OSError:
@@ -2154,7 +2160,175 @@ def _safe_claude_holder(sid):
         return None
 
 
+_WIN_PROCS_CACHE = {'at': 0.0, 'rows': {}}
+
+
+def _win_split_cmdline(cmdline, fallback_name=''):
+    if not isinstance(cmdline, str) or not cmdline.strip():
+        return [fallback_name] if fallback_name else []
+    try:
+        import shlex
+        parts = shlex.split(cmdline, posix=False)
+        cleaned = [p[1:-1] if len(p) >= 2 and p[0] == '"' and p[-1] == '"' else p for p in parts if p]
+        return cleaned if cleaned else ([fallback_name] if fallback_name else [])
+    except Exception:
+        return cmdline.split()
+
+
+def _win_procs_snapshot(force=False):
+    if os.name != 'nt':
+        return {}
+    now_t = time.monotonic()
+    if not force and _WIN_PROCS_CACHE['rows'] and (now_t - _WIN_PROCS_CACHE['at']) < 2.0:
+        return _WIN_PROCS_CACHE['rows']
+    rows = {}
+    try:
+        ps_cmd = "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'codex|claude|agy|antigravity|node|python' } | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress"
+        res = subprocess.run(
+            ['powershell', '-NoProfile', '-Command', ps_cmd],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=4,
+        )
+        raw_out = (res.stdout or b'').decode('utf-8', 'replace').strip()
+        if raw_out:
+            parsed = json.loads(raw_out)
+            items = parsed if isinstance(parsed, list) else ([parsed] if isinstance(parsed, dict) else [])
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    pid = int(item.get('ProcessId') or 0)
+                    ppid = int(item.get('ParentProcessId') or 0)
+                except (TypeError, ValueError):
+                    continue
+                if pid <= 0:
+                    continue
+                name = str(item.get('Name') or '')
+                argv = _win_split_cmdline(item.get('CommandLine') or '', name)
+                if argv:
+                    rows[pid] = (ppid, name, argv)
+    except Exception:
+        pass
+    _WIN_PROCS_CACHE['at'] = now_t
+    _WIN_PROCS_CACHE['rows'] = rows
+    return rows
+
+
+def _win_file_holder_pids(path):
+    if os.name != 'nt' or not path:
+        return []
+    p = Path(path)
+    if not p.is_file():
+        return []
+    try:
+        import ctypes
+        from ctypes import wintypes
+        rstrtmgr = ctypes.WinDLL('rstrtmgr.dll')
+        class RM_UNIQUE_PROCESS(ctypes.Structure):
+            _fields_ = [('dwProcessId', wintypes.DWORD), ('ProcessStartTime', wintypes.FILETIME)]
+        class RM_PROCESS_INFO(ctypes.Structure):
+            _fields_ = [
+                ('Process', RM_UNIQUE_PROCESS),
+                ('strAppName', wintypes.WCHAR * 256),
+                ('strServiceShortName', wintypes.WCHAR * 64),
+                ('ApplicationType', wintypes.DWORD),
+                ('AppStatus', wintypes.ULONG),
+                ('TSSessionId', wintypes.DWORD),
+                ('bRestartable', wintypes.BOOL),
+            ]
+        sess = wintypes.DWORD(0)
+        key = (wintypes.WCHAR * 64)()
+        if rstrtmgr.RmStartSession(ctypes.byref(sess), 0, key) != 0:
+            return []
+        try:
+            fp = ctypes.c_wchar_p(str(p))
+            if rstrtmgr.RmRegisterResources(sess, 1, ctypes.byref(fp), 0, None, 0, None) != 0:
+                return []
+            needed = wintypes.UINT(0)
+            count = wintypes.UINT(16)
+            procs = (RM_PROCESS_INFO * 16)()
+            reasons = wintypes.DWORD(0)
+            rc = rstrtmgr.RmGetList(sess, ctypes.byref(needed), ctypes.byref(count), procs, ctypes.byref(reasons))
+            if rc != 0:
+                return []
+            out = []
+            for idx in range(min(int(count.value), 16)):
+                pid = int(procs[idx].Process.dwProcessId)
+                app = str(procs[idx].strAppName or '')
+                if pid > 0:
+                    out.append((pid, app))
+            return out
+        finally:
+            rstrtmgr.RmEndSession(sess)
+    except Exception:
+        return []
+
+
+def _win_file_lock_held(path):
+    if os.name != 'nt' or not path:
+        return False
+    p = Path(path)
+    if not p.is_file():
+        return False
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        class OVERLAPPED(ctypes.Structure):
+            _fields_ = [
+                ('Internal', ctypes.c_void_p),
+                ('InternalHigh', ctypes.c_void_p),
+                ('Offset', ctypes.c_uint32),
+                ('OffsetHigh', ctypes.c_uint32),
+                ('hEvent', ctypes.c_void_p),
+            ]
+        h = kernel32.CreateFileW(str(p), 0xC0000000, 7, None, 3, 0x80, None)
+        if h in (-1, 0xFFFFFFFFFFFFFFFF):
+            err = ctypes.GetLastError()
+            return err in (32, 33)
+        try:
+            ov = OVERLAPPED()
+            ok = kernel32.LockFileEx(h, 3, 0, 1, 0, ctypes.byref(ov))
+            if ok:
+                kernel32.UnlockFileEx(h, 0, 1, 0, ctypes.byref(ov))
+                return False
+            return ctypes.GetLastError() in (32, 33)
+        finally:
+            kernel32.CloseHandle(h)
+    except Exception:
+        return False
+
+
+def _terminate_external_pid(pid):
+    p = int(pid or 0)
+    if p <= 0 or p == os.getpid():
+        raise ValueError('HARNESS_SESSION_BUSY')
+    _WIN_PROCS_CACHE['at'] = 0.0
+    if os.name == 'nt':
+        try:
+            os.kill(p, signal.SIGTERM)
+            return
+        except OSError:
+            pass
+        try:
+            subprocess.run(
+                ['taskkill', '/PID', str(p), '/T', '/F'],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=4,
+            )
+        except Exception:
+            pass
+        return
+    os.kill(p, signal.SIGTERM)
+
+
 def _proc_ppid(pid):
+    if os.name == 'nt':
+        row = _win_procs_snapshot().get(int(pid))
+        return row[0] if row else 0
     try:
         for line in (Path('/proc') / str(int(pid)) / 'status').read_text(encoding='utf-8', errors='replace').splitlines():
             if line.startswith('PPid:'):
@@ -2165,6 +2339,9 @@ def _proc_ppid(pid):
 
 
 def _proc_cmdline_parts(pid):
+    if os.name == 'nt':
+        row = _win_procs_snapshot().get(int(pid))
+        return list(row[2]) if row else []
     try:
         raw_cmd = (Path('/proc') / str(int(pid)) / 'cmdline').read_bytes()
         return [seg.decode('utf-8', 'ignore') for seg in raw_cmd.split(b'\x00') if seg]
@@ -2207,6 +2384,9 @@ def _is_bob_owned_proc(pid):
 
 
 def _iter_same_uid_procs():
+    if os.name == 'nt':
+        my_pid = os.getpid()
+        return [(pid, list(row[2])) for pid, row in _win_procs_snapshot().items() if pid != my_pid and row[2]]
     proc_root = Path('/proc')
     if not proc_root.is_dir():
         return []
@@ -2234,6 +2414,9 @@ def _observer_process_owned(pid, sid):
         p = int(pid or 0)
         if p <= 0:
             return False
+        if os.name == 'nt':
+            joined = ' '.join(_proc_cmdline_parts(p))
+            return 'external_observer' in joined and sid in joined
         os.kill(p, 0)
         argv = (Path('/proc') / str(p) / 'cmdline').read_bytes()
         return b'external_observer' in argv and sid.encode('utf-8') in argv
@@ -2262,6 +2445,27 @@ def _codex_socket_pid_map():
     except OSError:
         pass
     return out
+
+
+def _codex_writer_lock_candidates(raw, jpath=''):
+    candidates = []
+    seen = set()
+    def _add(p):
+        s = str(p)
+        if s not in seen:
+            seen.add(s)
+            candidates.append(p)
+    if jpath:
+        try:
+            jp = Path(jpath)
+            for parent in jp.parents:
+                if (parent / 'thread-writer-locks').is_dir():
+                    _add(parent / 'thread-writer-locks' / f'{raw}.lock')
+                    break
+        except Exception:
+            pass
+    _add(Path.home() / '.codex' / 'thread-writer-locks' / f'{raw}.lock')
+    return candidates
 
 
 def _inspect_codex_session_holder(raw, jpath=''):
@@ -2296,6 +2500,59 @@ def _inspect_codex_session_holder(raw, jpath=''):
                 pipe.close()
             except Exception:
                 pass
+    if os.name == 'nt':
+        lock_paths = _codex_writer_lock_candidates(raw, jpath)
+        check_files = [p for p in lock_paths if p.is_file()]
+        if jpath and Path(jpath).is_file():
+            check_files.append(Path(jpath))
+        for fp in check_files:
+            for pid, app_name in _win_file_holder_pids(fp):
+                if pid <= 0 or pid == os.getpid() or _is_bob_owned_proc(pid):
+                    continue
+                parts = _proc_cmdline_parts(pid)
+                joined = '\0'.join(parts).lower()
+                if any(tag in joined for tag in ('native_worker', 'external_observer', 'agy_supervisor', 'bob-receipt-reader')):
+                    continue
+                app_l = (app_name or '').lower()
+                is_codex = ('codex' in app_l) or ('codex' in joined)
+                if not is_codex:
+                    continue
+                if 'app-server' in joined:
+                    return {
+                        'busy': True,
+                        'pid': int(pid),
+                        'name': 'Codex App Server',
+                        'kind': 'app_server',
+                        'status': 'running',
+                        'remote_control': False,
+                        'harness': 'codex',
+                        'mode': 'codex_terminal',
+                        'can_hot_interrupt': False,
+                    }
+                return {
+                    'busy': True,
+                    'pid': int(pid),
+                    'name': 'Codex CLI',
+                    'kind': 'interactive',
+                    'status': 'running',
+                    'remote_control': False,
+                    'harness': 'codex',
+                    'mode': 'codex_terminal',
+                    'can_hot_interrupt': False,
+                }
+        for lp in lock_paths:
+            if lp.is_file() and _win_file_lock_held(lp) and not _inspect_bob_holder(f'codex:{raw}').get('held'):
+                return {
+                    'busy': True,
+                    'pid': 0,
+                    'name': 'Codex CLI',
+                    'kind': 'interactive',
+                    'status': 'running',
+                    'remote_control': False,
+                    'harness': 'codex',
+                    'mode': 'codex_terminal',
+                    'can_hot_interrupt': False,
+                }
     for pid, argv in _iter_same_uid_procs():
         joined = '\0'.join(argv).lower()
         if any(tag in joined for tag in ('native_worker', 'external_observer', 'agy_supervisor', 'bob-receipt-reader', 'app-server')):
@@ -2360,10 +2617,11 @@ def _release_codex_terminal_holder(raw, jpath=''):
             proc_dir = Path('/proc') / str(pid)
             if hasattr(os, 'getuid') and proc_dir.exists() and proc_dir.stat().st_uid != os.getuid():
                 raise ValueError('HARNESS_SESSION_BUSY')
-            cmdline = (proc_dir / 'cmdline').read_bytes().decode('utf-8', 'ignore').lower() if (proc_dir / 'cmdline').exists() else 'codex'
+            parts = _proc_cmdline_parts(pid)
+            cmdline = ' '.join(parts).lower() if parts else 'codex'
             if 'codex' not in cmdline or 'native_worker' in cmdline or 'app-server' in cmdline:
                 raise ValueError('HARNESS_SESSION_BUSY')
-            os.kill(pid, signal.SIGTERM)
+            _terminate_external_pid(pid)
         except ValueError:
             raise
         except OSError:
@@ -2447,6 +2705,20 @@ def _inspect_agy_session_holder(raw, adir=''):
     if not isinstance(raw, str) or not raw:
         return {'busy': False, 'remote_control': False, 'harness': 'agy'}
     cli_holder = None
+    if os.name == 'nt' and adir:
+        conv_pb = Path(adir) / 'conversations' / f'{raw}.pb'
+        if conv_pb.is_file():
+            for pid, app_name in _win_file_holder_pids(conv_pb):
+                if pid <= 0 or pid == os.getpid() or _is_bob_owned_proc(pid):
+                    continue
+                argv = _proc_cmdline_parts(pid) or ([app_name] if app_name else [])
+                hit = _classify_agy_process(pid, argv, [str(conv_pb)], raw, adir)
+                if not hit:
+                    continue
+                if hit.get('remote_control'):
+                    return hit
+                if cli_holder is None:
+                    cli_holder = hit
     for pid, argv in _iter_same_uid_procs():
         if _is_bob_owned_proc(pid):
             continue
@@ -2481,10 +2753,11 @@ def _release_agy_terminal_holder(raw, adir=''):
         proc_dir = Path('/proc') / str(pid)
         if hasattr(os, 'getuid') and proc_dir.exists() and proc_dir.stat().st_uid != os.getuid():
             raise ValueError('HARNESS_SESSION_BUSY')
-        cmdline = (proc_dir / 'cmdline').read_bytes().decode('utf-8', 'ignore').lower() if (proc_dir / 'cmdline').exists() else 'agy'
+        parts = _proc_cmdline_parts(pid)
+        cmdline = ' '.join(parts).lower() if parts else 'agy'
         if not any(tok in cmdline for tok in ('agy', 'antigravity')) or 'agy_supervisor' in cmdline or 'native_worker' in cmdline:
             raise ValueError('HARNESS_SESSION_BUSY')
-        os.kill(pid, signal.SIGTERM)
+        _terminate_external_pid(pid)
     except ValueError:
         raise
     except OSError:

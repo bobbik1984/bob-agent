@@ -302,15 +302,24 @@ fn run_local_python(arg_str: &str, timeout_secs: u64, source: &str) -> Result<Ve
     let py_code = format!(
         "import sys,base64;s=sys.stdin.read();sys.argv=['probe',base64.b64decode('{encoded}').decode('utf-8')];exec(s,{{'__name__':'__main__','__BOB_PROBE_SRC__':s}})"
     );
-    let mut child = Command::new("python3")
+    let (primary_py, fallback_py) = if cfg!(windows) {
+        ("python", "python3")
+    } else {
+        ("python3", "python")
+    };
+    let mut child = Command::new(primary_py)
         .args(["-c", &py_code])
+        .env("PYTHONUTF8", "1")
+        .env("PYTHONIOENCODING", "utf-8")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
         .or_else(|_| {
-            Command::new("python")
+            Command::new(fallback_py)
                 .args(["-c", &py_code])
+                .env("PYTHONUTF8", "1")
+                .env("PYTHONIOENCODING", "utf-8")
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())

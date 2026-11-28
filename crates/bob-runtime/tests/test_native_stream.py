@@ -1663,4 +1663,25 @@ class NativeTests(unittest.TestCase):
   _,wcwd=p._resolve_codex_work_cwd(rollout)
   self.assertEqual(wcwd,str(new_dir))
 
+ def test_windows_codex_holder_uses_writer_lock_pid_and_release_terminates(self):
+  codex_home=Path(self.tmp.name)/'win_codex'
+  locks=codex_home/'thread-writer-locks';locks.mkdir(parents=True)
+  sdir=codex_home/'sessions'/'2026'/'11'/'28';sdir.mkdir(parents=True)
+  raw='01a21d81-4e24-7753-aaa1-b23b74224dac'
+  lock_file=locks/f'{raw}.lock';lock_file.write_bytes(b'')
+  jpath=sdir/f'rollout-{raw}.jsonl';jpath.write_text('{}\n',encoding='utf-8')
+  # 1. Restart Manager reports active codex.exe PID holding the writer lock
+  with patch.object(p.os,'name','nt'),patch.object(p,'_open_loaded_codex',return_value=(None,None)),patch.object(p,'_win_file_holder_pids',side_effect=lambda fp: [(38532,'codex.exe')] if Path(fp)==lock_file else []),patch.object(p,'_is_bob_owned_proc',return_value=False),patch.object(p,'_proc_cmdline_parts',return_value=['codex']):
+   h=p._inspect_codex_session_holder(raw,str(jpath))
+  self.assertTrue(h['busy']);self.assertEqual(h['pid'],38532);self.assertEqual(h['mode'],'codex_terminal');self.assertEqual(h['harness'],'codex')
+  # 2. Fallback to OS LockFileEx check when RmGetList returns empty
+  with patch.object(p.os,'name','nt'),patch.object(p,'_open_loaded_codex',return_value=(None,None)),patch.object(p,'_win_file_holder_pids',return_value=[]),patch.object(p,'_win_file_lock_held',return_value=True),patch.object(p,'_inspect_bob_holder',return_value={'held':False}),patch.object(p,'_iter_same_uid_procs',return_value=[]):
+   h2=p._inspect_codex_session_holder(raw,str(jpath))
+  self.assertTrue(h2['busy']);self.assertEqual(h2['pid'],0);self.assertEqual(h2['mode'],'codex_terminal')
+  # 3. Release terminates the Windows codex.exe PID and polls until lock clears
+  with patch.object(p.os,'name','nt'),patch.object(p,'_inspect_codex_session_holder',side_effect=[h,{'busy':False,'remote_control':False,'harness':'codex'}]),patch.object(p,'_proc_cmdline_parts',return_value=['codex']),patch.object(p,'_terminate_external_pid') as term_mock:
+   released=p._release_codex_terminal_holder(raw,str(jpath))
+  self.assertFalse(released['busy'])
+  term_mock.assert_called_once_with(38532)
+
 if __name__=='__main__':unittest.main()
