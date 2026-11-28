@@ -1684,4 +1684,21 @@ class NativeTests(unittest.TestCase):
   self.assertFalse(released['busy'])
   term_mock.assert_called_once_with(38532)
 
+ def test_windows_stream_records_keeps_long_running_worker_alive_past_30s_without_os_kill_zero(self):
+  sid='codex:01a21d81-4e24-7753-aaa1-b23b74224dac';rid='win-long-run-req-1'
+  old_started=p._now()-45000
+  rec={'request_id':rid,'session_id':sid,'text':'long task','execution_status':'running','started_at':old_started,'pid':32844}
+  with p.closing(p._stream_db()) as db,db:
+   db.execute('INSERT INTO requests VALUES(?,?,?,?)',(rid,sid,'h',json.dumps(rec)))
+  with patch.object(p.os,'name','nt'),patch.object(p.os,'kill',side_effect=AssertionError('must never call os.kill(pid,0) on Windows')),patch.object(p,'_pid_alive',return_value=True),patch.object(p,'_proc_cmdline_parts',return_value=['python','worker.py',json.dumps({'mode':'native_worker','request_id':rid,'session_id':sid})]):
+   rows=p._stream_records(sid)
+  self.assertEqual(len(rows),1)
+  self.assertEqual(rows[0]['execution_status'],'running')
+  self.assertIsNone(rows[0].get('error_code'))
+  # When the Windows PID actually exits, reconciliation transitions honestly to HARNESS_PROCESS_LOST
+  with patch.object(p.os,'name','nt'),patch.object(p.os,'kill',side_effect=AssertionError('must never call os.kill(pid,0) on Windows')),patch.object(p,'_pid_alive',return_value=False):
+   rows_dead=p._stream_records(sid)
+  self.assertEqual(rows_dead[0]['execution_status'],'unknown')
+  self.assertEqual(rows_dead[0]['error_code'],'HARNESS_PROCESS_LOST')
+
 if __name__=='__main__':unittest.main()

@@ -701,19 +701,59 @@ def _save_r(d):
     except Exception:
         pass
 
+def _pid_alive(pid):
+    try:
+        p = int(pid or 0)
+        if p <= 0:
+            return False
+        if os.name == 'nt':
+            import ctypes
+            from ctypes import wintypes
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(0x1000, False, p)
+            if not handle:
+                return False
+            try:
+                code = wintypes.DWORD(0)
+                if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                    return False
+                return int(code.value) == 259
+            finally:
+                kernel32.CloseHandle(handle)
+        os.kill(p, 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _pid_has_cmdline_tokens(pid, tokens):
+    try:
+        p = int(pid or 0)
+        if p <= 0 or not _pid_alive(p):
+            return False
+        if os.name == 'nt':
+            parts = _proc_cmdline_parts(p)
+            if not parts:
+                parts = list(_win_procs_snapshot(force=True).get(p, (0, '', []))[2])
+            joined = ' '.join(parts)
+            return bool(joined) and all(str(t) in joined for t in tokens)
+        proc = Path('/proc') / str(p) / 'cmdline'
+        if not proc.exists():
+            return False
+        raw_cmd = proc.read_bytes()
+        return all(str(t).encode('utf-8') in raw_cmd for t in tokens)
+    except (OSError, ValueError):
+        return False
+
+
 def _reconcile(sid):
     d, chg, out, now_ms = _load_r(), False, [], _now()
     for r in d.values():
         if not isinstance(r, dict) or r.get('session_id') != sid:
             continue
         if r.get('execution_status') == 'running':
-            pid, alive = r.get('pid'), False
-            if isinstance(pid, int) and pid > 0:
-                try:
-                    os.kill(pid, 0)
-                    alive = True
-                except OSError:
-                    pass
+            pid = r.get('pid')
+            alive = _pid_alive(pid) if isinstance(pid, int) and pid > 0 else False
             if not alive and now_ms - int(r.get('started_at') or 0) > 2500:
                 r['execution_status'], r['ended_at'], chg = 'unknown', now_ms, True
         out.append(r)
@@ -1477,13 +1517,12 @@ def _stream_records(sid):
             try:
                 pid=int(r.get('pid') or 0)
                 if pid>0:
-                    os.kill(pid,0)
                     # Existence alone is not ownership (or proof of a live
                     # worker on hosts without a readable process command line).
-                    proc=Path('/proc')/str(pid)/'cmdline'
                     if r.get('supervisor_token'):
                         alive=_agy_process_owned(pid,r['supervisor_token'],sid)
-                    elif proc.exists():alive=r['request_id'].encode() in proc.read_bytes()
+                    else:
+                        alive=_pid_has_cmdline_tokens(pid,(r['request_id'],))
             except (OSError,ValueError):pass
             if not alive:
                 r.update(execution_status='unknown',error_code='HARNESS_PROCESS_LOST')
@@ -1830,10 +1869,20 @@ class NativePipe:
         except (OSError, ValueError): pass
         try: self.p.wait(timeout=3)
         except subprocess.TimeoutExpired:
-            os.killpg(self.p.pid, signal.SIGTERM)
-            try: self.p.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                os.killpg(self.p.pid, signal.SIGKILL); self.p.wait(timeout=3)
+            if hasattr(os, 'killpg'):
+                os.killpg(self.p.pid, signal.SIGTERM)
+                try: self.p.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    os.killpg(self.p.pid, signal.SIGKILL); self.p.wait(timeout=3)
+            else:
+                try: self.p.terminate()
+                except OSError: pass
+                try: self.p.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    try: self.p.kill()
+                    except OSError: pass
+                    try: self.p.wait(timeout=3)
+                    except subprocess.TimeoutExpired: pass
 
 
 
@@ -2947,9 +2996,7 @@ def _permission_owner_alive(rec, sid):
     if not sid.startswith(('claude-jsonl:', 'codex:')):return False
     try:
         pid=int(rec.get('pid') or 0)
-        if pid<=0:return False
-        argv=(Path('/proc')/str(pid)/'cmdline').read_bytes()
-        return all(v.encode() in argv for v in ('native_worker',sid,rec['request_id']))
+        return _pid_has_cmdline_tokens(pid,('native_worker',sid,rec['request_id']))
     except (OSError,ValueError,KeyError):return False
 
 NATIVE_APPROVAL_TTL_MS = 30 * 60 * 1000
@@ -3688,9 +3735,7 @@ def _agy_tables(db):
 def _agy_process_owned(pid, token, sid):
     try:
         if int(pid) <= 0 or not token: return False
-        os.kill(int(pid), 0)
-        argv = (Path('/proc')/str(pid)/'cmdline').read_bytes()
-        return all(x.encode() in argv for x in ('agy_supervisor', token, sid))
+        return _pid_has_cmdline_tokens(int(pid), ('agy_supervisor', token, sid))
     except (OSError, ValueError):
         return False
 
@@ -4278,10 +4323,7 @@ def touch_external_observer(sid):
         row=db.execute('SELECT pid,touched,status FROM observers WHERE session=?',(sid,)).fetchone()
         alive=False
         if row and row[0]:
-            try:
-                cmd=(Path('/proc')/str(row[0])/'cmdline').read_bytes()
-                alive=sid.encode() in cmd and (hashlib.sha256(source.encode()).hexdigest()+'.py').encode() in cmd
-            except OSError:pass
+            alive=_pid_has_cmdline_tokens(int(row[0]),(sid,hashlib.sha256(source.encode()).hexdigest()+'.py'))
         if alive:
             db.execute('UPDATE observers SET touched=? WHERE session=?',(_now(),sid));return row[2]
         if row and row[2]=='unavailable' and _now()-row[1]<30000:return 'unavailable'
