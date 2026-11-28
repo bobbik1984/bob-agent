@@ -20,3 +20,63 @@ test('real directory component shows persisted list while refreshing and preserv
  resolve([{id:'new',title:'fresh',updated_at:2}]);await unchanged;
  assert.equal(ctx.actions.remote.value,groupedInput);
 });
+
+test('progressive directory refresh renders fast node immediately without waiting for slow or offline nodes',async()=>{
+ const cache=createReadingCache({storage:null});
+ const fastNode={id:'fast',baseUrl:'https://fast.example.invalid',enabled:true};
+ const slowNode={id:'slow',baseUrl:'https://slow.example.invalid',enabled:true};
+ const resolvers=new Map(), rejectors=new Map(), readable=new Set();
+ const ctx={
+  setInterval:()=>0,clearInterval:()=>{},deviceGroups,
+  pathState:n=>readable.has(n.id)?'readable':'unverified',
+  checkPath:async(n,bridge)=>{const rows=await bridge.dshList(n.id);readable.add(n.id);return rows;},
+  readingCache:cache,readingKey,singleFlight,
+  defineProps:()=>({nodes:[fastNode,slowNode],catalog:{},search:'',mode:'device'}),
+  defineEmits:()=>()=>{},useI18n:()=>({t:x=>x}),
+  ref:value=>({value}),watch:()=>{},onUnmounted:()=>{},
+  computed:fn=>({get value(){return fn()}}),
+  label:n=>n.id,directoryGroups:()=>[],
+  kernelBridge:{
+   projectLinks:()=>Promise.resolve({links:[]}),
+   dshList:id=>new Promise((r,j)=>{resolvers.set(id,r);rejectors.set(id,j);}),
+  },
+ };
+ vm.createContext(ctx);
+ vm.runInContext(source+';globalThis.actions={refresh,remote,failures,loading,settledCount,totalCount};',ctx);
+ const pending=ctx.actions.refresh();
+ await new Promise(r=>setImmediate(r));
+ assert.equal(ctx.actions.loading.value,true);
+ assert.equal(ctx.actions.totalCount.value,2);
+ assert.equal(ctx.actions.settledCount.value,0);
+ assert.equal(ctx.actions.remote.value.length,0);
+
+ // Fast node connects first: its sessions render immediately while slow node is still pending.
+ resolvers.get('fast')([{id:'f1',title:'fast session',updated_at:10}]);
+ await new Promise(r=>setImmediate(r));
+ await new Promise(r=>setImmediate(r));
+ assert.equal(ctx.actions.loading.value,true);
+ assert.equal(ctx.actions.settledCount.value,1);
+ assert.equal(ctx.actions.remote.value.length,1);
+ assert.equal(ctx.actions.remote.value[0].title,'fast session');
+ assert.equal(ctx.actions.remote.value[0].directoryStale,false);
+ assert.equal(ctx.actions.failures.value.length,0);
+
+ // Slow node later times out: fast node remains rendered and only slow node reports failure.
+ rejectors.get('slow')(Error('timeout'));
+ await pending;
+ assert.equal(ctx.actions.loading.value,false);
+ assert.equal(ctx.actions.settledCount.value,2);
+ assert.equal(ctx.actions.remote.value.length,1);
+ assert.equal(ctx.actions.remote.value[0].title,'fast session');
+ assert.equal(ctx.actions.failures.value.length,1);
+ assert.equal(ctx.actions.failures.value[0].id,'slow');
+});
+
+test('status indicator does not get stuck yellow while checking or viewing a synced remote conversation',()=>{
+ const appVue=readFileSync(new URL('../src/App.vue',import.meta.url),'utf8');
+ const chatSession=readFileSync(new URL('../src/composables/useChatSession.mjs',import.meta.url),'utf8');
+ assert.match(appVue,/unconfirmed:\s*deviceSyncPhase === 'offline' \|\| \(!remoteConversation && \(homeFault \|\| \(devicePaired && !deviceOnline && deviceSyncPhase !== 'checking'\)\)\)/);
+ assert.match(chatSession,/const homeSyncPending = ref\(false\);/);
+ assert.match(chatSession,/status === 'sync_checked' \|\| isReachablePayload/);
+ assert.match(chatSession,/Promise\.all\(\[\s*kernelBridge\.catalog\(\),\s*kernelBridge\.assistantConversation\(\)/);
+});

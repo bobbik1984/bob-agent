@@ -3918,27 +3918,32 @@ pub(crate) async fn sync_with_paired_remote_nodes<R: Runtime>(
     }
     peers.sort_by_key(|(_, _, _, is_web_host)| if *is_web_host { 0 } else { 1 });
 
-    let mut any_synced = false;
-    let mut web_sync_failed = false;
+    if peers.is_empty() {
+        return Ok(false);
+    }
+    let base_local_topo = build_local_topology_payload(host, state).await?;
+    let mut tasks = Vec::with_capacity(peers.len());
     for (peer_id, peer_url, peer_tok, is_web_host) in peers {
-        let mut local_topo = build_local_topology_payload(host, state).await?;
+        let mut local_topo = base_local_topo.clone();
         let read_quotas = is_web_host && peer_tok.is_some() && peer_url.starts_with("https://");
         if read_quotas {
             local_topo["includeSubscriptionQuotas"] = json!(true);
         }
-        let url_clone = peer_url.clone();
-        let tok_clone = peer_tok.clone();
-        let sync_res = tauri::async_runtime::spawn_blocking(move || {
+        let handle = tauri::async_runtime::spawn_blocking(move || {
             bob_runtime::node_pairing::sync_topology_with_peer_url(
-                &url_clone,
-                tok_clone.as_deref(),
+                &peer_url,
+                peer_tok.as_deref(),
                 &local_topo,
             )
-        })
-        .await
-        .ok()
-        .and_then(Result::ok);
+            .ok()
+        });
+        tasks.push((peer_id, is_web_host, read_quotas, handle));
+    }
 
+    let mut any_synced = false;
+    let mut web_sync_failed = false;
+    for (peer_id, is_web_host, read_quotas, handle) in tasks {
+        let sync_res = handle.await.ok().flatten();
         if let Some(synced) = sync_res {
             apply_synced_topology_payload(host, state, &synced, None).await?;
             if read_quotas && synced["subscriptionQuotas"].is_object() {

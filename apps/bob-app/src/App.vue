@@ -196,7 +196,7 @@ onMounted(async () => {
   await securityLock.refresh();
   const bootAfterUnlock = async () => {
     await startup();
-    await jarvisHome.refreshJarvisState(sessionId.value);
+    void jarvisHome.refreshJarvisState(sessionId.value);
     if (available) {
       deviceCapabilities.value = await kernelBridge.pairingCapabilities().catch(() => null);
     }
@@ -273,7 +273,7 @@ onUnmounted(() => {
           checking: deviceSyncPhase === 'checking',
           syncing: deviceSyncPhase === 'syncing',
           synced: deviceSyncPhase === 'synced',
-          unconfirmed: deviceSyncPhase === 'offline' || homeFault || (devicePaired && !deviceOnline),
+          unconfirmed: deviceSyncPhase === 'offline' || (!remoteConversation && (homeFault || (devicePaired && !deviceOnline && deviceSyncPhase !== 'checking'))),
         }"
         :aria-label="`${connectionLabel} · ${t('forceRefreshBtn')}`"
         :title="`${connectionLabel} · ${t('forceRefreshBtn')}`"

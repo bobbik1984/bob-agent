@@ -1036,7 +1036,8 @@ pub fn sync_topology_with_peer_url(
     }
     let client = reqwest::blocking::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_secs(15))
+        .connect_timeout(Duration::from_secs(4))
+        .timeout(Duration::from_secs(10))
         .build()
         .map_err(|_| "PAIRING_NETWORK_UNAVAILABLE")?;
     let sync_url = format!("{base}/api/client/v1/topology/sync");
@@ -1130,7 +1131,9 @@ pub fn is_bob_node_endpoint(endpoint: &str) -> Result<bool, &'static str> {
         return Err("DSH_ADDRESS_INVALID");
     }
     let response = reqwest::blocking::Client::builder()
-        .redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(4))
+        .timeout(Duration::from_secs(6))
         .build().map_err(|_| "DSH_UNAVAILABLE")?
         .get(format!("{}/api/node/v1/info", endpoint.trim_end_matches('/')))
         .send().map_err(|_| "DSH_UNAVAILABLE")?;
@@ -1175,6 +1178,8 @@ fn forwarded_rpc_timeout_secs(command: &str, args: &Value) -> u64 {
         // Native conversion <=110s; DSH can additionally read history, stat,
         // download and re-stat before rendering. Keep the outer budget larger.
         240
+    } else if command == "app_dsh_list" {
+        15
     } else {35}
 }
 
@@ -1219,7 +1224,7 @@ pub fn forward_dsh_rpc_to_endpoint_with_target(
     }
     let client = reqwest::blocking::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(Duration::from_secs(10))
+        .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(forwarded_rpc_timeout_secs(command,args)))
         .build()
         .map_err(|_| "DSH_UNAVAILABLE")?;

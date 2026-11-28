@@ -283,6 +283,19 @@ const devicePaired = computed(
     hasOnlineDeviceGroup.value,
 );
 const homeReachable = ref(false);
+const homeSyncPending = ref(false);
+const hasRemoteSyncTarget = computed(
+  () =>
+    !browserClient &&
+    (homeConfigured.value ||
+      Boolean(ctx.onlineState?.connected) ||
+      ['connected', 'confirmed', 'paired', 'home_ready'].includes(
+        pairingStatusState.value?.state,
+      ) ||
+      Boolean(pairingStatusState.value?.paired_home) ||
+      Boolean(pairingStatusState.value?.online_node) ||
+      (ctx.modelHub?.value?.state?.remote_nodes || []).some(n => n && n.enabled !== false)),
+);
 const deviceOnline = computed(() => homeReachable.value && !homeFault.value);
 // The badge identifies the connected target, never infers it from this screen's size.
 const pairedHomeIdentity = computed(() => catalog.value?.device_groups?.find(group => group.role === 'paired_home')?.device_id);
@@ -648,12 +661,12 @@ globalThis.__bobSetRemoteSyncPhase = phase => {
 
 const deviceSyncPhase = computed(() => {
   if (remoteConversation.value) {
-    return remoteSyncPhase.value || (deviceOnline.value ? 'synced' : 'offline');
+    return remoteSyncPhase.value || (deviceOnline.value ? 'synced' : homeSyncPending.value ? 'checking' : 'offline');
   }
   if (saving.value || dispatchPending.value || activeExecution.value || mainSyncPhase.value === 'syncing') {
     return 'syncing';
   }
-  if (loading.value || mainSyncPhase.value === 'checking') {
+  if (loading.value || mainSyncPhase.value === 'checking' || (!deviceOnline.value && homeSyncPending.value)) {
     return 'checking';
   }
   if (homeFault.value || (devicePaired.value && !deviceOnline.value)) {
@@ -836,6 +849,7 @@ function applyCatalogPreferences(snap) {
 
 let syncFailureStreak = 0;
 let nextAllowedSyncAt = 0;
+let activeHomeSyncs = 0;
 
 const reload = singleFlight(async () => {
   if (!sessionId.value || disposed) return;
@@ -844,16 +858,23 @@ const reload = singleFlight(async () => {
   mainSyncPhase.value = 'checking';
   void refreshAssistantResults();
   if (Date.now() >= nextAllowedSyncAt) {
+    activeHomeSyncs += 1;
+    homeSyncPending.value = true;
     void kernelBridge
       .syncHome()
       .then(async status => {
         if (disposed) return;
+        const isReachablePayload = Boolean(status && typeof status === 'object' && status.reachable === true);
         if (status !== 'sync_in_progress') {
           syncFailureStreak = 0;
           nextAllowedSyncAt = 0;
           homeFault.value = false;
-          if (status === 'sync_checked') {
+          if (status === 'sync_checked' || isReachablePayload) {
             homeReachable.value = true;
+          } else if (status === 'provider_unconfigured' && !hasRemoteSyncTarget.value && readiness.value) {
+            homeReachable.value = true;
+          }
+          if (status === 'sync_checked') {
             directorySyncRevision.value += 1;
             void ctx.loadModelHub();
             void ctx.loadPersonalOps();
@@ -868,6 +889,10 @@ const reload = singleFlight(async () => {
         const backoffMs = Math.min(60000, 3000 * Math.pow(2, syncFailureStreak - 1));
         nextAllowedSyncAt = Date.now() + backoffMs;
         homeFault.value = true;
+      })
+      .finally(() => {
+        activeHomeSyncs = Math.max(0, activeHomeSyncs - 1);
+        if (activeHomeSyncs === 0) homeSyncPending.value = false;
       });
   }
   const tasks = [
@@ -890,7 +915,7 @@ const reload = singleFlight(async () => {
   }
   if (results[1].status === 'fulfilled') {
     readiness.value = results[1].value;
-    if (browserClient) homeReachable.value = true;
+    if (browserClient || !hasRemoteSyncTarget.value) homeReachable.value = true;
   }
   else {
     readiness.value = null;
@@ -1372,10 +1397,14 @@ async function startup() {
     return;
   }
   try {
-    const state = await kernelBridge.bootstrap();
-    const initialCatalog = await kernelBridge.catalog();
+    await kernelBridge.bootstrap();
+    const hubPromise = ctx.loadModelHub();
+    const opsPromise = ctx.loadPersonalOps();
+    const [initialCatalog, entry] = await Promise.all([
+      kernelBridge.catalog(),
+      kernelBridge.assistantConversation(),
+    ]);
     applyCatalogPreferences(initialCatalog);
-    const entry = await kernelBridge.assistantConversation();
     assistantConversationId.value = entry.conversation_id;
     const selected = chooseStartupConversation(clientState, initialCatalog);
     newConversationPending.value = false;
@@ -1385,8 +1414,8 @@ async function startup() {
       controller.loadDraft(draft.value, 0);
     }
     await reload();
-    await ctx.loadModelHub();
-    await ctx.loadPersonalOps();
+    void hubPromise;
+    void opsPromise;
     void ctx.jarvisHome?.refreshJarvisState?.(sessionId.value);
     const activeItem = catalog.value?.conversations?.find(c => c.id === sessionId.value);
     if (activeItem?.view_state && !draft.value) {

@@ -14,7 +14,7 @@ onUnmounted(()=>clearInterval(recentTimer));
 const props=defineProps({nodes:Array,catalog:Object,search:String,mode:String,syncRevision:Number,creationRevision:Number,deleteLocal:Function});
 const emit=defineEmits(['select-local','select-remote','create-in-project']);
 const {t}=useI18n();
-const remote=ref([]), failures=ref([]), loading=ref(false), rodIndex=ref(0);let generation=0, rodTimer=null;
+const remote=ref([]), failures=ref([]), loading=ref(false), settledCount=ref(0), totalCount=ref(0), rodIndex=ref(0);let generation=0, rodTimer=null;
 const rodFrames=['|','/','─','\\'];
 const rodFrame=computed(()=>rodFrames[rodIndex.value%rodFrames.length]);
 watch(loading,val=>{if(typeof setInterval!=='function')return;if(val&&!rodTimer){rodTimer=setInterval(()=>{rodIndex.value=(rodIndex.value+1)%rodFrames.length;},120);}else if(!val&&rodTimer){clearInterval(rodTimer);rodTimer=null;}},{immediate:true});
@@ -60,13 +60,36 @@ watch([()=>props.catalog,()=>props.syncRevision],()=>loadLinks());
 const listKey=n=>readingKey(n.id,'directory',n.baseUrl||n.url||'');
 const display=nodes=>{const labels=new Map(deviceGroups(nodes).map(g=>[g.id,g.label]));const seenUids=new Set();const next=[];for(const n of nodes){for(const s of (cachedNodes.get(listKey(n))||[])){const uid=`${n.id}:${s.id}`;if(seenUids.has(uid))continue;seenUids.add(uid);next.push({...s,node:{...n,label:labels.get(n.deviceId||n.id)},remote:true,directoryStale:s.directoryStale||pathState(n)!=='readable',uid});}}if(JSON.stringify(next)!==JSON.stringify(remote.value))remote.value=next;};
 async function refresh(){const g=++generation;loading.value=true;const nodes=(props.nodes||[]).filter(n=>n.enabled!==false);
+ totalCount.value=nodes.length;settledCount.value=0;
  failures.value=failures.value.filter(f=>nodes.some(n=>n.id===f.id&&(n.baseUrl||n.url)===f.url));
  const linksReady = loadLinks();
  await Promise.all(nodes.map(async n=>{const k=listKey(n);if(!cachedNodes.has(k)){const rows=await readingCache.get(k);if(Array.isArray(rows))cachedNodes.set(k,rows)}}));
  await linksReady;
  if(g!==generation)return;display(nodes);
- const results=await Promise.allSettled(nodes.map(async n=>{const revision=readingCache.revision();const rows=await singleFlight(listKey(n),()=>checkPath(n,kernelBridge));if(!Array.isArray(rows))throw Error('DSH_INVALID_LIST');cachedNodes.set(listKey(n),rows);await readingCache.put(listKey(n),rows,undefined,revision);return rows}));
- if(g!==generation)return;display(nodes);failures.value=results.flatMap((x,i)=>x.status==='rejected'?[{id:nodes[i].id,name:label(nodes[i]),url:nodes[i].baseUrl||nodes[i].url,cached:Boolean(cachedNodes.get(listKey(nodes[i]))?.length)}]:[]);loading.value=false;}
+ if(!nodes.length){loading.value=false;return;}
+ const failedMap=new Map(failures.value.map(f=>[f.id,f]));
+ const syncFailures=()=>{failures.value=nodes.map(n=>failedMap.get(n.id)).filter(Boolean);};
+ await Promise.all(nodes.map(async n=>{
+  const k=listKey(n), revision=readingCache.revision();
+  try{
+   const rows=await singleFlight(k,()=>checkPath(n,kernelBridge));
+   if(!Array.isArray(rows))throw Error('DSH_INVALID_LIST');
+   if(g!==generation)return;
+   cachedNodes.set(k,rows);
+   failedMap.delete(n.id);
+   syncFailures();
+   display(nodes);
+   await readingCache.put(k,rows,undefined,revision);
+  }catch{
+   if(g!==generation)return;
+   failedMap.set(n.id,{id:n.id,name:label(n),url:n.baseUrl||n.url,cached:Boolean(cachedNodes.get(k)?.length)});
+   syncFailures();
+   display(nodes);
+  }finally{
+   if(g===generation)settledCount.value+=1;
+  }
+ }));
+ if(g!==generation)return;loading.value=false;}
 watch(()=>JSON.stringify((props.nodes||[]).map(n=>[n.id,n.deviceId,n.enabled,n.baseUrl])),()=>{selectedNodes.value=deviceFilterKeys(selectedNodes.value,props.nodes||[]);return refresh()},{immediate:true});
 watch(()=>props.creationRevision,()=>refresh());
 onUnmounted(()=>{if(rodTimer&&typeof clearInterval==='function')clearInterval(rodTimer);generation++});
@@ -152,7 +175,7 @@ const toolLabel=s=>s.remote?(s.toolLabel||s.tool_label||(s.harness==='claude'||s
     <button v-if="activeFilterCount>0" type="button" class="directory-filter-reset" @click="resetFilters">{{t('filterResetBtn')}}</button>
    </div>
    <div v-if="hasConnectedNodes" class="directory-refresh-bar">
-    <span v-if="loading" class="terminal-status-line" role="status"><span class="terminal-rod" aria-hidden="true">[{{rodFrame}}]</span><span>{{t('dshLoading')}}</span><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span>
+    <span v-if="loading" class="terminal-status-line" role="status"><span class="terminal-rod" aria-hidden="true">[{{rodFrame}}]</span><span>{{t('dshLoading')}}</span><small v-if="totalCount>1" class="directory-progress-count">{{settledCount}}/{{totalCount}}</small><span class="terminal-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span>
     <button type="button" :disabled="loading" @click="refresh">{{t('dshRefresh')}}</button>
    </div>
   </div>
