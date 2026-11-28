@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { createPersistentPreviewCache } from '../src/persistent-preview-cache.mjs';
 import { createReadingCache, readingKey } from '../src/reading-cache.mjs';
+import { CHUNK_UPLOAD_THRESHOLD, MAX_ATTACHMENT_BYTES, bytesToBase64, prepareAttachmentBinary, uploadAttachmentChunks } from '../src/attachment-upload.mjs';
 
 const dshSource = readFileSync(new URL('../src/components/DshSessions.vue', import.meta.url), 'utf8')
   .split('<script setup>')[1]
@@ -47,6 +48,11 @@ function mountDsh(storage = new Map(), overrides = {}) {
   const context = {artifactPath,isNotAcceptedReceipt,unconfirmActivity,settleNativeActivity,orderedNativeActivities,waitingNativeApproval,
     createChatScroll,
     createPersistentPreviewCache,
+    CHUNK_UPLOAD_THRESHOLD,
+    MAX_ATTACHMENT_BYTES,
+    bytesToBase64,
+    prepareAttachmentBinary,
+    uploadAttachmentChunks,
     readingCache: createReadingCache({ storage: null }),
     readingKey,
     provide: (k, v) => {

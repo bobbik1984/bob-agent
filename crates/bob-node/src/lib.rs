@@ -3504,8 +3504,8 @@ fn guess_content_type(path: &Path) -> &'static str {
 }
 
 fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(15)));
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(15)));
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
 
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
@@ -3550,12 +3550,12 @@ fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<NodeContext>>) {
     let Some(hend) = header_end else {
         return;
     };
+    if content_length > 0 && buf.len() < hend + content_length {
+        write_json_response(&mut stream, 408, r#"{"ok":false,"error":"REQUEST_BODY_INCOMPLETE"}"#);
+        return;
+    }
     let header_text = String::from_utf8_lossy(&buf[..hend - 4]).to_owned();
-    let body_bytes = if buf.len() >= hend + content_length {
-        &buf[hend..hend + content_length]
-    } else {
-        &buf[hend..]
-    };
+    let body_bytes = &buf[hend..hend + content_length];
     let body_str = String::from_utf8_lossy(body_bytes);
 
     let mut lines = header_text.lines();

@@ -1119,6 +1119,7 @@ fn find_remote_ssh_target_for_connection(data_dir: &std::path::Path, connection:
 
 pub const MAX_STAGED_ATTACHMENT_BYTES: usize = 50 * 1024 * 1024;
 pub const MAX_ATTACHMENT_CHUNK_BYTES: usize = 2 * 1024 * 1024;
+pub const MAX_ATTACHMENT_CHUNKS: u64 = 1024;
 const ATTACHMENT_STAGING_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 
 fn sanitize_upload_id(raw: &str) -> Result<String, &'static str> {
@@ -1169,7 +1170,7 @@ pub fn stage_attachment_chunk(data_dir: &std::path::Path, args: &Value) -> Resul
  let chunk_index = args.get("chunkIndex").and_then(Value::as_u64).ok_or("ATTACHMENT_CHUNK_INVALID")?;
  let total_chunks = args.get("totalChunks").and_then(Value::as_u64).ok_or("ATTACHMENT_CHUNK_INVALID")?;
  let total_size = args.get("totalSize").and_then(Value::as_u64).unwrap_or(0);
- if total_chunks == 0 || total_chunks > 128 || chunk_index >= total_chunks {
+ if total_chunks == 0 || total_chunks > MAX_ATTACHMENT_CHUNKS || chunk_index >= total_chunks {
   return Err("ATTACHMENT_CHUNK_INVALID");
  }
  if total_size as usize > MAX_STAGED_ATTACHMENT_BYTES {
@@ -1209,7 +1210,7 @@ pub fn finalize_attachment_staging(
   args.get("uploadId").and_then(Value::as_str).ok_or("ATTACHMENT_UPLOAD_ID_INVALID")?,
  )?;
  let total_chunks = args.get("totalChunks").and_then(Value::as_u64).ok_or("ATTACHMENT_CHUNK_INVALID")?;
- if total_chunks == 0 || total_chunks > 128 {
+ if total_chunks == 0 || total_chunks > MAX_ATTACHMENT_CHUNKS {
   return Err("ATTACHMENT_CHUNK_INVALID");
  }
  let raw_name = args.get("name").and_then(Value::as_str).unwrap_or("attachment.bin");
@@ -1218,6 +1219,34 @@ pub fn finalize_attachment_staging(
  let dir = staging_root.join(&upload_id);
  if !dir.is_dir() {
   return Err("ATTACHMENT_NOT_FOUND");
+ }
+ let staged_path = dir.join("staged.bin");
+ let meta_path = dir.join("meta.json");
+ if staged_path.is_file() && meta_path.is_file() {
+  if let Ok(raw_meta) = std::fs::read_to_string(&meta_path) {
+   if let Ok(meta_val) = serde_json::from_str::<Value>(&raw_meta) {
+    let existing_sha = meta_val.get("sha256").and_then(Value::as_str).unwrap_or("");
+    if let Some(expected) = args
+     .get("expectedSha256")
+     .and_then(Value::as_str)
+     .map(str::trim)
+     .filter(|s| !s.is_empty())
+    {
+     if !expected.eq_ignore_ascii_case(existing_sha) {
+      return Err("ATTACHMENT_CHECKSUM_MISMATCH");
+     }
+    }
+    if !existing_sha.is_empty() {
+     return Ok(json!({
+      "ok": true,
+      "upload_id": upload_id,
+      "name": meta_val.get("name").and_then(Value::as_str).unwrap_or(&safe_name),
+      "size": meta_val.get("size").and_then(Value::as_u64).unwrap_or(0),
+      "sha256": existing_sha
+     }));
+    }
+   }
+  }
  }
  let mut combined = Vec::new();
  for idx in 0..total_chunks {
@@ -1744,6 +1773,18 @@ mod question_answer_tests {
    "type": "application/octet-stream",
   }), 1_700_000_000_000i64).unwrap();
   assert_eq!(fin["size"], full.len());
+
+  // Calling finalize a second time after parts were cleaned up must remain idempotent.
+  let fin_retry = finalize_attachment_staging(&data_dir, &json!({
+   "uploadId": uid,
+   "totalChunks": 2,
+   "name": "big.bin",
+   "type": "application/octet-stream",
+   "expectedSha256": fin["sha256"],
+  }), 1_700_000_000_500i64).unwrap();
+  assert_eq!(fin_retry["ok"], true);
+  assert_eq!(fin_retry["sha256"], fin["sha256"]);
+  assert_eq!(fin_retry["size"], full.len());
 
   let attachments = json!([{
    "name": "big.bin",

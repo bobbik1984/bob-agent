@@ -1178,6 +1178,8 @@ fn forwarded_rpc_timeout_secs(command: &str, args: &Value) -> u64 {
         // Native conversion <=110s; DSH can additionally read history, stat,
         // download and re-stat before rendering. Keep the outer budget larger.
         240
+    } else if matches!(command, "app_attachment_upload_chunk" | "app_attachment_finalize") {
+        45
     } else if command == "app_dsh_list" {
         15
     } else {35}
@@ -1325,23 +1327,26 @@ pub fn forward_dsh_rpc_to_remote_node(
         return Err("DSH_UNAVAILABLE");
     }
 
-    // Fallback: relay through any paired `web_host` (or other `bob-node`) peer in `remoteNodes`
+    // Fallback: relay through paired `web_host` (or for non-attachment RPCs, other `bob-node`) peers in `remoteNodes`.
+    // Never spray large attachment chunks to unrelated non-web_host peers when the target node timed out.
+    let is_attachment_rpc = matches!(command, "app_attachment_upload_chunk" | "app_attachment_finalize");
+    let is_web_host_peer = |n: &&Value| {
+        n.get("remark").and_then(Value::as_str) == Some("web_host")
+            || n.get("url")
+                .or_else(|| n.get("baseUrl"))
+                .and_then(Value::as_str)
+                .map(|u| u.contains("bob-online"))
+                .unwrap_or(false)
+    };
     let mut candidates: Vec<&Value> = nodes
         .iter()
         .filter(|n| {
             n["id"].as_str() != Some(connection_id)
                 && n.get("enabled").and_then(Value::as_bool).unwrap_or(true)
+                && (!is_attachment_rpc || is_web_host_peer(n))
         })
         .collect();
-    candidates.sort_by_key(|n| {
-        let is_web_host = n.get("remark").and_then(Value::as_str) == Some("web_host")
-            || n.get("url")
-                .or_else(|| n.get("baseUrl"))
-                .and_then(Value::as_str)
-                .map(|u| u.contains("bob-online"))
-                .unwrap_or(false);
-        if is_web_host { 0 } else { 1 }
-    });
+    candidates.sort_by_key(|n| if is_web_host_peer(n) { 0 } else { 1 });
 
     for peer in candidates {
         let Some(peer_id) = peer.get("id").and_then(Value::as_str) else {

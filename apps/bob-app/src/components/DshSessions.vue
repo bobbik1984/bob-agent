@@ -14,6 +14,7 @@ import CustomSelect from './CustomSelect.vue';
 import {readingCache,readingKey,connectionPrefix} from '../reading-cache.mjs';
 import {isTestOrScratchSession} from '../conversation-directory.mjs';
 import {createPersistentPreviewCache} from '../persistent-preview-cache.mjs';
+import {CHUNK_UPLOAD_THRESHOLD,MAX_ATTACHMENT_BYTES,bytesToBase64,prepareAttachmentBinary,uploadAttachmentChunks} from '../attachment-upload.mjs';
 const props=defineProps({nodes:{type:Array,default:()=>[]}, target:{type:Object,default:null}});
 const {t}=useI18n();
 const connection=ref(''), sessions=ref([]), selected=ref(null), history=ref(null), search=ref(''), busy=ref(false), sending=ref(false), error=ref(''), notice=ref(''), draft=ref(''), pending=ref(null);
@@ -1204,83 +1205,102 @@ function onReaderTouchEnd(){const dist=pullUpDistance.value;touchStartY=null;pul
 function onReaderWheel(e){if(!selected.value||!(e?.deltaY>24))return;const el=reader.value,atBottom=!el||(el.scrollHeight-el.scrollTop-el.clientHeight<=8);if(!atBottom){wheelOverscroll=0;return;}wheelOverscroll+=e.deltaY;clearTimeout(wheelResetTimer);wheelResetTimer=setTimeout(()=>{wheelOverscroll=0;},450);if(wheelOverscroll>=140){wheelOverscroll=0;void forceRefresh();}}
 function openFilePicker(){fileInput.value?.click?.();}
 function isTextAttachment(f){const m=String(f?.type||'').toLowerCase(),n=String(f?.name||'').toLowerCase();if(m.startsWith('image/')||m.startsWith('audio/')||m.startsWith('video/')||m==='application/pdf'||m==='application/zip')return false;if(m.startsWith('text/')||m.includes('json')||m.includes('yaml')||m.includes('xml')||m.includes('javascript'))return true;return /\.(txt|md|json|ya?ml|csv|tsv|py|rs|js|mjs|cjs|ts|tsx|jsx|vue|html|css|scss|sh|bat|ps1|toml|ini|cfg|log|sql|gd|tscn)$/i.test(n);}
-function bytesToBase64(bytes){let bin='';const chunk=0x8000;for(let i=0;i<bytes.length;i+=chunk){bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+chunk));}return btoa(bin);}
-const CHUNK_UPLOAD_THRESHOLD = 256 * 1024;
-const CHUNK_UPLOAD_BYTES = 1024 * 1024;
-const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 
 function updateAttachmentItem(id, patch) {
   attachments.value = attachments.value.map(a => (a.id === id ? { ...a, ...patch } : a));
 }
 
-async function uploadAttachmentToNode(attId, file, name, type) {
-  if (!file || !connection.value || !kernelBridge.attachmentUploadChunk || !kernelBridge.attachmentFinalize) return;
-  const totalSize = file.size || 0;
-  if (totalSize <= 0 || totalSize > MAX_ATTACHMENT_BYTES) {
-    updateAttachmentItem(attId, { status: 'error' });
+async function uploadAttachmentToNode(attId) {
+  const item = attachments.value.find(a => a.id === attId);
+  if (!item || !connection.value || !kernelBridge.attachmentUploadChunk || !kernelBridge.attachmentFinalize) return;
+  let bytes = item.bytes;
+  if ((!bytes || !bytes.length) && item.file) {
+    try {
+      const prepared = await prepareAttachmentBinary(item.file);
+      bytes = prepared.bytes;
+      updateAttachmentItem(attId, { bytes, size: prepared.size, name: prepared.name, type: prepared.type });
+    } catch {
+      updateAttachmentItem(attId, { status: 'error', errorReason: 'FILE_READ_FAILED' });
+      return;
+    }
+  }
+  if (!bytes || bytes.length <= 0 || bytes.length > MAX_ATTACHMENT_BYTES) {
+    updateAttachmentItem(attId, { status: 'error', errorReason: 'ATTACHMENT_TOO_LARGE' });
     return;
   }
-  const uploadId = `up_${crypto.randomUUID().replace(/-/g, '')}`;
-  const totalChunks = Math.max(1, Math.ceil(totalSize / CHUNK_UPLOAD_BYTES));
-  updateAttachmentItem(attId, { status: 'uploading', progress: 0, uploadId: '' });
+  const pendingUploadId = item.pendingUploadId || `up_${crypto.randomUUID().replace(/-/g, '')}`;
+  const uploadedChunks = item.uploadedChunks instanceof Set ? item.uploadedChunks : new Set();
+  const initialPct = uploadedChunks.size > 0 ? item.progress || 0 : 0;
+  updateAttachmentItem(attId, {
+    status: 'uploading',
+    progress: initialPct,
+    uploadId: '',
+    pendingUploadId,
+    uploadedChunks,
+    errorReason: '',
+  });
+  const current = attachments.value.find(a => a.id === attId) || item;
   try {
-    const ab = await file.arrayBuffer();
-    const bytes = new Uint8Array(ab);
-    for (let idx = 0; idx < totalChunks; idx++) {
-      const start = idx * CHUNK_UPLOAD_BYTES;
-      const slice = bytes.subarray(start, Math.min(bytes.length, start + CHUNK_UPLOAD_BYTES));
-      await kernelBridge.attachmentUploadChunk({
-        connectionId: connection.value,
-        uploadId,
-        chunkIndex: idx,
-        totalChunks,
-        totalSize: bytes.length,
-        name,
-        type,
-        dataBase64: bytesToBase64(slice),
-      });
-      updateAttachmentItem(attId, { progress: Math.round(((idx + 1) / totalChunks) * 100) });
-    }
-    const fin = await kernelBridge.attachmentFinalize({
+    const fin = await uploadAttachmentChunks({
       connectionId: connection.value,
-      uploadId,
-      totalChunks,
-      name,
-      type,
+      bytes,
+      name: current.name,
+      type: current.type,
+      uploadId: pendingUploadId,
+      uploadedChunks,
+      chunkUpload: args => kernelBridge.attachmentUploadChunk(args),
+      finalize: args => kernelBridge.attachmentFinalize(args),
+      onProgress: pct => {
+        if (attachments.value.some(a => a.id === attId)) {
+          updateAttachmentItem(attId, { progress: pct });
+        }
+      },
+      isCancelled: () => !attachments.value.some(a => a.id === attId),
     });
+    if (!attachments.value.some(a => a.id === attId)) return;
     updateAttachmentItem(attId, {
       status: 'staged',
       progress: 100,
-      uploadId: fin?.upload_id || uploadId,
-      sha256: fin?.sha256 || '',
+      uploadId: fin.uploadId,
+      sha256: fin.sha256,
       base64: '',
+      errorReason: '',
     });
-  } catch {
-    updateAttachmentItem(attId, { status: 'error' });
+  } catch (err) {
+    const code = String(err?.message || err || '');
+    if (code === 'UPLOAD_CANCELLED' || !attachments.value.some(a => a.id === attId)) return;
+    updateAttachmentItem(attId, { status: 'error', errorReason: code });
   }
 }
 
 function retryAttachmentUpload(att) {
-  if (att?.file) void uploadAttachmentToNode(att.id, att.file, att.name, att.type);
+  if (att?.id && (att.bytes?.length || att.file)) void uploadAttachmentToNode(att.id);
 }
 
-async function readAttachmentBase64(f){if(!f||(f.size||0)>8*1024*1024)return '';try{if(String(f.type||'').startsWith('image/')&&(f.size||0)>1024*1024&&typeof createImageBitmap==='function'&&typeof document!=='undefined'){const bmp=await createImageBitmap(f);const maxSide=Math.max(bmp.width||1,bmp.height||1);const scale=maxSide>1920?1920/maxSide:1;const w=Math.max(1,Math.round(bmp.width*scale)),h=Math.max(1,Math.round(bmp.height*scale));const c=document.createElement('canvas');c.width=w;c.height=h;const ctx2d=c.getContext('2d');if(ctx2d){ctx2d.drawImage(bmp,0,0,w,h);const outMime=f.type==='image/png'?'image/png':'image/jpeg';const dataUrl=c.toDataURL(outMime,0.86);const idx=dataUrl.indexOf(',');if(idx>0)return dataUrl.slice(idx+1);}}if(typeof f.arrayBuffer==='function'){const ab=await f.arrayBuffer();return bytesToBase64(new Uint8Array(ab));}}catch{}return '';}
 async function appendFilesToAttachments(fileList){
   const files=Array.from(fileList||[]);
   for(const f of files){
     if((f.size||0)>MAX_ATTACHMENT_BYTES)continue;
     let content='',base64='';
-    const name=f.name||`attachment_${Date.now()}`;
-    const type=f.type||'';
-    const useChunked=Boolean(connection.value && kernelBridge.attachmentUploadChunk && kernelBridge.attachmentFinalize && (f.size||0)>CHUNK_UPLOAD_THRESHOLD);
-    const thumbUrl=type.startsWith('image/')&&typeof URL!=='undefined'&&typeof URL.createObjectURL==='function'?URL.createObjectURL(f):'';
+    let prepared;
+    try{
+      prepared=await prepareAttachmentBinary(f);
+    }catch{
+      prepared={bytes:new Uint8Array(0),size:f.size||0,name:f.name||`attachment_${Date.now()}`,type:f.type||'',compressed:false,originalSize:f.size||0};
+    }
+    if((prepared.size||0)>MAX_ATTACHMENT_BYTES)continue;
+    const {bytes,size,name,type}=prepared;
+    const useChunked=Boolean(connection.value && kernelBridge.attachmentUploadChunk && kernelBridge.attachmentFinalize && size>CHUNK_UPLOAD_THRESHOLD);
+    const thumbBlob=bytes.length>0&&typeof Blob!=='undefined'?new Blob([bytes],{type:type||'application/octet-stream'}):f;
+    const thumbUrl=type.startsWith('image/')&&typeof URL!=='undefined'&&typeof URL.createObjectURL==='function'?URL.createObjectURL(thumbBlob):'';
     try{
       if(isTextAttachment(f)&&typeof f.text==='function'&&(f.size||0)<=256*1024)content=await f.text();
-      if(!useChunked)base64=await readAttachmentBase64(f);
+      if(!useChunked&&bytes.length>0)base64=bytesToBase64(bytes);
     }catch{}
     const id=crypto.randomUUID();
-    attachments.value.push({id,name,size:f.size||0,type,content,base64,thumbUrl,file:f,status:useChunked?'uploading':'ready',progress:useChunked?0:100,uploadId:'',sha256:''});
-    if(useChunked)void uploadAttachmentToNode(id,f,name,type);
+    const pendingUploadId=useChunked?`up_${crypto.randomUUID().replace(/-/g,'')}`:'';
+    attachments.value.push({id,name,size,type,content,base64,thumbUrl,file:f,bytes,status:useChunked?'uploading':'ready',progress:useChunked?0:100,uploadId:'',pendingUploadId,uploadedChunks:new Set(),sha256:'',errorReason:''});
+    if(useChunked)void uploadAttachmentToNode(id);
   }
 }
 async function onFilesSelected(e){await appendFilesToAttachments(e?.target?.files);if(e?.target)e.target.value='';}
@@ -1298,7 +1318,11 @@ function onQuoteToPrompt({path, name}){
     }
   });
 }
-function removeAttachment(id){attachments.value=attachments.value.filter(a=>a.id!==id);}
+function removeAttachment(id){
+  const target=attachments.value.find(a=>a.id===id);
+  if(target?.thumbUrl&&typeof URL!=='undefined'&&typeof URL.revokeObjectURL==='function'){try{URL.revokeObjectURL(target.thumbUrl);}catch{}}
+  attachments.value=attachments.value.filter(a=>a.id!==id);
+}
 function formatAttachmentBlock(list){if(!list?.length)return '';return list.map(a=>a.content?`[Attachment: ${a.name}]\n\`\`\`\n${String(a.content).slice(0,16384)}\n\`\`\``:`[Attachment: ${a.name} (${a.size||0} bytes)]`).join('\n\n');}
 function onComposeKeydown(e){if(e?.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();void send();}}
 globalThis.__bobForceRefreshDsh=forceRefresh;
@@ -1617,7 +1641,7 @@ onUnmounted(()=>{resetDshStop();stopVoiceInput();chatScroll.dispose();clearTimeo
    <div class="dsh-compose-box">
     <p v-if="history?.execution_enabled===false || selected?.execution_enabled===false" role="status">{{t('toolPolicyDisabled')}}</p>
     <textarea ref="composerInput" v-model="draft" :disabled="sending || history?.execution_enabled===false || selected?.execution_enabled===false || isClaudeRemoteControl" :placeholder="t(isClaudeRemoteControl ? 'claudeRemoteControlTitle' : 'dshPrompt')" :aria-label="t('dshPrompt')" rows="2" @keydown="onComposeKeydown" @paste="onComposerPaste" @dragover.prevent @drop.prevent="onComposerDrop"></textarea>
-    <div v-if="attachments.length" class="composer-attachments"><span v-for="att in attachments" :key="att.id" class="composer-attachment-chip"><img v-if="(att.thumbUrl || att.base64) && att.type?.startsWith('image/')" :src="att.thumbUrl || ('data:' + att.type + ';base64,' + att.base64)" alt="" class="chip-thumb" /><span class="chip-file-name">{{ att.name }}</span><span v-if="att.status==='uploading'" class="chip-upload-status">{{ t('attachmentUploading', { pct: att.progress || 0 }) }}</span><span v-else-if="att.status==='staged'" class="chip-upload-status staged">{{ t('attachmentStaged') }}</span><template v-else-if="att.status==='error'"><span class="chip-upload-status error">{{ t('attachmentUploadFailed') }}</span><button type="button" class="chip-retry-btn" @click="retryAttachmentUpload(att)">{{ t('attachmentRetry') }}</button></template><button type="button" class="chip-remove-btn" :aria-label="t('removeAttachment')" @click="removeAttachment(att.id)">×</button></span></div>
+    <div v-if="attachments.length" class="composer-attachments"><span v-for="att in attachments" :key="att.id" class="composer-attachment-chip"><img v-if="(att.thumbUrl || att.base64) && att.type?.startsWith('image/')" :src="att.thumbUrl || ('data:' + att.type + ';base64,' + att.base64)" alt="" class="chip-thumb" /><span class="chip-file-name">{{ att.name }}</span><span v-if="att.status==='uploading'" class="chip-upload-status">{{ t('attachmentUploading', { pct: att.progress || 0 }) }}</span><span v-else-if="att.status==='staged'" class="chip-upload-status staged">{{ t('attachmentStaged') }}</span><template v-else-if="att.status==='error'"><span class="chip-upload-status error" :title="att.errorReason || t('attachmentUploadFailed')">{{ t('attachmentUploadFailed') }}</span><button type="button" class="chip-retry-btn" @click="retryAttachmentUpload(att)">{{ t('attachmentRetry') }}</button></template><button type="button" class="chip-remove-btn" :aria-label="t('removeAttachment')" @click="removeAttachment(att.id)">×</button></span></div>
     <div class="dsh-compose-toolbar">
      <div class="dsh-compose-left-tools">
       <input ref="fileInput" type="file" multiple class="visually-hidden" @change="onFilesSelected" />
